@@ -64,12 +64,32 @@ class AssetUpdate(BaseModel):
     metadata: dict | None = None
 
 
-class AssetResponse(AssetBase):
+class AssetResponse(BaseModel):
     """Schema for asset response."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    name: str
+    display_name: str | None = None
+    asset_type: AssetType
+    ip_address: str  # String for response serialization
+    hostname: str | None = None
+    fqdn: str | None = None
+    mac_address: str | None = None
+    subnet: str | None = None
+    vlan_id: int | None = None
+    datacenter: str | None = None
+    environment: str | None = None
+    is_internal: bool = True
+    is_critical: bool = False
+    criticality_score: int = 0
+    owner: str | None = None
+    team: str | None = None
+    external_id: str | None = None
+    description: str | None = None
+    tags: dict[str, str] | None = None
+    metadata: dict | None = None
     country_code: str | None = None
     city: str | None = None
     first_seen: datetime

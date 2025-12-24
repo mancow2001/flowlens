@@ -1,13 +1,15 @@
 """Asset API endpoints."""
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import String, cast, func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination, Sorting
 from flowlens.models.asset import Asset, AssetType, Service
+from flowlens.models.dependency import Dependency
 from flowlens.schemas.asset import (
     AssetCreate,
     AssetList,
@@ -17,6 +19,7 @@ from flowlens.schemas.asset import (
     AssetWithServices,
     ServiceResponse,
 )
+from flowlens.schemas.dependency import AssetInfo, DependencyWithAssets
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
@@ -310,3 +313,111 @@ async def get_asset_services(
     services = result.scalars().all()
 
     return [ServiceResponse.model_validate(s) for s in services]
+
+
+@router.get("/{asset_id}/dependencies", response_model=list[DependencyWithAssets])
+async def get_asset_dependencies(
+    asset_id: UUID,
+    db: DbSession,
+    user: AuthenticatedUser,
+    direction: Literal["upstream", "downstream", "both"] = Query("both"),
+) -> list[DependencyWithAssets]:
+    """Get dependencies for an asset.
+
+    Args:
+        asset_id: The asset ID.
+        direction: Filter by direction - upstream (assets that connect TO this asset),
+                   downstream (assets this asset connects TO), or both.
+    """
+    # Verify asset exists
+    asset_result = await db.execute(
+        select(Asset.id).where(Asset.id == asset_id, Asset.deleted_at.is_(None))
+    )
+    if not asset_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset {asset_id} not found",
+        )
+
+    # Build query based on direction
+    if direction == "upstream":
+        # Dependencies where this asset is the target (others connect TO it)
+        query = select(Dependency).where(
+            Dependency.target_asset_id == asset_id,
+            Dependency.valid_to.is_(None),
+        )
+    elif direction == "downstream":
+        # Dependencies where this asset is the source (it connects TO others)
+        query = select(Dependency).where(
+            Dependency.source_asset_id == asset_id,
+            Dependency.valid_to.is_(None),
+        )
+    else:
+        # Both directions
+        query = select(Dependency).where(
+            or_(
+                Dependency.source_asset_id == asset_id,
+                Dependency.target_asset_id == asset_id,
+            ),
+            Dependency.valid_to.is_(None),
+        )
+
+    # Load related assets
+    query = query.options(
+        selectinload(Dependency.source_asset),
+        selectinload(Dependency.target_asset),
+    ).order_by(Dependency.last_seen.desc())
+
+    result = await db.execute(query)
+    dependencies = result.scalars().all()
+
+    # Build response
+    response = []
+    for dep in dependencies:
+        source_info = AssetInfo(
+            id=dep.source_asset.id,
+            name=dep.source_asset.name,
+            ip_address=str(dep.source_asset.ip_address),
+            hostname=dep.source_asset.hostname,
+            is_critical=dep.source_asset.is_critical,
+        )
+        target_info = AssetInfo(
+            id=dep.target_asset.id,
+            name=dep.target_asset.name,
+            ip_address=str(dep.target_asset.ip_address),
+            hostname=dep.target_asset.hostname,
+            is_critical=dep.target_asset.is_critical,
+        )
+
+        response.append(DependencyWithAssets(
+            id=dep.id,
+            source_asset_id=dep.source_asset_id,
+            target_asset_id=dep.target_asset_id,
+            target_port=dep.target_port,
+            protocol=dep.protocol,
+            dependency_type=dep.dependency_type,
+            is_critical=dep.is_critical,
+            is_confirmed=dep.is_confirmed,
+            is_ignored=dep.is_ignored,
+            description=dep.description,
+            tags=dep.tags,
+            metadata=dep.extra_data,
+            bytes_total=dep.bytes_total,
+            packets_total=dep.packets_total,
+            flows_total=dep.flows_total,
+            bytes_last_24h=dep.bytes_last_24h,
+            bytes_last_7d=dep.bytes_last_7d,
+            first_seen=dep.first_seen,
+            last_seen=dep.last_seen,
+            valid_from=dep.valid_from,
+            valid_to=dep.valid_to,
+            avg_latency_ms=dep.avg_latency_ms,
+            p95_latency_ms=dep.p95_latency_ms,
+            discovered_by=dep.discovered_by,
+            created_at=dep.created_at,
+            updated_at=dep.updated_at,
+            source_asset=source_info,
+            target_asset=target_info,
+        ))
+
+    return response
