@@ -106,6 +106,62 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Enrichment Service (enriches flow records with DNS, GeoIP, etc.)
+  enrichment:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-enrichment
+    command: ["python", "-m", "flowlens.enrichment.main"]
+    environment:
+      ENVIRONMENT: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      ENRICHMENT_WORKER_COUNT: "2"
+      ENRICHMENT_BATCH_SIZE: "500"
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: json
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "flowlens.enrichment.main"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Resolution Service (builds assets and dependencies from flows)
+  resolution:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-resolution
+    command: ["python", "-m", "flowlens.resolution.main"]
+    environment:
+      ENVIRONMENT: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      RESOLUTION_WORKER_COUNT: "1"
+      RESOLUTION_WINDOW_SIZE_MINUTES: "5"
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: json
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "flowlens.resolution.main"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Frontend UI
   frontend:
     build:
