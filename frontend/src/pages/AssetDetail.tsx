@@ -213,14 +213,16 @@ export default function AssetDetail() {
                   Potentially affected assets
                 </div>
               </div>
-              <div className="space-y-2">
-                {Object.entries(blastRadius.by_depth).map(([depth, count]) => (
-                  <div key={depth} className="flex justify-between">
-                    <span className="text-slate-400">Depth {depth}</span>
-                    <span className="text-white">{count} assets</span>
-                  </div>
-                ))}
-              </div>
+              {blastRadius.by_depth && Object.keys(blastRadius.by_depth).length > 0 && (
+                <div className="space-y-2">
+                  {Object.entries(blastRadius.by_depth).map(([depth, count]) => (
+                    <div key={depth} className="flex justify-between">
+                      <span className="text-slate-400">Depth {depth}</span>
+                      <span className="text-white">{count} assets</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-slate-400 text-center py-4">
