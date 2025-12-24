@@ -130,33 +130,34 @@ export default function Topology() {
       .attr('stroke-width', (d) => Math.min(Math.log(d.bytes_total + 1) / 5, 4))
       .attr('marker-end', 'url(#arrowhead)');
 
+    // Create drag behavior
+    const dragBehavior = d3
+      .drag<SVGGElement, SimNode>()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      })
+      .on('drag', (event, d) => {
+        d.fx = event.x;
+        d.fy = event.y;
+      })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      });
+
     // Create node groups
     const node = container
       .append('g')
       .attr('class', 'nodes')
-      .selectAll('g')
+      .selectAll<SVGGElement, SimNode>('g')
       .data(nodes)
       .join('g')
       .attr('class', 'node')
       .style('cursor', 'pointer')
-      .call(
-        d3
-          .drag<SVGGElement, SimNode>()
-          .on('start', (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on('drag', (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on('end', (event, d) => {
-            if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }) as unknown as (selection: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown>) => void
-      );
+      .call(dragBehavior);
 
     // Add circles to nodes
     node
