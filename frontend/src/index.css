@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-text: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-border: #334155;
+}
+
+body {
+  @apply bg-slate-900 text-slate-100;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-600 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}
+
+/* Topology graph node styles */
+.node-server {
+  fill: #3b82f6;
+}
+
+.node-database {
+  fill: #8b5cf6;
+}
+
+.node-service {
+  fill: #10b981;
+}
+
+.node-external {
+  fill: #f59e0b;
+}
+
+.node-unknown {
+  fill: #6b7280;
+}
+
+/* Edge styles */
+.edge {
+  stroke: #475569;
+  stroke-width: 1.5;
+}
+
+.edge:hover {
+  stroke: #60a5fa;
+  stroke-width: 2;
+}
+
+.edge-active {
+  stroke: #3b82f6;
+  stroke-width: 2;
+}
+
+/* Alert severity colors */
+.severity-critical {
+  @apply bg-red-600 text-white;
+}
+
+.severity-error {
+  @apply bg-orange-500 text-white;
+}
+
+.severity-warning {
+  @apply bg-yellow-500 text-slate-900;
+}
+
+.severity-info {
+  @apply bg-blue-500 text-white;
+}

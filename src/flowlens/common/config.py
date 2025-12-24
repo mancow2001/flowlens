@@ -204,6 +204,45 @@ class LoggingSettings(BaseSettings):
     include_caller: bool = True
 
 
+class EmailSettings(BaseSettings):
+    """Email notification configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="EMAIL_")
+
+    enabled: bool = False
+    host: str = "localhost"
+    port: int = 587
+    username: str | None = None
+    password: SecretStr | None = None
+    use_tls: bool = True
+    start_tls: bool = True
+    from_address: str = "flowlens@localhost"
+    from_name: str = "FlowLens"
+    timeout: int = 30
+    validate_certs: bool = True
+
+    # Default recipients for alerts
+    alert_recipients: list[str] = Field(default_factory=list)
+
+
+class NotificationSettings(BaseSettings):
+    """Notification system configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="NOTIFICATION_")
+
+    # Global enable/disable
+    enabled: bool = True
+
+    # Channel-specific settings
+    email: EmailSettings = Field(default_factory=EmailSettings)
+
+    # Alert routing rules (severity -> channels)
+    critical_channels: list[str] = Field(default_factory=lambda: ["email"])
+    high_channels: list[str] = Field(default_factory=lambda: ["email"])
+    warning_channels: list[str] = Field(default_factory=list)
+    info_channels: list[str] = Field(default_factory=list)
+
+
 class Settings(BaseSettings):
     """Main application settings aggregating all configuration."""
 
@@ -230,6 +269,7 @@ class Settings(BaseSettings):
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 
     @property
     def is_production(self) -> bool:

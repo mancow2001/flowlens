@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from flowlens.api.websocket import get_connection_manager
 from flowlens.common.config import get_settings
 from flowlens.common.database import close_database, init_database
 from flowlens.common.exceptions import FlowLensError
@@ -49,10 +50,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_database(settings)
     logger.info("Database initialized")
 
+    # Start WebSocket connection manager
+    ws_manager = get_connection_manager()
+    await ws_manager.start()
+    logger.info("WebSocket connection manager started")
+
     yield
 
     # Cleanup
     logger.info("Shutting down FlowLens API")
+
+    # Stop WebSocket connection manager
+    ws_manager = get_connection_manager()
+    await ws_manager.stop()
+    logger.info("WebSocket connection manager stopped")
+
     await close_database()
     logger.info("Database closed")
 
@@ -184,13 +196,16 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, analysis, assets, dependencies, topology
+    from flowlens.api.routers import admin, alerts, analysis, assets, changes, dependencies, topology, ws
 
     app.include_router(admin.router)
     app.include_router(assets.router, prefix="/api/v1")
     app.include_router(dependencies.router, prefix="/api/v1")
     app.include_router(topology.router, prefix="/api/v1")
     app.include_router(analysis.router, prefix="/api/v1")
+    app.include_router(alerts.router, prefix="/api/v1")
+    app.include_router(changes.router, prefix="/api/v1")
+    app.include_router(ws.router, prefix="/api/v1")
 
     # Root endpoint
     @app.get("/")

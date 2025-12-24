@@ -1,0 +1,82 @@
+import { Link, useLocation } from 'react-router-dom';
+import {
+  HomeIcon,
+  ServerStackIcon,
+  ArrowsRightLeftIcon,
+  BellAlertIcon,
+  ClockIcon,
+  ChartBarIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from '@heroicons/react/24/outline';
+import { useAppStore } from '../../stores/appStore';
+import clsx from 'clsx';
+
+const navigation = [
+  { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
+  { name: 'Topology', href: '/topology', icon: ChartBarIcon },
+  { name: 'Assets', href: '/assets', icon: ServerStackIcon },
+  { name: 'Dependencies', href: '/dependencies', icon: ArrowsRightLeftIcon },
+  { name: 'Alerts', href: '/alerts', icon: BellAlertIcon },
+  { name: 'Changes', href: '/changes', icon: ClockIcon },
+];
+
+export default function Sidebar() {
+  const location = useLocation();
+  const { sidebarCollapsed, toggleSidebar } = useAppStore();
+
+  return (
+    <div
+      className={clsx(
+        'fixed inset-y-0 left-0 z-50 flex flex-col bg-slate-800 border-r border-slate-700 transition-all duration-300',
+        sidebarCollapsed ? 'w-16' : 'w-64'
+      )}
+    >
+      {/* Logo */}
+      <div className="flex items-center h-16 px-4 border-b border-slate-700">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
+            <span className="text-white font-bold text-sm">FL</span>
+          </div>
+          {!sidebarCollapsed && (
+            <span className="text-lg font-semibold text-white">FlowLens</span>
+          )}
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+        {navigation.map((item) => {
+          const isActive = location.pathname === item.href;
+          return (
+            <Link
+              key={item.name}
+              to={item.href}
+              className={clsx(
+                'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                isActive
+                  ? 'bg-primary-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+              )}
+            >
+              <item.icon className="w-5 h-5 flex-shrink-0" />
+              {!sidebarCollapsed && <span>{item.name}</span>}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* Collapse button */}
+      <button
+        onClick={toggleSidebar}
+        className="flex items-center justify-center h-12 border-t border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+      >
+        {sidebarCollapsed ? (
+          <ChevronRightIcon className="w-5 h-5" />
+        ) : (
+          <ChevronLeftIcon className="w-5 h-5" />
+        )}
+      </button>
+    </div>
+  );
+}
