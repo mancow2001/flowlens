@@ -171,7 +171,7 @@ async def get_asset(
         external_id=asset.external_id,
         description=asset.description,
         tags=asset.tags,
-        metadata=asset.metadata,
+        metadata=asset.extra_data,
         first_seen=asset.first_seen,
         last_seen=asset.last_seen,
         bytes_in_total=asset.bytes_in_total,
