@@ -89,24 +89,54 @@ async def list_dependencies(
     # Apply pagination
     query = query.offset(pagination.offset).limit(pagination.page_size)
 
+    # Load related assets
+    query = query.options(
+        selectinload(Dependency.source_asset),
+        selectinload(Dependency.target_asset),
+    )
+
     # Execute query
     result = await db.execute(query)
     dependencies = result.scalars().all()
 
-    # Build response
-    items = [
-        DependencySummary(
+    # Build response with asset info
+    items = []
+    for d in dependencies:
+        source_info = None
+        target_info = None
+
+        if d.source_asset:
+            source_info = AssetInfo(
+                id=d.source_asset.id,
+                name=d.source_asset.name,
+                ip_address=str(d.source_asset.ip_address),
+                hostname=d.source_asset.hostname,
+                is_critical=d.source_asset.is_critical,
+            )
+
+        if d.target_asset:
+            target_info = AssetInfo(
+                id=d.target_asset.id,
+                name=d.target_asset.name,
+                ip_address=str(d.target_asset.ip_address),
+                hostname=d.target_asset.hostname,
+                is_critical=d.target_asset.is_critical,
+            )
+
+        items.append(DependencySummary(
             id=d.id,
             source_asset_id=d.source_asset_id,
             target_asset_id=d.target_asset_id,
             target_port=d.target_port,
             protocol=d.protocol,
+            bytes_total=d.bytes_total,
             bytes_last_24h=d.bytes_last_24h,
             last_seen=d.last_seen,
+            valid_to=d.valid_to,
             is_critical=d.is_critical,
-        )
-        for d in dependencies
-    ]
+            source_asset=source_info,
+            target_asset=target_info,
+        ))
 
     return DependencyList(
         items=items,

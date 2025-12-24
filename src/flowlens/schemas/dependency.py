@@ -101,9 +101,13 @@ class DependencySummary(BaseModel):
     target_asset_id: UUID
     target_port: int
     protocol: int
+    bytes_total: int
     bytes_last_24h: int
     last_seen: datetime
+    valid_to: datetime | None
     is_critical: bool
+    source_asset: AssetInfo | None = None
+    target_asset: AssetInfo | None = None
 
 
 class DependencyList(BaseModel):

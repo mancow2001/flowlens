@@ -69,7 +69,8 @@ export interface AssetInfo {
   is_critical: boolean;
 }
 
-export interface Dependency {
+// Full dependency with all fields (used by detail views)
+export interface DependencyFull {
   id: string;
   source_asset_id: string;
   target_asset_id: string;
@@ -98,6 +99,22 @@ export interface Dependency {
   discovered_by: string;
   created_at: string;
   updated_at: string;
+}
+
+// Dependency summary used by list views (matches DependencySummary schema)
+export interface Dependency {
+  id: string;
+  source_asset_id: string;
+  target_asset_id: string;
+  source_asset?: AssetInfo;
+  target_asset?: AssetInfo;
+  target_port: number;
+  protocol: number;
+  bytes_total: number;
+  bytes_last_24h: number;
+  last_seen: string;
+  valid_to: string | null;
+  is_critical: boolean;
 }
 
 // Topology types

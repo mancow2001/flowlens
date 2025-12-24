@@ -21,6 +21,59 @@ from flowlens.models.flow import FlowAggregate, FlowRecord
 logger = get_logger(__name__)
 
 
+# Ephemeral port threshold - ports above this are typically ephemeral
+EPHEMERAL_PORT_THRESHOLD = 32768
+
+
+def is_ephemeral_port(port: int) -> bool:
+    """Check if a port is likely ephemeral (client-side).
+
+    Args:
+        port: Port number to check.
+
+    Returns:
+        True if port is in ephemeral range.
+    """
+    return port >= EPHEMERAL_PORT_THRESHOLD
+
+
+def normalize_flow_direction(
+    src_ip: str,
+    dst_ip: str,
+    src_port: int,
+    dst_port: int,
+    protocol: int,
+) -> tuple[str, str, int, int]:
+    """Normalize flow direction to always point towards the service.
+
+    When both ends have ephemeral or both have well-known ports,
+    we use the lower port as the service port. Otherwise, the
+    non-ephemeral port is the service.
+
+    Args:
+        src_ip: Source IP address.
+        dst_ip: Destination IP address.
+        src_port: Source port.
+        dst_port: Destination port.
+        protocol: Protocol number.
+
+    Returns:
+        Tuple of (client_ip, server_ip, service_port, protocol).
+    """
+    src_ephemeral = is_ephemeral_port(src_port)
+    dst_ephemeral = is_ephemeral_port(dst_port)
+
+    # If destination is well-known (non-ephemeral) and source is ephemeral,
+    # this is the normal client → server direction
+    if dst_ephemeral and not src_ephemeral:
+        # This looks like a response: server(src) → client(dst)
+        # Normalize to client → server
+        return dst_ip, src_ip, src_port, protocol
+
+    # Standard direction: src → dst where dst has the service port
+    return src_ip, dst_ip, dst_port, protocol
+
+
 @dataclass
 class AggregationKey:
     """Key for aggregating flows."""
@@ -166,11 +219,21 @@ class FlowAggregator:
         buckets: dict[AggregationKey, AggregationBucket] = {}
 
         for flow in flows:
-            key = AggregationKey(
+            # Normalize flow direction to always point towards the service
+            # This handles response flows (server → client on ephemeral port)
+            norm_src, norm_dst, norm_port, norm_proto = normalize_flow_direction(
                 src_ip=str(flow.src_ip),
                 dst_ip=str(flow.dst_ip),
+                src_port=flow.src_port,
                 dst_port=flow.dst_port,
                 protocol=flow.protocol,
+            )
+
+            key = AggregationKey(
+                src_ip=norm_src,
+                dst_ip=norm_dst,
+                dst_port=norm_port,
+                protocol=norm_proto,
             )
 
             if key not in buckets:
@@ -189,8 +252,8 @@ class FlowAggregator:
             buckets[key].add(
                 bytes_count=flow.bytes_count,
                 packets_count=flow.packets_count,
-                src_ip=str(flow.src_ip),
-                dst_ip=str(flow.dst_ip),
+                src_ip=norm_src,
+                dst_ip=norm_dst,
                 src_asset_id=src_asset_id,
                 dst_asset_id=dst_asset_id,
             )
