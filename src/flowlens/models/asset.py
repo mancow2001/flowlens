@@ -173,7 +173,8 @@ class Asset(SoftDeleteModel):
         default=dict,
     )
 
-    metadata: Mapped[dict | None] = mapped_column(
+    extra_data: Mapped[dict | None] = mapped_column(
+        "metadata",  # Keep column name as 'metadata' in database
         JSONB,
         nullable=True,
         default=dict,
@@ -381,7 +382,8 @@ class Application(Base, UUIDMixin, TimestampMixin):
         default=dict,
     )
 
-    metadata: Mapped[dict | None] = mapped_column(
+    extra_data: Mapped[dict | None] = mapped_column(
+        "metadata",  # Keep column name as 'metadata' in database
         JSONB,
         nullable=True,
         default=dict,

@@ -41,28 +41,34 @@ def create_engine(settings: Settings | None = None) -> AsyncEngine:
 
     db_settings = settings.database
 
-    # Use NullPool for testing, QueuePool for production
-    pool_class = NullPool if settings.environment == "development" else None
+    # Use NullPool for development (no connection pooling), QueuePool for production
+    use_null_pool = settings.environment == "development"
 
-    engine = create_async_engine(
-        db_settings.async_url,
-        echo=db_settings.echo,
-        echo_pool=db_settings.echo_pool,
-        pool_size=db_settings.pool_size,
-        max_overflow=db_settings.max_overflow,
-        pool_timeout=db_settings.pool_timeout,
-        pool_recycle=db_settings.pool_recycle,
-        poolclass=pool_class,
-        # Performance optimizations
-        pool_pre_ping=True,
-        connect_args={
+    # Base engine arguments
+    engine_kwargs: dict = {
+        "echo": db_settings.echo,
+        "echo_pool": db_settings.echo_pool,
+        "connect_args": {
             "server_settings": {
                 "application_name": "flowlens",
                 "jit": "off",  # Disable JIT for more predictable latency
             },
             "command_timeout": 60,
         },
-    )
+    }
+
+    if use_null_pool:
+        # NullPool doesn't accept pool configuration arguments
+        engine_kwargs["poolclass"] = NullPool
+    else:
+        # Production: use connection pooling
+        engine_kwargs["pool_size"] = db_settings.pool_size
+        engine_kwargs["max_overflow"] = db_settings.max_overflow
+        engine_kwargs["pool_timeout"] = db_settings.pool_timeout
+        engine_kwargs["pool_recycle"] = db_settings.pool_recycle
+        engine_kwargs["pool_pre_ping"] = True
+
+    engine = create_async_engine(db_settings.async_url, **engine_kwargs)
 
     # Set up connection event handlers
     @event.listens_for(engine.sync_engine, "connect")

@@ -1,1 +1,6 @@
 .DS_Store
+/migrations/__pycache__
+/src/flowlens/__pycache__
+/src/flowlens/common/__pycache__
+/src/flowlens/models/__pycache__
+*.pyc

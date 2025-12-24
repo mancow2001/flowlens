@@ -145,7 +145,8 @@ class Dependency(Base, UUIDMixin, TimestampMixin, TemporalMixin):
         default=dict,
     )
 
-    metadata: Mapped[dict | None] = mapped_column(
+    extra_data: Mapped[dict | None] = mapped_column(
+        "metadata",  # Keep column name as 'metadata' in database
         JSONB,
         nullable=True,
         default=dict,

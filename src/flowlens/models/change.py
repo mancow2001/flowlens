@@ -144,7 +144,8 @@ class ChangeEvent(Base, UUIDMixin, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict | None] = mapped_column(
+    extra_data: Mapped[dict | None] = mapped_column(
+        "metadata",  # Keep column name as 'metadata' in database
         JSONB,
         nullable=True,
         default=dict,

@@ -119,13 +119,18 @@ class PaginationParams:
         page: Annotated[int, Query(ge=1, description="Page number")] = 1,
         page_size: Annotated[
             int,
-            Query(ge=1, le=1000, alias="pageSize", description="Items per page"),
+            Query(ge=1, le=1000, alias="page_size", description="Items per page"),
         ] = 50,
     ) -> None:
         settings = get_settings()
         self.page = page
         self.page_size = min(page_size, settings.api.max_page_size)
         self.offset = (page - 1) * self.page_size
+
+    @property
+    def limit(self) -> int:
+        """Alias for page_size for compatibility."""
+        return self.page_size
 
 
 Pagination = Annotated[PaginationParams, Depends()]

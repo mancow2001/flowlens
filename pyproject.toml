@@ -58,6 +58,9 @@ dependencies = [
     "httpx>=0.26.0",
     "tenacity>=8.2.0",
     "orjson>=3.9.0",
+
+    # Email
+    "aiosmtplib>=3.0.0",
 ]
 
 [project.optional-dependencies]

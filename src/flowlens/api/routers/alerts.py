@@ -7,9 +7,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.api.dependencies import DbSession, Pagination, get_current_user
 from flowlens.common.config import get_settings
@@ -66,8 +65,8 @@ def get_notification_manager() -> NotificationManager:
 
 @router.get("", response_model=AlertListResponse)
 async def list_alerts(
-    db: AsyncSession = Depends(DbSession),
-    pagination: Pagination = Depends(),
+    db: DbSession,
+    pagination: Pagination,
     severity: str | None = Query(None, pattern="^(info|warning|error|critical)$"),
     is_acknowledged: bool | None = None,
     is_resolved: bool | None = None,
@@ -127,7 +126,7 @@ async def list_alerts(
 
 @router.get("/summary", response_model=AlertSummary)
 async def get_alert_summary(
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> AlertSummary:
     """Get summary of alert counts by severity.
 
@@ -140,7 +139,7 @@ async def get_alert_summary(
     return await _get_alert_summary(db)
 
 
-async def _get_alert_summary(db: AsyncSession) -> AlertSummary:
+async def _get_alert_summary(db: DbSession) -> AlertSummary:
     """Get alert summary from database.
 
     Args:
@@ -184,7 +183,7 @@ async def _get_alert_summary(db: AsyncSession) -> AlertSummary:
 @router.get("/{alert_id}", response_model=AlertResponse)
 async def get_alert(
     alert_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> AlertResponse:
     """Get a specific alert by ID.
 
@@ -213,7 +212,7 @@ async def get_alert(
 async def acknowledge_alert(
     alert_id: UUID,
     data: AlertAcknowledge,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> AlertResponse:
     """Acknowledge an alert.
 
@@ -262,7 +261,7 @@ async def acknowledge_alert(
 async def resolve_alert(
     alert_id: UUID,
     data: AlertResolve,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> AlertResponse:
     """Resolve an alert.
 
@@ -318,7 +317,7 @@ async def resolve_alert(
 async def update_alert(
     alert_id: UUID,
     data: AlertUpdate,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> AlertResponse:
     """Update an alert.
 
@@ -362,7 +361,7 @@ async def update_alert(
 @router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alert(
     alert_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> None:
     """Delete an alert.
 
@@ -391,7 +390,7 @@ async def delete_alert(
 async def bulk_acknowledge_alerts(
     alert_ids: list[UUID],
     data: AlertAcknowledge,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> dict:
     """Acknowledge multiple alerts.
 
@@ -427,7 +426,7 @@ async def bulk_acknowledge_alerts(
 async def bulk_resolve_alerts(
     alert_ids: list[UUID],
     data: AlertResolve,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> dict:
     """Resolve multiple alerts.
 

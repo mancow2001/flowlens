@@ -7,9 +7,8 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.api.dependencies import DbSession, Pagination
 from flowlens.common.logging import get_logger
@@ -33,8 +32,8 @@ router = APIRouter(prefix="/changes", tags=["changes"])
 
 @router.get("", response_model=ChangeEventListResponse)
 async def list_changes(
-    db: AsyncSession = Depends(DbSession),
-    pagination: Pagination = Depends(),
+    db: DbSession,
+    pagination: Pagination,
     change_type: str | None = None,
     asset_id: UUID | None = None,
     dependency_id: UUID | None = None,
@@ -109,7 +108,7 @@ async def list_changes(
 
 @router.get("/summary", response_model=ChangeEventSummary)
 async def get_change_summary(
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> ChangeEventSummary:
     """Get summary of change event counts.
 
@@ -122,7 +121,7 @@ async def get_change_summary(
     return await _get_change_summary(db)
 
 
-async def _get_change_summary(db: AsyncSession) -> ChangeEventSummary:
+async def _get_change_summary(db: DbSession) -> ChangeEventSummary:
     """Get change event summary from database.
 
     Args:
@@ -169,7 +168,7 @@ async def _get_change_summary(db: AsyncSession) -> ChangeEventSummary:
 
 @router.get("/types", response_model=list[ChangeTypeCount])
 async def list_change_types(
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> list[ChangeTypeCount]:
     """Get counts of each change type.
 
@@ -193,7 +192,7 @@ async def list_change_types(
 
 @router.get("/timeline", response_model=ChangeTimeline)
 async def get_change_timeline(
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
     period: str = Query("day", pattern="^(hour|day|week)$"),
     days: int = Query(7, ge=1, le=90),
 ) -> ChangeTimeline:
@@ -246,7 +245,7 @@ async def get_change_timeline(
 @router.get("/{change_id}", response_model=ChangeEventResponse)
 async def get_change(
     change_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> ChangeEventResponse:
     """Get a specific change event by ID.
 
@@ -282,7 +281,7 @@ async def get_change(
 @router.get("/{change_id}/alerts", response_model=list[dict])
 async def get_change_alerts(
     change_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> list[dict]:
     """Get alerts associated with a change event.
 
@@ -328,7 +327,7 @@ async def get_change_alerts(
 @router.get("/dependency/{dependency_id}", response_model=list[DependencyChangeDetail])
 async def get_dependency_changes(
     dependency_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
     limit: int = Query(50, ge=1, le=200),
 ) -> list[DependencyChangeDetail]:
     """Get change history for a dependency.
@@ -391,7 +390,7 @@ async def get_dependency_changes(
 @router.get("/asset/{asset_id}", response_model=list[AssetChangeDetail])
 async def get_asset_changes(
     asset_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
     limit: int = Query(50, ge=1, le=200),
 ) -> list[AssetChangeDetail]:
     """Get change history for an asset.
@@ -442,7 +441,7 @@ async def get_asset_changes(
 @router.post("/{change_id}/process", response_model=ChangeEventResponse)
 async def mark_change_processed(
     change_id: UUID,
-    db: AsyncSession = Depends(DbSession),
+    db: DbSession,
 ) -> ChangeEventResponse:
     """Mark a change event as processed.
 
