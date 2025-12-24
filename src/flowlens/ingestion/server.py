@@ -58,6 +58,12 @@ class FlowProtocol(asyncio.DatagramProtocol):
             addr: (host, port) tuple of sender.
         """
         exporter_ip = addr[0]
+        logger.debug(
+            "Received packet",
+            protocol=self._protocol_name,
+            exporter=exporter_ip,
+            size=len(data),
+        )
         FLOWS_RECEIVED.labels(
             protocol=self._protocol_name,
             exporter=exporter_ip,

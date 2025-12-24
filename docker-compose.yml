@@ -91,7 +91,7 @@ services:
       INGESTION_NETFLOW_PORT: "2055"
       INGESTION_SFLOW_PORT: "6343"
       INGESTION_BATCH_SIZE: "1000"
-      LOG_LEVEL: INFO
+      LOG_LEVEL: DEBUG
       LOG_FORMAT: json
     ports:
       - "2055:2055/udp"
