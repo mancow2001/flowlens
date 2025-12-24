@@ -130,10 +130,8 @@ export default function AssetDetail() {
             <h1 className="text-2xl font-bold text-white">{asset.name}</h1>
             <div className="flex items-center gap-2 mt-1">
               <Badge>{asset.asset_type.replace('_', ' ')}</Badge>
-              <Badge variant={asset.is_active ? 'success' : 'default'}>
-                {asset.is_active ? 'Active' : 'Inactive'}
-              </Badge>
-              {asset.is_external && <Badge variant="warning">External</Badge>}
+              {asset.is_critical && <Badge variant="error">Critical</Badge>}
+              {!asset.is_internal && <Badge variant="warning">External</Badge>}
             </div>
           </div>
         </div>
@@ -169,12 +167,12 @@ export default function AssetDetail() {
               </dd>
             </div>
             <div>
-              <dt className="text-sm text-slate-400">OS</dt>
-              <dd className="text-white">
-                {asset.os_type
-                  ? `${asset.os_type} ${asset.os_version || ''}`
-                  : '-'}
-              </dd>
+              <dt className="text-sm text-slate-400">Environment</dt>
+              <dd className="text-white">{asset.environment || '-'}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-slate-400">Datacenter</dt>
+              <dd className="text-white">{asset.datacenter || '-'}</dd>
             </div>
           </dl>
         </Card>
@@ -183,9 +181,9 @@ export default function AssetDetail() {
         <Card title="Activity">
           <dl className="space-y-3">
             <div>
-              <dt className="text-sm text-slate-400">Discovered</dt>
+              <dt className="text-sm text-slate-400">First Seen</dt>
               <dd className="text-white">
-                {formatDateTime(asset.discovered_at)}
+                {formatDateTime(asset.first_seen)}
               </dd>
             </div>
             <div>
@@ -241,16 +239,10 @@ export default function AssetDetail() {
                 key={service.id}
                 className="p-3 bg-slate-700/50 rounded-lg text-center"
               >
-                <div className="font-medium text-white">{service.name}</div>
+                <div className="font-medium text-white">{service.name || 'Unknown'}</div>
                 <div className="text-sm text-slate-400">
                   {service.port}/{service.protocol}
                 </div>
-                <Badge
-                  variant={service.is_active ? 'success' : 'default'}
-                  size="sm"
-                >
-                  {service.is_active ? 'Active' : 'Inactive'}
-                </Badge>
               </div>
             ))}
           </div>

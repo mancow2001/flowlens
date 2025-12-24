@@ -2,21 +2,33 @@
 export interface Asset {
   id: string;
   name: string;
+  display_name: string | null;
   asset_type: AssetType;
-  ip_address: string | null;
+  ip_address: string;
   hostname: string | null;
   fqdn: string | null;
   mac_address: string | null;
-  os_type: string | null;
-  os_version: string | null;
-  is_active: boolean;
-  is_external: boolean;
-  discovered_at: string;
+  subnet: string | null;
+  vlan_id: number | null;
+  datacenter: string | null;
+  environment: string | null;
+  country_code: string | null;
+  city: string | null;
+  is_internal: boolean;
+  is_critical: boolean;
+  criticality_score: number;
+  owner: string | null;
+  team: string | null;
+  external_id: string | null;
+  description: string | null;
+  tags: Record<string, string> | null;
+  metadata: Record<string, unknown> | null;
+  first_seen: string;
   last_seen: string;
-  geo_country: string | null;
-  geo_city: string | null;
-  tags: Record<string, string>;
-  metadata: Record<string, unknown>;
+  bytes_in_total: number;
+  bytes_out_total: number;
+  connections_in: number;
+  connections_out: number;
   services: Service[];
   created_at: string;
   updated_at: string;
@@ -36,32 +48,56 @@ export type AssetType =
 
 export interface Service {
   id: string;
-  name: string;
+  asset_id: string;
   port: number;
-  protocol: string;
-  is_active: boolean;
+  protocol: number;
+  name: string | null;
+  service_type: string | null;
+  version: string | null;
+  first_seen: string;
+  last_seen: string;
+  bytes_total: number;
+  connections_total: number;
 }
 
 // Dependency types
+export interface AssetInfo {
+  id: string;
+  name: string;
+  ip_address: string;
+  hostname: string | null;
+  is_critical: boolean;
+}
+
 export interface Dependency {
   id: string;
   source_asset_id: string;
   target_asset_id: string;
-  source_asset?: Asset;
-  target_asset?: Asset;
+  source_asset?: AssetInfo;
+  target_asset?: AssetInfo;
   target_port: number;
   protocol: number;
-  protocol_name: string;
+  dependency_type: string | null;
+  is_critical: boolean;
+  is_confirmed: boolean;
+  is_ignored: boolean;
+  description: string | null;
+  tags: Record<string, string> | null;
+  metadata: Record<string, unknown> | null;
   bytes_total: number;
   packets_total: number;
   flows_total: number;
   bytes_last_24h: number;
-  is_active: boolean;
+  bytes_last_7d: number;
   first_seen: string;
   last_seen: string;
-  confidence_score: number;
   valid_from: string;
   valid_to: string | null;
+  avg_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  discovered_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Topology types
