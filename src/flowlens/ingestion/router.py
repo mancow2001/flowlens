@@ -5,6 +5,7 @@ for high-scale deployments.
 """
 
 import asyncio
+import json
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -167,7 +168,7 @@ class PostgreSQLRouter(FlowRouter):
                     params[f"{prefix}output_interface"] = record.output_interface
                     params[f"{prefix}tos"] = record.tos
                     params[f"{prefix}extended_fields"] = (
-                        record.extended_fields if record.extended_fields else None
+                        json.dumps(record.extended_fields) if record.extended_fields else None
                     )
 
                 sql = f"""

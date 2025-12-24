@@ -110,10 +110,34 @@ ASSETS_DISCOVERED = Counter(
     ["asset_type"],
 )
 
+ASSETS_UPDATED = Counter(
+    "flowlens_assets_updated_total",
+    "Total number of assets updated",
+    ["asset_type"],
+)
+
 AGGREGATION_WINDOW_DURATION = Histogram(
     "flowlens_aggregation_window_duration_seconds",
     "Time to process an aggregation window",
     buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+)
+
+# Resolution metrics
+CHANGES_DETECTED = Counter(
+    "flowlens_changes_detected_total",
+    "Total number of changes detected",
+    ["change_type"],
+)
+
+RESOLUTION_ERRORS = Counter(
+    "flowlens_resolution_errors_total",
+    "Total number of resolution errors",
+    ["error_type"],
+)
+
+RESOLUTION_PROCESSED = Counter(
+    "flowlens_resolution_processed_total",
+    "Total number of flow records processed by resolution",
 )
 
 # API metrics

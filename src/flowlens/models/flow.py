@@ -318,6 +318,13 @@ class FlowAggregate(Base):
         index=True,
     )
 
+    # Processing status
+    is_processed: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        index=True,
+    )
+
     # Processing metadata
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -334,6 +341,12 @@ class FlowAggregate(Base):
         ),
         # For dependency resolution
         Index("ix_agg_assets_window", "src_asset_id", "dst_asset_id", "window_start"),
+        # For unprocessed aggregate queries
+        Index(
+            "ix_agg_unprocessed",
+            "window_start",
+            postgresql_where="is_processed = false",
+        ),
         # Port constraint
         CheckConstraint("dst_port >= 0 AND dst_port <= 65535"),
         CheckConstraint("protocol >= 0 AND protocol <= 255"),

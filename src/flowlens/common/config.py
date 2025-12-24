@@ -153,10 +153,12 @@ class ResolutionSettings(BaseSettings):
     window_size_minutes: int = Field(default=5, ge=1, le=60)
 
     # Worker settings
+    worker_count: int = Field(default=1, ge=1, le=16)
     batch_size: int = Field(default=1000, ge=100)
     poll_interval_ms: int = Field(default=500, ge=100)
 
     # Dependency detection
+    detection_interval_minutes: int = Field(default=5, ge=1, le=60)
     stale_threshold_hours: int = Field(default=24, ge=1)
     new_dependency_lookback_minutes: int = Field(default=30, ge=5)
 

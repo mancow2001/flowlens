@@ -18,6 +18,7 @@ from flowlens.common.metrics import (
 from flowlens.ingestion.backpressure import BackpressureQueue
 from flowlens.ingestion.parsers.base import FlowParser, FlowRecord
 from flowlens.ingestion.parsers.netflow_v5 import NetFlowV5Parser
+from flowlens.ingestion.parsers.netflow_v9 import NetFlowV9Parser
 from flowlens.ingestion.router import FlowRouter, PostgreSQLRouter
 
 logger = get_logger(__name__)
@@ -118,6 +119,7 @@ class FlowCollector:
         # Parsers by protocol
         self._parsers: dict[str, FlowParser] = {
             "netflow_v5": NetFlowV5Parser(),
+            "netflow_v9": NetFlowV9Parser(),
         }
 
         # Transports
@@ -269,7 +271,14 @@ class FlowCollector:
                 FLOWS_PARSED.labels(protocol="netflow_v5").inc(len(records))
                 return records
 
-        # TODO: Add NetFlow v9, IPFIX, sFlow parsers
+        if version == 9:
+            parser = self._parsers.get("netflow_v9")
+            if parser:
+                records = parser.parse(data, IPv4Address(exporter_ip))
+                FLOWS_PARSED.labels(protocol="netflow_v9").inc(len(records))
+                return records
+
+        # TODO: Add IPFIX (version 10), sFlow parsers
         raise ValueError(f"Unsupported flow version: {version}")
 
     @property

@@ -5,7 +5,7 @@ dependency analysis.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -306,20 +306,20 @@ class FlowAggregator:
         Returns:
             List of (window_start, window_end) tuples.
         """
-        cutoff = datetime.utcnow() - timedelta(hours=lookback_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         # Find distinct windows with unprocessed flows
+        # Use a labeled column so ORDER BY can reference the same expression
+        window_col = func.date_trunc("minute", FlowRecord.timestamp).label("window_minute")
         result = await db.execute(
-            select(
-                func.date_trunc("minute", FlowRecord.timestamp)
-            )
+            select(window_col)
             .where(
                 FlowRecord.timestamp >= cutoff,
                 FlowRecord.is_enriched == True,
                 FlowRecord.is_processed == False,
             )
             .distinct()
-            .order_by(func.date_trunc("minute", FlowRecord.timestamp))
+            .order_by(window_col)
             .limit(100)
         )
 

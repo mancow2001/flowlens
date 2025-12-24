@@ -58,7 +58,7 @@ async def get_topology_graph(
             id=a.id,
             name=a.name,
             label=a.display_name or a.name,
-            asset_type=a.asset_type.value,
+            asset_type=a.asset_type.value if hasattr(a.asset_type, 'value') else a.asset_type,
             ip_address=str(a.ip_address),
             is_internal=a.is_internal,
             is_critical=a.is_critical,
@@ -233,7 +233,7 @@ async def find_path(
     user: AuthenticatedUser,
     source_id: UUID = Query(..., alias="sourceId"),
     target_id: UUID = Query(..., alias="targetId"),
-    max_depth: int = Query(10, ge=1, le=20, alias="maxDepth"),
+    max_depth: int = Query(5, ge=1, le=10, alias="maxDepth"),
 ) -> PathResult:
     """Find path between two assets.
 
@@ -251,6 +251,7 @@ async def find_path(
             )
 
     # Use BFS to find shortest path
+    # The query stops expanding paths that already reached the target
     result = await db.execute(
         text("""
             WITH RECURSIVE path_search AS (
@@ -258,7 +259,8 @@ async def find_path(
                     source_asset_id,
                     target_asset_id,
                     ARRAY[source_asset_id, target_asset_id] AS path,
-                    1 AS depth
+                    1 AS depth,
+                    (target_asset_id = :target_id) AS found
                 FROM dependencies
                 WHERE source_asset_id = :source_id
                   AND valid_to IS NULL
@@ -269,12 +271,14 @@ async def find_path(
                     d.source_asset_id,
                     d.target_asset_id,
                     ps.path || d.target_asset_id,
-                    ps.depth + 1
+                    ps.depth + 1,
+                    (d.target_asset_id = :target_id) AS found
                 FROM path_search ps
                 JOIN dependencies d ON d.source_asset_id = ps.target_asset_id
                 WHERE ps.depth < :max_depth
                   AND d.valid_to IS NULL
                   AND NOT d.target_asset_id = ANY(ps.path)
+                  AND NOT ps.found  -- Stop expanding paths that found target
             )
             SELECT path, depth
             FROM path_search

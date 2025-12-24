@@ -85,7 +85,12 @@ export const topologyApi = {
     depth?: number;
     include_inactive?: boolean;
   }): Promise<TopologyData> => {
-    const { data } = await api.get('/topology/graph', { params });
+    // POST with filter body
+    const { data } = await api.post('/topology/graph', {
+      asset_id: params?.asset_id,
+      depth: params?.depth,
+      include_inactive: params?.include_inactive,
+    });
     return data;
   },
 

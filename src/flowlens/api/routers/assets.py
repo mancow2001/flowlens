@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination, Sorting
@@ -57,7 +57,7 @@ async def list_assets(
         query = query.where(
             Asset.name.ilike(search_filter)
             | Asset.hostname.ilike(search_filter)
-            | Asset.ip_address.cast(str).ilike(search_filter)
+            | cast(Asset.ip_address, String).ilike(search_filter)
         )
 
     # Get total count
