@@ -129,7 +129,7 @@ export default function AssetDetail() {
           <div>
             <h1 className="text-2xl font-bold text-white">{asset.name}</h1>
             <div className="flex items-center gap-2 mt-1">
-              <Badge>{asset.asset_type.replace('_', ' ')}</Badge>
+              <Badge>{asset.asset_type?.replace('_', ' ') ?? 'Unknown'}</Badge>
               {asset.is_critical && <Badge variant="error">Critical</Badge>}
               {!asset.is_internal && <Badge variant="warning">External</Badge>}
             </div>

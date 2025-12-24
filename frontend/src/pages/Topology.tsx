@@ -273,7 +273,7 @@ export default function Topology() {
                     style={{ backgroundColor: color }}
                   />
                   <span className="text-sm text-slate-300 capitalize">
-                    {type.replace('_', ' ')}
+                    {type?.replace('_', ' ') ?? 'Unknown'}
                   </span>
                 </div>
               ))}
@@ -291,7 +291,7 @@ export default function Topology() {
                 <div>
                   <span className="text-sm text-slate-400">Type</span>
                   <p className="text-white capitalize">
-                    {selectedNode.type.replace('_', ' ')}
+                    {selectedNode.type?.replace('_', ' ') ?? 'Unknown'}
                   </p>
                 </div>
                 {selectedNode.ip_address && (

@@ -80,7 +80,7 @@ export default function Assets() {
       header: 'Type',
       render: (asset: Asset) => (
         <Badge>
-          {asset.asset_type.replace('_', ' ')}
+          {asset.asset_type?.replace('_', ' ') ?? 'Unknown'}
         </Badge>
       ),
     },
