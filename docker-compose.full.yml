@@ -1,0 +1,307 @@
+# FlowLens Docker Compose - Full Configuration
+# PostgreSQL + Redis + Kafka for >10k flows/sec
+
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: flowlens-postgres
+    environment:
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DB: flowlens
+      # Performance tuning
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=768MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "max_worker_processes=4"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=4"
+      - "-c"
+      - "synchronous_commit=off"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowlens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis for caching and pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: flowlens-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Zookeeper (required by Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: flowlens-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Kafka for high-throughput flow ingestion
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: flowlens-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 8
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: 1073741824  # 1GB
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Database migrations
+  migrations:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-migrations
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # API Service (multiple workers)
+  api:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-api
+    command: ["python", "-m", "flowlens.api.main"]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      POSTGRES_POOL_SIZE: 20
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+      API_WORKERS: "4"
+      AUTH_ENABLED: "true"
+      AUTH_SECRET_KEY: "${AUTH_SECRET_KEY:-change-me-in-production}"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/admin/health/live')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Flow Ingestion Service (multiple instances)
+  ingestion:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-ingestion
+    command: ["python", "-m", "flowlens.ingestion.main"]
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC_FLOWS: flowlens.flows.raw
+      INGESTION_BIND_ADDRESS: "0.0.0.0"
+      INGESTION_NETFLOW_PORT: "2055"
+      INGESTION_SFLOW_PORT: "6343"
+      INGESTION_BATCH_SIZE: "1000"
+      INGESTION_QUEUE_MAX_SIZE: "100000"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    ports:
+      - "2055:2055/udp"
+      - "6343:6343/udp"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+    restart: unless-stopped
+
+  # Enrichment Service
+  enrichment:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-enrichment
+    command: ["python", "-m", "flowlens.enrichment.main"]
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: flowlens-enrichment
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      ENRICHMENT_BATCH_SIZE: "500"
+      ENRICHMENT_WORKER_COUNT: "4"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    restart: unless-stopped
+
+  # Dependency Resolution Service
+  resolution:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-resolution
+    command: ["python", "-m", "flowlens.resolution.main"]
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: flowlens-resolution
+      RESOLUTION_WINDOW_SIZE_MINUTES: 5
+      RESOLUTION_BATCH_SIZE: "1000"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+
+networks:
+  default:
+    name: flowlens-network
