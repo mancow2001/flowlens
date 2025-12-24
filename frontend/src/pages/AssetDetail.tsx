@@ -290,10 +290,10 @@ export default function AssetDetail() {
       </Card>
 
       {/* Tags and Metadata */}
-      {(Object.keys(asset.tags).length > 0 ||
-        Object.keys(asset.metadata).length > 0) && (
+      {((asset.tags && Object.keys(asset.tags).length > 0) ||
+        (asset.metadata && Object.keys(asset.metadata).length > 0)) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {Object.keys(asset.tags).length > 0 && (
+          {asset.tags && Object.keys(asset.tags).length > 0 && (
             <Card title="Tags">
               <div className="flex flex-wrap gap-2">
                 {Object.entries(asset.tags).map(([key, value]) => (
@@ -305,7 +305,7 @@ export default function AssetDetail() {
             </Card>
           )}
 
-          {Object.keys(asset.metadata).length > 0 && (
+          {asset.metadata && Object.keys(asset.metadata).length > 0 && (
             <Card title="Metadata">
               <pre className="text-sm text-slate-300 overflow-x-auto">
                 {JSON.stringify(asset.metadata, null, 2)}

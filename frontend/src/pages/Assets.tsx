@@ -97,8 +97,8 @@ export default function Assets() {
       key: 'status',
       header: 'Status',
       render: (asset: Asset) => (
-        <Badge variant={asset.is_active ? 'success' : 'default'}>
-          {asset.is_active ? 'Active' : 'Inactive'}
+        <Badge variant={asset.is_critical ? 'error' : asset.is_internal ? 'success' : 'warning'}>
+          {asset.is_critical ? 'Critical' : asset.is_internal ? 'Internal' : 'External'}
         </Badge>
       ),
     },

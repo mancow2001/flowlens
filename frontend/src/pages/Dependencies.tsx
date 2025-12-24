@@ -99,8 +99,8 @@ export default function Dependencies() {
       key: 'status',
       header: 'Status',
       render: (dep: Dependency) => (
-        <Badge variant={dep.is_active ? 'success' : 'default'}>
-          {dep.is_active ? 'Active' : 'Inactive'}
+        <Badge variant={dep.is_critical ? 'error' : dep.valid_to === null ? 'success' : 'default'}>
+          {dep.is_critical ? 'Critical' : dep.valid_to === null ? 'Active' : 'Inactive'}
         </Badge>
       ),
     },
