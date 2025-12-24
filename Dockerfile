@@ -46,10 +46,6 @@ ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/admin/health/live')" || exit 1
-
 # Default command (can be overridden)
 CMD ["python", "-m", "flowlens.api.main"]
 
