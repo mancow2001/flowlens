@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Asset, Alert, ChangeEvent, DashboardStats } from '../types';
+import type { Alert, ChangeEvent, DashboardStats } from '../types';
 
 interface AppState {
   // Selected items

@@ -1,11 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import {
-  MagnifyingGlassIcon,
-  FunnelIcon,
-  ServerStackIcon,
-} from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import Card from '../components/common/Card';
 import Table from '../components/common/Table';
 import Badge from '../components/common/Badge';
@@ -37,7 +33,7 @@ export default function Assets() {
   const [assetType, setAssetType] = useState<AssetType | ''>('');
   const [isActive, setIsActive] = useState<boolean | undefined>(undefined);
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['assets', page, search, assetType, isActive],
     queryFn: () =>
       assetApi.list({

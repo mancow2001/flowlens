@@ -6,7 +6,7 @@ import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import { changeApi } from '../services/api';
-import { formatRelativeTime, formatDateTime } from '../utils/format';
+import { formatRelativeTime } from '../utils/format';
 import type { ChangeEvent } from '../types';
 
 export default function Changes() {

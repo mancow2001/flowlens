@@ -6,9 +6,8 @@ import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import { alertApi } from '../services/api';
-import { formatRelativeTime, getSeverityColor } from '../utils/format';
+import { formatRelativeTime } from '../utils/format';
 import type { Alert, AlertSeverity } from '../types';
-import clsx from 'clsx';
 
 const SEVERITY_OPTIONS: { value: AlertSeverity | ''; label: string }[] = [
   { value: '', label: 'All Severities' },

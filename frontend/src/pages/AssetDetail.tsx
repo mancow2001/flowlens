@@ -24,7 +24,7 @@ export default function AssetDetail() {
     enabled: !!id,
   });
 
-  const { data: dependencies, isLoading: depsLoading } = useQuery({
+  const { data: dependencies } = useQuery({
     queryKey: ['assets', id, 'dependencies'],
     queryFn: () => assetApi.getDependencies(id!, 'both'),
     enabled: !!id,

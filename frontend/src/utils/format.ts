@@ -50,7 +50,7 @@ export function formatProtocol(protocol: number): string {
   return protocols[protocol] || `Proto ${protocol}`;
 }
 
-export function formatPort(port: number, protocol: number): string {
+export function formatPort(port: number, _protocol?: number): string {
   const wellKnownPorts: Record<number, string> = {
     20: 'FTP-DATA',
     21: 'FTP',

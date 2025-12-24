@@ -1,13 +1,11 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import { topologyApi } from '../services/api';
-import type { TopologyNode, TopologyEdge, TopologyData } from '../types';
-import { formatBytes, formatProtocol } from '../utils/format';
-import clsx from 'clsx';
+import type { TopologyNode } from '../types';
 
 interface SimNode extends TopologyNode, d3.SimulationNodeDatum {}
 
@@ -157,7 +155,7 @@ export default function Topology() {
             if (!event.active) simulation.alphaTarget(0);
             d.fx = null;
             d.fy = null;
-          })
+          }) as unknown as (selection: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown>) => void
       );
 
     // Add circles to nodes
