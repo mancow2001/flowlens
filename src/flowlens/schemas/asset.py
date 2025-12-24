@@ -1,10 +1,10 @@
 """Pydantic schemas for Asset API endpoints."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress
+from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, field_validator
 
 from flowlens.models.asset import AssetType
 
@@ -100,6 +100,14 @@ class AssetResponse(BaseModel):
     connections_out: int
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("ip_address", "subnet", mode="before")
+    @classmethod
+    def convert_to_string(cls, v: Any) -> str | None:
+        """Convert INET/CIDR types to string."""
+        if v is None:
+            return None
+        return str(v)
 
 
 class AssetSummary(BaseModel):

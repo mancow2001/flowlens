@@ -153,7 +153,7 @@ async def get_asset(
         name=asset.name,
         display_name=asset.display_name,
         asset_type=asset.asset_type,
-        ip_address=asset.ip_address,
+        ip_address=str(asset.ip_address),
         hostname=asset.hostname,
         fqdn=asset.fqdn,
         mac_address=asset.mac_address,
