@@ -54,6 +54,8 @@
 
 | Feature | PRD Ref | Priority | Effort | Status |
 |---------|---------|----------|--------|--------|
+| VMware vSphere discovery | FR-AD-003 | P1 | Medium | Not Started |
+| Nutanix AHV discovery | FR-AD-003 | P1 | Medium | Not Started |
 | AWS EC2/VPC discovery | FR-AD-003 | P1 | Medium | Not Started |
 | Azure VM discovery | FR-AD-003 | P1 | Medium | Not Started |
 | Docker container discovery | FR-AD-004 | P1 | Low | Not Started |
@@ -167,52 +169,64 @@ The following prioritization is based on:
 
 ---
 
-### Sprint 5: Cloud Discovery
+### Sprint 5: Hypervisor Discovery
+*On-premises virtualization platforms - critical for enterprise datacenters*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 14 | **VMware vSphere discovery** | Medium | Dominant enterprise hypervisor; vCenter API for VMs, hosts, clusters |
+| 15 | **Nutanix AHV discovery** | Medium | Growing HCI platform; Prism API for VMs and clusters |
+
+**Outcome**: Full visibility into virtualized infrastructure
+
+---
+
+### Sprint 6: Cloud Discovery
 *Extend discovery to cloud-native infrastructure*
 
 | # | Feature | Effort | Rationale |
 |---|---------|--------|-----------|
-| 14 | **AWS EC2/VPC discovery** | Medium | Largest cloud provider; VPC flow logs + EC2 metadata |
-| 15 | **Azure VM discovery** | Medium | Second largest; similar pattern to AWS |
-| 16 | **Credential vault integration** | Medium | Secure credential storage for cloud APIs |
+| 16 | **AWS EC2/VPC discovery** | Medium | Largest cloud provider; VPC flow logs + EC2 metadata |
+| 17 | **Azure VM discovery** | Medium | Second largest; similar pattern to AWS |
+| 18 | **Credential vault integration** | Medium | Secure credential storage for cloud/hypervisor APIs |
 
 **Outcome**: Cloud workloads integrated into dependency map
 
 ---
 
-### Sprint 6: Enterprise Authentication & Integration
+### Sprint 7: Enterprise Authentication & Integration
 *Enterprise SSO and CMDB sync*
 
 | # | Feature | Effort | Rationale |
 |---|---------|--------|-----------|
-| 17 | **SSO (SAML/OIDC)** | High | Enterprise requirement; centralized identity |
-| 18 | **CMDB integration (ServiceNow)** | High | Bidirectional sync; single source of truth |
-| 19 | **Data retention policies** | Medium | Compliance; storage management |
+| 19 | **SSO (SAML/OIDC)** | High | Enterprise requirement; centralized identity |
+| 20 | **CMDB integration (ServiceNow)** | High | Bidirectional sync; single source of truth |
+| 21 | **Data retention policies** | Medium | Compliance; storage management |
 
 **Outcome**: Enterprise-ready identity and CMDB integration
 
 ---
 
-### Sprint 7: Advanced Visualization
+### Sprint 8: Advanced Visualization
 *Polish and power-user features*
 
 | # | Feature | Effort | Rationale |
 |---|---------|--------|-----------|
-| 20 | **Historical topology (time-slider)** | Medium | Visualize changes over time; incident investigation |
-| 21 | **Saved views/dashboards** | Medium | User customization; team workflows |
-| 22 | **Diagram export (PNG/SVG)** | Low | Documentation; presentations |
+| 22 | **Historical topology (time-slider)** | Medium | Visualize changes over time; incident investigation |
+| 23 | **Saved views/dashboards** | Medium | User customization; team workflows |
+| 24 | **Diagram export (PNG/SVG)** | Low | Documentation; presentations |
 
 **Outcome**: Complete visualization feature set
 
 ---
 
-### Sprint 8: Advanced Data Collection
+### Sprint 9: Advanced Data Collection
 *Optional enhancements for deeper visibility*
 
 | # | Feature | Effort | Rationale |
 |---|---------|--------|-----------|
-| 23 | **Packet capture integration** | High | Deep protocol inspection; optional for most users |
-| 24 | **GCP discovery** | Medium | Third cloud provider; lower priority than AWS/Azure |
+| 25 | **Packet capture integration** | High | Deep protocol inspection; optional for most users |
+| 26 | **GCP discovery** | Medium | Third cloud provider; lower priority than AWS/Azure |
 
 **Outcome**: Extended data collection options
 
@@ -262,7 +276,9 @@ SSH Discovery ──┬──> Software Inventory
 
 SNMP + WMI ─────> Full Cross-Platform Discovery
 
-AWS/Azure ──────> Credential Vault ──> Cloud Native
+VMware/Nutanix ─> Hypervisor Visibility ──┐
+                                          ├──> Complete Infrastructure Map
+AWS/Azure ──────> Credential Vault ───────┘
 
 SSO ────────────> CMDB Integration ──> Enterprise Ready
 ```
@@ -288,6 +304,8 @@ SSO ────────────> CMDB Integration ──> Enterprise Re
 | Packet Capture | Performance impact, legal concerns | Make optional, document privacy |
 | Kubernetes | API versioning, RBAC complexity | Target specific K8s versions |
 | WMI Discovery | Windows security policies | Require domain admin guidance |
+| VMware vSphere | vCenter API versioning (6.x vs 7.x vs 8.x) | Use pyvmomi; support multiple versions |
+| Nutanix AHV | Prism API v2 vs v3 differences | Target Prism Central v3 API |
 
 ---
 
