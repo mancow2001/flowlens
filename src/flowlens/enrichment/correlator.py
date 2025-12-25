@@ -109,10 +109,9 @@ class AssetCorrelator:
         else:
             name = ip_str.replace(".", "-").replace(":", "-")
 
-        # Default asset type based on classification
+        # Default asset type - use UNKNOWN for all auto-discovered assets
+        # The is_internal field tracks internal vs external location
         asset_type = AssetType.UNKNOWN
-        if not is_internal:
-            asset_type = AssetType.EXTERNAL
 
         # Get GeoIP info for external IPs
         country_code = None
