@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import Card from '../components/common/Card';
@@ -80,13 +80,79 @@ function hullPath(hull: [number, number][], padding: number = 30): string {
   return lineGenerator(paddedHull) || '';
 }
 
+// Find all connected nodes (upstream and downstream) from a starting node
+function findConnectedNodes(
+  startNodeId: string,
+  edges: TopologyEdge[],
+  maxDepth: number = 10
+): { upstream: Set<string>; downstream: Set<string>; connectedEdges: Set<string> } {
+  const upstream = new Set<string>();
+  const downstream = new Set<string>();
+  const connectedEdges = new Set<string>();
+
+  // Build adjacency lists
+  const outgoing = new Map<string, { nodeId: string; edgeId: string }[]>();
+  const incoming = new Map<string, { nodeId: string; edgeId: string }[]>();
+
+  edges.forEach(edge => {
+    if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
+    if (!incoming.has(edge.target)) incoming.set(edge.target, []);
+    outgoing.get(edge.source)!.push({ nodeId: edge.target, edgeId: edge.id });
+    incoming.get(edge.target)!.push({ nodeId: edge.source, edgeId: edge.id });
+  });
+
+  // BFS for downstream (what this node connects to)
+  const downstreamQueue: { nodeId: string; depth: number }[] = [{ nodeId: startNodeId, depth: 0 }];
+  const visitedDown = new Set<string>([startNodeId]);
+
+  while (downstreamQueue.length > 0) {
+    const { nodeId, depth } = downstreamQueue.shift()!;
+    if (depth >= maxDepth) continue;
+
+    const neighbors = outgoing.get(nodeId) || [];
+    for (const { nodeId: neighborId, edgeId } of neighbors) {
+      connectedEdges.add(edgeId);
+      if (!visitedDown.has(neighborId)) {
+        visitedDown.add(neighborId);
+        downstream.add(neighborId);
+        downstreamQueue.push({ nodeId: neighborId, depth: depth + 1 });
+      }
+    }
+  }
+
+  // BFS for upstream (what connects to this node)
+  const upstreamQueue: { nodeId: string; depth: number }[] = [{ nodeId: startNodeId, depth: 0 }];
+  const visitedUp = new Set<string>([startNodeId]);
+
+  while (upstreamQueue.length > 0) {
+    const { nodeId, depth } = upstreamQueue.shift()!;
+    if (depth >= maxDepth) continue;
+
+    const neighbors = incoming.get(nodeId) || [];
+    for (const { nodeId: neighborId, edgeId } of neighbors) {
+      connectedEdges.add(edgeId);
+      if (!visitedUp.has(neighborId)) {
+        visitedUp.add(neighborId);
+        upstream.add(neighborId);
+        upstreamQueue.push({ nodeId: neighborId, depth: depth + 1 });
+      }
+    }
+  }
+
+  return { upstream, downstream, connectedEdges };
+}
+
 export default function Topology() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNode, setSelectedNode] = useState<TopologyNode | null>(null);
+  const [highlightedPaths, setHighlightedPaths] = useState<{
+    upstream: Set<string>;
+    downstream: Set<string>;
+    edges: Set<string>;
+  } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('none');
-  const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
   const { data: topology, isLoading } = useQuery({
@@ -120,6 +186,31 @@ export default function Topology() {
     return colorMap;
   }, [groups]);
 
+  // Handle node selection and path highlighting
+  const handleNodeClick = useCallback((node: TopologyNode) => {
+    if (selectedNode?.id === node.id) {
+      // Clicking same node clears selection
+      setSelectedNode(null);
+      setHighlightedPaths(null);
+    } else {
+      setSelectedNode(node);
+      if (topology) {
+        const { upstream, downstream, connectedEdges } = findConnectedNodes(
+          node.id,
+          topology.edges,
+          5 // max depth
+        );
+        setHighlightedPaths({ upstream, downstream, edges: connectedEdges });
+      }
+    }
+  }, [selectedNode, topology]);
+
+  // Clear selection
+  const clearSelection = useCallback(() => {
+    setSelectedNode(null);
+    setHighlightedPaths(null);
+  }, []);
+
   // Handle resize
   useEffect(() => {
     const updateDimensions = () => {
@@ -142,6 +233,7 @@ export default function Topology() {
         .duration(750)
         .call(zoomRef.current.transform, d3.zoomIdentity);
     }
+    clearSelection();
   };
 
   // D3 Force simulation
@@ -175,6 +267,13 @@ export default function Topology() {
 
     zoomRef.current = zoom;
     svg.call(zoom);
+
+    // Click on background to clear selection
+    svg.on('click', (event) => {
+      if (event.target === svgRef.current) {
+        clearSelection();
+      }
+    });
 
     // Create container for zoom/pan
     const container = svg.append('g');
@@ -224,12 +323,11 @@ export default function Topology() {
       }).strength(0.1));
     }
 
-    simulationRef.current = simulation;
+    // Create arrow markers for different states
+    const defs = svg.append('defs');
 
-    // Create arrow marker
-    svg
-      .append('defs')
-      .append('marker')
+    // Default arrow
+    defs.append('marker')
       .attr('id', 'arrowhead')
       .attr('viewBox', '-0 -5 10 10')
       .attr('refX', 25)
@@ -241,6 +339,32 @@ export default function Topology() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#475569');
 
+    // Highlighted arrow (upstream - cyan)
+    defs.append('marker')
+      .attr('id', 'arrowhead-upstream')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#06b6d4');
+
+    // Highlighted arrow (downstream - yellow)
+    defs.append('marker')
+      .attr('id', 'arrowhead-downstream')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#eab308');
+
     // Create links
     const link = container
       .append('g')
@@ -249,8 +373,9 @@ export default function Topology() {
       .data(links)
       .join('line')
       .attr('class', 'edge')
-      .attr('stroke', (d) => (d.is_critical ? '#ef4444' : '#3b82f6'))
-      .attr('stroke-width', (d) => Math.min(Math.log(d.bytes_total + 1) / 5, 4))
+      .attr('stroke', '#475569')
+      .attr('stroke-width', 2)
+      .attr('stroke-opacity', 0.6)
       .attr('marker-end', 'url(#arrowhead)');
 
     // Create drag behavior
@@ -310,8 +435,9 @@ export default function Topology() {
       .attr('font-weight', 'bold');
 
     // Handle click
-    node.on('click', (_, d) => {
-      setSelectedNode(d);
+    node.on('click', (event, d) => {
+      event.stopPropagation();
+      handleNodeClick(d);
     });
 
     // Handle hover
@@ -319,8 +445,12 @@ export default function Topology() {
       .on('mouseenter', function () {
         d3.select(this).select('circle').attr('stroke', '#3b82f6').attr('stroke-width', 3);
       })
-      .on('mouseleave', function () {
-        d3.select(this).select('circle').attr('stroke', '#1e293b').attr('stroke-width', 2);
+      .on('mouseleave', function (_, d) {
+        const isSelected = selectedNode?.id === d.id;
+        const isHighlighted = highlightedPaths?.upstream.has(d.id) || highlightedPaths?.downstream.has(d.id);
+        if (!isSelected && !isHighlighted) {
+          d3.select(this).select('circle').attr('stroke', '#1e293b').attr('stroke-width', 2);
+        }
       });
 
     // Update positions on tick
@@ -408,7 +538,112 @@ export default function Topology() {
     return () => {
       simulation.stop();
     };
-  }, [topology, dimensions, groupingMode, groups, groupColors]);
+  }, [topology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection]);
+
+  // Update highlighting when selection changes
+  useEffect(() => {
+    if (!svgRef.current || !topology) return;
+
+    const svg = d3.select(svgRef.current);
+
+    // Update node highlighting
+    svg.selectAll<SVGGElement, SimNode>('.node').each(function (d) {
+      const nodeGroup = d3.select(this);
+      const circle = nodeGroup.select('circle');
+
+      if (selectedNode?.id === d.id) {
+        // Selected node - bright white border
+        circle
+          .attr('stroke', '#ffffff')
+          .attr('stroke-width', 4);
+      } else if (highlightedPaths?.upstream.has(d.id)) {
+        // Upstream node - cyan border
+        circle
+          .attr('stroke', '#06b6d4')
+          .attr('stroke-width', 3);
+      } else if (highlightedPaths?.downstream.has(d.id)) {
+        // Downstream node - yellow border
+        circle
+          .attr('stroke', '#eab308')
+          .attr('stroke-width', 3);
+      } else if (highlightedPaths) {
+        // Non-connected node when something is selected - dim
+        circle
+          .attr('stroke', '#1e293b')
+          .attr('stroke-width', 2)
+          .attr('opacity', 0.3);
+      } else {
+        // Default state
+        circle
+          .attr('stroke', '#1e293b')
+          .attr('stroke-width', 2)
+          .attr('opacity', 1);
+      }
+    });
+
+    // Update edge highlighting
+    svg.selectAll<SVGLineElement, SimLink>('.edge').each(function (d) {
+      const edge = d3.select(this);
+      const sourceId = typeof d.source === 'object' ? (d.source as SimNode).id : d.source;
+      const targetId = typeof d.target === 'object' ? (d.target as SimNode).id : d.target;
+
+      if (highlightedPaths?.edges.has(d.id)) {
+        // Check if this is an upstream or downstream edge
+        const isUpstream = highlightedPaths.upstream.has(sourceId as string) ||
+                          (selectedNode?.id === targetId);
+        const isDownstream = highlightedPaths.downstream.has(targetId as string) ||
+                            (selectedNode?.id === sourceId);
+
+        if (isUpstream && !isDownstream) {
+          edge
+            .attr('stroke', '#06b6d4')
+            .attr('stroke-width', 3)
+            .attr('stroke-opacity', 1)
+            .attr('marker-end', 'url(#arrowhead-upstream)');
+        } else if (isDownstream) {
+          edge
+            .attr('stroke', '#eab308')
+            .attr('stroke-width', 3)
+            .attr('stroke-opacity', 1)
+            .attr('marker-end', 'url(#arrowhead-downstream)');
+        } else {
+          edge
+            .attr('stroke', '#3b82f6')
+            .attr('stroke-width', 3)
+            .attr('stroke-opacity', 1)
+            .attr('marker-end', 'url(#arrowhead)');
+        }
+      } else if (highlightedPaths) {
+        // Non-connected edge when something is selected - dim
+        edge
+          .attr('stroke', '#475569')
+          .attr('stroke-width', 1)
+          .attr('stroke-opacity', 0.2)
+          .attr('marker-end', 'url(#arrowhead)');
+      } else {
+        // Default state
+        edge
+          .attr('stroke', '#475569')
+          .attr('stroke-width', 2)
+          .attr('stroke-opacity', 0.6)
+          .attr('marker-end', 'url(#arrowhead)');
+      }
+    });
+
+    // Update node labels opacity
+    svg.selectAll<SVGGElement, SimNode>('.node').each(function (d) {
+      const nodeGroup = d3.select(this);
+      const isConnected = selectedNode?.id === d.id ||
+                         highlightedPaths?.upstream.has(d.id) ||
+                         highlightedPaths?.downstream.has(d.id);
+
+      if (highlightedPaths && !isConnected) {
+        nodeGroup.selectAll('text').attr('opacity', 0.3);
+      } else {
+        nodeGroup.selectAll('text').attr('opacity', 1);
+      }
+    });
+  }, [selectedNode, highlightedPaths, topology]);
 
   if (isLoading) {
     return <LoadingPage />;
@@ -420,7 +655,9 @@ export default function Topology() {
         <div>
           <h1 className="text-2xl font-bold text-white">Topology Map</h1>
           <p className="text-slate-400 mt-1">
-            Interactive visualization of asset dependencies
+            {selectedNode
+              ? `Showing dependencies for ${selectedNode.name}`
+              : 'Click a node to highlight its dependencies'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -436,6 +673,11 @@ export default function Topology() {
             <option value="datacenter">Group by Datacenter</option>
             <option value="type">Group by Type</option>
           </select>
+          {selectedNode && (
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              Clear Selection
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={resetView}>
             Reset View
           </Button>
@@ -479,6 +721,26 @@ export default function Topology() {
                   <span className="text-sm text-slate-300">External (E)</span>
                 </div>
               </div>
+
+              {selectedNode && (
+                <>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">Path Highlighting</div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full border-2 border-white bg-transparent" />
+                      <span className="text-sm text-slate-300">Selected</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full border-2 border-cyan-400 bg-transparent" />
+                      <span className="text-sm text-slate-300">Upstream ({highlightedPaths?.upstream.size || 0})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full border-2 border-yellow-400 bg-transparent" />
+                      <span className="text-sm text-slate-300">Downstream ({highlightedPaths?.downstream.size || 0})</span>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {groupingMode !== 'none' && groups.size > 0 && (
                 <>
@@ -526,6 +788,12 @@ export default function Topology() {
                   <span className="text-sm text-slate-400">Location</span>
                   <p className="text-white">
                     {selectedNode.is_internal ? 'Internal' : 'External'}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-400">Connections</span>
+                  <p className="text-white">
+                    {highlightedPaths?.upstream.size || 0} upstream, {highlightedPaths?.downstream.size || 0} downstream
                   </p>
                 </div>
                 {selectedNode.environment && (

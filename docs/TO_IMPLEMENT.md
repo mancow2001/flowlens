@@ -12,12 +12,26 @@
 |----------|--------|---------|
 | **Flow Ingestion** | 95% | NetFlow v5/v9, sFlow, IPFIX parsers with Kafka/PostgreSQL routing |
 | **Dependency Mapping** | 90% | Flow aggregation, dependency building, temporal validity |
-| **Visualization** | 70% | D3.js topology map, zoom/pan, node selection |
+| **Visualization** | 85% | D3.js topology map, zoom/pan, hierarchical grouping, path highlighting |
 | **Change Detection** | 90% | 13 change types, asset/dependency lifecycle tracking |
 | **Alerts** | 80% | Alert model, severity levels, acknowledgment, email notifications |
 | **Impact Analysis** | 95% | Blast radius, upstream/downstream, SPOF detection, path finding |
 | **REST API** | 95% | Comprehensive endpoints for all entities |
 | **Enrichment** | 80% | GeoIP, DNS, protocol identification (200+ services) |
+
+### Visualization Features (Completed)
+
+| Feature | PRD Ref | Status |
+|---------|---------|--------|
+| Interactive topology map with zoom/pan | FR-VZ-001 | ✅ Done |
+| Hierarchical grouping (location, environment, datacenter, type) | FR-VZ-002 | ✅ Done |
+| Highlight dependency paths (upstream/downstream) | FR-VZ-003 | ✅ Done |
+| Display connection metadata on click | FR-VZ-004 | ✅ Done |
+| Reset view button | - | ✅ Done |
+| Clear selection button | - | ✅ Done |
+| Internal/External node coloring (I/E indicators) | - | ✅ Done |
+| Convex hull group visualization | - | ✅ Done |
+| Dynamic legend with group counts | - | ✅ Done |
 
 ---
 
@@ -70,7 +84,6 @@
 | Multi-region deployment | NFR-SC-004 | Not Started |
 | Load balancer detection | - | Not Started |
 | DNS dependency mapping | - | Not Started |
-| Application grouping UI | FR-VZ-002 | Not Started |
 | Compliance reporting | - | Not Started |
 
 ---
