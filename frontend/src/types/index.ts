@@ -123,9 +123,15 @@ export interface Dependency {
 export interface TopologyNode {
   id: string;
   name: string;
+  label?: string;
   type: AssetType;
   ip_address: string | null;
-  is_external: boolean;
+  is_internal: boolean;
+  is_critical: boolean;
+  environment: string | null;
+  datacenter: string | null;
+  connections_in: number;
+  connections_out: number;
   x?: number;
   y?: number;
 }
@@ -134,10 +140,14 @@ export interface TopologyEdge {
   id: string;
   source: string;
   target: string;
-  port: number;
-  protocol: string;
+  target_port: number;
+  protocol: number;
+  protocol_name: string | null;
+  service_type: string | null;
   bytes_total: number;
-  is_active: boolean;
+  bytes_last_24h: number;
+  is_critical: boolean;
+  last_seen: string;
 }
 
 export interface TopologyData {
