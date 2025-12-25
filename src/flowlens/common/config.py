@@ -192,6 +192,14 @@ class APISettings(BaseSettings):
     rate_limit_requests: int = Field(default=100, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
+        """Parse comma-separated CORS origins string into list."""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
     # Pagination
     default_page_size: int = Field(default=50, ge=1, le=1000)
     max_page_size: int = Field(default=1000, ge=1, le=10000)
