@@ -49,35 +49,9 @@ export default function Assets() {
   });
 
   // Get a display character for the asset avatar
+  // I = Internal, E = External
   const getAvatarChar = (asset: Asset): string => {
-    // Prefer hostname first letter if available and starts with a letter
-    if (asset.hostname && /^[a-zA-Z]/.test(asset.hostname)) {
-      return asset.hostname.charAt(0).toUpperCase();
-    }
-    // If name starts with a letter, use that
-    if (/^[a-zA-Z]/.test(asset.name)) {
-      return asset.name.charAt(0).toUpperCase();
-    }
-    // For IP-based names, use asset type initial or location
-    const typeInitials: Record<string, string> = {
-      server: 'S',
-      database: 'D',
-      workstation: 'W',
-      load_balancer: 'L',
-      firewall: 'F',
-      router: 'R',
-      switch: 'SW',
-      storage: 'ST',
-      container: 'C',
-      virtual_machine: 'V',
-      cloud_service: 'CS',
-      unknown: '?',
-    };
-    // For unknown types, show E for external or I for internal
-    if (asset.asset_type === 'unknown') {
-      return asset.is_internal ? 'I' : 'E';
-    }
-    return typeInitials[asset.asset_type] ?? '?';
+    return asset.is_internal ? 'I' : 'E';
   };
 
   const columns = [
@@ -89,13 +63,7 @@ export default function Assets() {
           <div
             className={clsx(
               'w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-medium',
-              asset.asset_type === 'server' && 'bg-blue-600',
-              asset.asset_type === 'database' && 'bg-purple-600',
-              asset.asset_type === 'workstation' && 'bg-green-600',
-              !asset.is_internal && 'bg-orange-600',
-              asset.is_internal && !['server', 'database', 'workstation'].includes(
-                asset.asset_type ?? ''
-              ) && 'bg-slate-600'
+              asset.is_internal ? 'bg-green-600' : 'bg-orange-600'
             )}
           >
             {getAvatarChar(asset)}
