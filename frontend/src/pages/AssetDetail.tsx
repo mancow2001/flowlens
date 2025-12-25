@@ -136,8 +136,15 @@ export default function AssetDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary">View in Topology</Button>
-          <Button variant="primary">Run Impact Analysis</Button>
+          <Button variant="secondary" onClick={() => navigate('/topology')}>
+            View in Topology
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => document.getElementById('blast-radius')?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            Run Impact Analysis
+          </Button>
         </div>
       </div>
 
@@ -202,6 +209,7 @@ export default function AssetDetail() {
         </Card>
 
         {/* Blast Radius */}
+        <div id="blast-radius">
         <Card title="Blast Radius">
           {blastRadius ? (
             <div className="space-y-3">
@@ -230,6 +238,7 @@ export default function AssetDetail() {
             </div>
           )}
         </Card>
+        </div>
       </div>
 
       {/* Services */}
