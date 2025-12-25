@@ -17,12 +17,14 @@ const ASSET_TYPES: { value: AssetType | ''; label: string }[] = [
   { value: 'server', label: 'Server' },
   { value: 'database', label: 'Database' },
   { value: 'workstation', label: 'Workstation' },
-  { value: 'network_device', label: 'Network Device' },
   { value: 'load_balancer', label: 'Load Balancer' },
   { value: 'firewall', label: 'Firewall' },
+  { value: 'router', label: 'Router' },
+  { value: 'switch', label: 'Switch' },
+  { value: 'storage', label: 'Storage' },
   { value: 'container', label: 'Container' },
+  { value: 'virtual_machine', label: 'Virtual Machine' },
   { value: 'cloud_service', label: 'Cloud Service' },
-  { value: 'external', label: 'External' },
   { value: 'unknown', label: 'Unknown' },
 ];
 
@@ -56,19 +58,25 @@ export default function Assets() {
     if (/^[a-zA-Z]/.test(asset.name)) {
       return asset.name.charAt(0).toUpperCase();
     }
-    // For IP-based names, use asset type initial
+    // For IP-based names, use asset type initial or location
     const typeInitials: Record<string, string> = {
       server: 'S',
       database: 'D',
       workstation: 'W',
-      network_device: 'N',
       load_balancer: 'L',
       firewall: 'F',
+      router: 'R',
+      switch: 'SW',
+      storage: 'ST',
       container: 'C',
-      cloud_service: 'C',
-      external: 'E',
+      virtual_machine: 'V',
+      cloud_service: 'CS',
       unknown: '?',
     };
+    // For unknown types, show E for external or I for internal
+    if (asset.asset_type === 'unknown') {
+      return asset.is_internal ? 'I' : 'E';
+    }
     return typeInitials[asset.asset_type] ?? '?';
   };
 
@@ -120,12 +128,15 @@ export default function Assets() {
       ),
     },
     {
-      key: 'status',
-      header: 'Status',
+      key: 'location',
+      header: 'Location',
       render: (asset: Asset) => (
-        <Badge variant={asset.is_critical ? 'error' : asset.is_internal ? 'success' : 'warning'}>
-          {asset.is_critical ? 'Critical' : asset.is_internal ? 'Internal' : 'External'}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={asset.is_internal ? 'success' : 'warning'}>
+            {asset.is_internal ? 'Internal' : 'External'}
+          </Badge>
+          {asset.is_critical && <Badge variant="error">Critical</Badge>}
+        </div>
       ),
     },
     {

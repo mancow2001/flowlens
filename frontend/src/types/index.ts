@@ -37,13 +37,15 @@ export interface Asset {
 export type AssetType =
   | 'server'
   | 'workstation'
-  | 'network_device'
   | 'database'
   | 'load_balancer'
   | 'firewall'
+  | 'router'
+  | 'switch'
+  | 'storage'
   | 'container'
+  | 'virtual_machine'
   | 'cloud_service'
-  | 'external'
   | 'unknown';
 
 export interface Service {
