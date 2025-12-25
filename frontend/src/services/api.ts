@@ -27,10 +27,18 @@ export const assetApi = {
     page?: number;
     page_size?: number;
     asset_type?: string;
-    is_active?: boolean;
+    is_internal?: boolean;
     search?: string;
   }): Promise<PaginatedResponse<Asset>> => {
-    const { data } = await api.get('/assets', { params });
+    // Convert to backend parameter names (camelCase aliases)
+    const queryParams: Record<string, unknown> = {};
+    if (params?.page) queryParams.page = params.page;
+    if (params?.page_size) queryParams.page_size = params.page_size;
+    if (params?.asset_type) queryParams.assetType = params.asset_type;
+    if (params?.is_internal !== undefined) queryParams.isInternal = params.is_internal;
+    if (params?.search) queryParams.search = params.search;
+
+    const { data } = await api.get('/assets', { params: queryParams });
     return data;
   },
 

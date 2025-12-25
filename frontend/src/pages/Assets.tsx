@@ -31,20 +31,46 @@ export default function Assets() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [assetType, setAssetType] = useState<AssetType | ''>('');
-  const [isActive, setIsActive] = useState<boolean | undefined>(undefined);
+  const [isInternal, setIsInternal] = useState<boolean | undefined>(undefined);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['assets', page, search, assetType, isActive],
+    queryKey: ['assets', page, search, assetType, isInternal],
     queryFn: () =>
       assetApi.list({
         page,
         page_size: 20,
         search: search || undefined,
         asset_type: assetType || undefined,
-        is_active: isActive,
+        is_internal: isInternal,
       }),
     placeholderData: (prev) => prev,
   });
+
+  // Get a display character for the asset avatar
+  const getAvatarChar = (asset: Asset): string => {
+    // Prefer hostname first letter if available and starts with a letter
+    if (asset.hostname && /^[a-zA-Z]/.test(asset.hostname)) {
+      return asset.hostname.charAt(0).toUpperCase();
+    }
+    // If name starts with a letter, use that
+    if (/^[a-zA-Z]/.test(asset.name)) {
+      return asset.name.charAt(0).toUpperCase();
+    }
+    // For IP-based names, use asset type initial
+    const typeInitials: Record<string, string> = {
+      server: 'S',
+      database: 'D',
+      workstation: 'W',
+      network_device: 'N',
+      load_balancer: 'L',
+      firewall: 'F',
+      container: 'C',
+      cloud_service: 'C',
+      external: 'E',
+      unknown: '?',
+    };
+    return typeInitials[asset.asset_type] ?? '?';
+  };
 
   const columns = [
     {
@@ -60,11 +86,11 @@ export default function Assets() {
               asset.asset_type === 'workstation' && 'bg-green-600',
               asset.asset_type === 'external' && 'bg-orange-600',
               !['server', 'database', 'workstation', 'external'].includes(
-                asset.asset_type
+                asset.asset_type ?? ''
               ) && 'bg-slate-600'
             )}
           >
-            {asset.name.charAt(0).toUpperCase()}
+            {getAvatarChar(asset)}
           </div>
           <div>
             <div className="font-medium text-white">{asset.name}</div>
@@ -166,30 +192,30 @@ export default function Assets() {
             ))}
           </select>
 
-          {/* Status filter */}
+          {/* Location filter */}
           <select
-            value={isActive === undefined ? '' : isActive.toString()}
+            value={isInternal === undefined ? '' : isInternal.toString()}
             onChange={(e) => {
               const val = e.target.value;
-              setIsActive(val === '' ? undefined : val === 'true');
+              setIsInternal(val === '' ? undefined : val === 'true');
               setPage(1);
             }}
             className="px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
-            <option value="">All Status</option>
-            <option value="true">Active</option>
-            <option value="false">Inactive</option>
+            <option value="">All Locations</option>
+            <option value="true">Internal</option>
+            <option value="false">External</option>
           </select>
 
           {/* Clear filters */}
-          {(search || assetType || isActive !== undefined) && (
+          {(search || assetType || isInternal !== undefined) && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
                 setSearch('');
                 setAssetType('');
-                setIsActive(undefined);
+                setIsInternal(undefined);
                 setPage(1);
               }}
             >
