@@ -141,6 +141,8 @@ services:
       target: production
     container_name: flowlens-resolution
     command: ["python", "-m", "flowlens.resolution.main"]
+    env_file:
+      - .env
     environment:
       ENVIRONMENT: development
       POSTGRES_HOST: postgres
