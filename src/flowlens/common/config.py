@@ -187,18 +187,15 @@ class APISettings(BaseSettings):
     workers: int = Field(default=4, ge=1, le=32)
     reload: bool = False
 
-    # Security
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # Security - stored as comma-separated string, converted to list via property
+    cors_origins_str: str = Field(default="*", alias="cors_origins")
     rate_limit_requests: int = Field(default=100, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
-        """Parse comma-separated CORS origins string into list."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+    @property
+    def cors_origins(self) -> list[str]:
+        """Get CORS origins as a list."""
+        return [origin.strip() for origin in self.cors_origins_str.split(",") if origin.strip()]
 
     # Pagination
     default_page_size: int = Field(default=50, ge=1, le=1000)
