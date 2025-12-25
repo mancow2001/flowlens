@@ -104,35 +104,190 @@ These require agents or capabilities outside flow-based architecture:
 
 ---
 
-## Recommended Implementation Order
+## Prioritized Implementation Roadmap
 
-### Phase 1: Core Gaps (Immediate Priority)
+The following prioritization is based on:
+- **User Value**: Features that unlock the most functionality for end users
+- **Effort/Impact Ratio**: Low-effort, high-impact items first
+- **Dependencies**: Features that enable other features
+- **Production Readiness**: Security and compliance requirements for production use
 
-1. **Webhook notifications** - Low effort, enables integration ecosystem
-2. **Slack integration** - Common enterprise requirement
-3. **Alert rules configuration** - Makes alerting actionable
-4. **Audit logging** - Compliance requirement
+---
 
-### Phase 2: Discovery Enhancement
+### Sprint 1: Production Readiness (Security & Compliance)
+*These are blockers for any production deployment*
 
-5. **SSH-based discovery** - Linux/Unix asset enrichment
-6. **Docker container discovery** - Container environments
-7. **SNMP device discovery** - Network devices
-8. **WMI-based discovery** - Windows environments
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 1 | **Audit logging** | Medium | Compliance requirement; needed for SOC2, security audits |
+| 2 | **RBAC implementation** | Medium | Multi-user security; prevents unauthorized access |
+| 3 | **Webhook notifications** | Low | Enables integration ecosystem; unblocks external tooling |
 
-### Phase 3: Enterprise Features
+**Outcome**: Production-ready security posture
 
-9. **RBAC** - Multi-user security
-10. **Kubernetes discovery** - K8s environments
-11. **AWS/Azure cloud discovery** - Cloud workloads
-12. **SSO (SAML/OIDC)** - Enterprise authentication
+---
 
-### Phase 4: Advanced Features
+### Sprint 2: Actionable Alerting
+*Make the alerting system useful for operations*
 
-13. **Historical topology (time-slider)** - Change visualization
-14. **Saved views/dashboards** - User customization
-15. **CMDB integration** - ServiceNow sync
-16. **PagerDuty integration** - On-call alerting
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 4 | **Alert rules engine** | Medium | Without rules, alerts are noise; enables actionable notifications |
+| 5 | **Slack integration** | Low | #1 enterprise notification channel; immediate user value |
+| 6 | **PagerDuty integration** | Low | On-call alerting for critical dependencies; ops essential |
+| 7 | **Alert suppression windows** | Medium | Prevents alert fatigue during maintenance |
+
+**Outcome**: Ops teams can respond to meaningful alerts
+
+---
+
+### Sprint 3: Active Discovery (Linux/Containers)
+*Enrich flow-based discovery with active host interrogation*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 8 | **SSH-based discovery** | Medium | Linux servers are majority of infrastructure; hostname, OS, services |
+| 9 | **Docker container discovery** | Low | Containers are ubiquitous; low effort via Docker API |
+| 10 | **Kubernetes discovery** | Medium | K8s is standard orchestration; builds on Docker work |
+
+**Outcome**: Rich asset metadata for Linux/container environments
+
+---
+
+### Sprint 4: Network & Windows Discovery
+*Complete the discovery story for heterogeneous environments*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 11 | **SNMP device discovery** | Medium | Network devices (routers, switches, firewalls); critical for full topology |
+| 12 | **WMI-based discovery** | Medium | Windows environments; completes cross-platform story |
+| 13 | **Software inventory extraction** | Medium | Builds on SSH/WMI; enables application-level mapping |
+
+**Outcome**: Full cross-platform asset discovery
+
+---
+
+### Sprint 5: Cloud Discovery
+*Extend discovery to cloud-native infrastructure*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 14 | **AWS EC2/VPC discovery** | Medium | Largest cloud provider; VPC flow logs + EC2 metadata |
+| 15 | **Azure VM discovery** | Medium | Second largest; similar pattern to AWS |
+| 16 | **Credential vault integration** | Medium | Secure credential storage for cloud APIs |
+
+**Outcome**: Cloud workloads integrated into dependency map
+
+---
+
+### Sprint 6: Enterprise Authentication & Integration
+*Enterprise SSO and CMDB sync*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 17 | **SSO (SAML/OIDC)** | High | Enterprise requirement; centralized identity |
+| 18 | **CMDB integration (ServiceNow)** | High | Bidirectional sync; single source of truth |
+| 19 | **Data retention policies** | Medium | Compliance; storage management |
+
+**Outcome**: Enterprise-ready identity and CMDB integration
+
+---
+
+### Sprint 7: Advanced Visualization
+*Polish and power-user features*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 20 | **Historical topology (time-slider)** | Medium | Visualize changes over time; incident investigation |
+| 21 | **Saved views/dashboards** | Medium | User customization; team workflows |
+| 22 | **Diagram export (PNG/SVG)** | Low | Documentation; presentations |
+
+**Outcome**: Complete visualization feature set
+
+---
+
+### Sprint 8: Advanced Data Collection
+*Optional enhancements for deeper visibility*
+
+| # | Feature | Effort | Rationale |
+|---|---------|--------|-----------|
+| 23 | **Packet capture integration** | High | Deep protocol inspection; optional for most users |
+| 24 | **GCP discovery** | Medium | Third cloud provider; lower priority than AWS/Azure |
+
+**Outcome**: Extended data collection options
+
+---
+
+### Future/Backlog (P2)
+
+| Feature | Rationale for Deferral |
+|---------|------------------------|
+| GraphQL API | REST API sufficient; GraphQL adds complexity |
+| What-if scenario modeling | Nice-to-have; requires significant UI work |
+| Custom discovery plugins | Extensibility after core is stable |
+| Multi-tenancy | Enterprise-tier feature |
+| Multi-region deployment | Scale requirement; architecture change |
+| Load balancer detection | Heuristic-based; low accuracy without agents |
+| DNS dependency mapping | Requires DNS server integration |
+| Compliance reporting | Template-based; customer-specific |
+
+---
+
+## Quick Wins (Can Be Done Anytime)
+
+These are low-effort items that can fill gaps between sprints:
+
+| Feature | Effort | Notes |
+|---------|--------|-------|
+| Diagram export (PNG/SVG) | Low | Canvas/SVG serialization |
+| Webhook notifications | Low | HTTP POST on events |
+| Slack integration | Low | Webhook + optional API |
+| PagerDuty integration | Low | Events API v2 |
+| Docker container discovery | Low | Docker API queries |
+
+---
+
+## Dependencies Graph
+
+```
+Audit Logging ──┐
+                ├──> Production Ready ──> Enterprise Deployment
+RBAC ───────────┘
+
+Alert Rules ────┬──> Slack/PagerDuty ──> Actionable Ops
+                └──> Suppression Windows
+
+SSH Discovery ──┬──> Software Inventory
+                └──> Container Discovery ──> K8s Discovery
+
+SNMP + WMI ─────> Full Cross-Platform Discovery
+
+AWS/Azure ──────> Credential Vault ──> Cloud Native
+
+SSO ────────────> CMDB Integration ──> Enterprise Ready
+```
+
+---
+
+## Effort Estimates
+
+| Effort | Meaning | Typical Duration |
+|--------|---------|------------------|
+| Low | < 2 days | Simple integration, API wrapper |
+| Medium | 3-5 days | New subsystem, moderate complexity |
+| High | 1-2 weeks | Significant architecture, external dependencies |
+
+---
+
+## Risk Assessment
+
+| Feature | Risk | Mitigation |
+|---------|------|------------|
+| SSO (SAML/OIDC) | Complex protocol, IdP variations | Use established library (authlib) |
+| CMDB Integration | ServiceNow API complexity | Start with read-only sync |
+| Packet Capture | Performance impact, legal concerns | Make optional, document privacy |
+| Kubernetes | API versioning, RBAC complexity | Target specific K8s versions |
+| WMI Discovery | Windows security policies | Require domain admin guidance |
 
 ---
 
