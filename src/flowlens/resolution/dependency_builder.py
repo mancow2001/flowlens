@@ -11,8 +11,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flowlens.common.config import ResolutionSettings, get_settings
 from flowlens.common.logging import get_logger
 from flowlens.common.metrics import DEPENDENCIES_CREATED, DEPENDENCIES_UPDATED
+from flowlens.enrichment.resolvers.geoip import PrivateIPClassifier
 from flowlens.enrichment.resolvers.protocol import ProtocolResolver
 from flowlens.models.dependency import Dependency, DependencyHistory
 from flowlens.models.flow import FlowAggregate
@@ -32,21 +34,64 @@ class DependencyBuilder:
         self,
         asset_mapper: AssetMapper | None = None,
         protocol_resolver: ProtocolResolver | None = None,
+        settings: ResolutionSettings | None = None,
     ) -> None:
         """Initialize dependency builder.
 
         Args:
             asset_mapper: Asset mapper instance.
             protocol_resolver: Protocol resolver for service classification.
+            settings: Resolution settings for filtering configuration.
         """
         self._asset_mapper = asset_mapper or AssetMapper()
         self._protocol_resolver = protocol_resolver or ProtocolResolver()
+        self._settings = settings or get_settings().resolution
+        self._ip_classifier = PrivateIPClassifier()
+
+    def _should_exclude_external(
+        self,
+        src_ip: str,
+        dst_ip: str,
+    ) -> bool:
+        """Check if this flow should be excluded based on external IP settings.
+
+        Args:
+            src_ip: Source IP address.
+            dst_ip: Destination IP address.
+
+        Returns:
+            True if the flow should be excluded.
+        """
+        # If no exclusion settings are enabled, allow all
+        if not (
+            self._settings.exclude_external_ips
+            or self._settings.exclude_external_sources
+            or self._settings.exclude_external_targets
+        ):
+            return False
+
+        src_is_external = not self._ip_classifier.is_private(src_ip)
+        dst_is_external = not self._ip_classifier.is_private(dst_ip)
+
+        # Exclude if either end is external and exclude_external_ips is set
+        if self._settings.exclude_external_ips and (src_is_external or dst_is_external):
+            return True
+
+        # Exclude if source is external and exclude_external_sources is set
+        if self._settings.exclude_external_sources and src_is_external:
+            return True
+
+        # Exclude if target is external and exclude_external_targets is set
+        if self._settings.exclude_external_targets and dst_is_external:
+            return True
+
+        return False
 
     async def build_from_aggregate(
         self,
         db: AsyncSession,
         aggregate: FlowAggregate,
-    ) -> UUID:
+    ) -> UUID | None:
         """Build or update dependency from a flow aggregate.
 
         Args:
@@ -54,8 +99,20 @@ class DependencyBuilder:
             aggregate: Flow aggregate to process.
 
         Returns:
-            Dependency ID.
+            Dependency ID, or None if excluded.
         """
+        src_ip = str(aggregate.src_ip)
+        dst_ip = str(aggregate.dst_ip)
+
+        # Check external IP exclusion settings
+        if self._should_exclude_external(src_ip, dst_ip):
+            logger.debug(
+                "Skipping external IP dependency",
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+            )
+            return None
+
         # Map to assets
         src_asset_id, dst_asset_id = await self._asset_mapper.map_aggregate_to_assets(
             db, aggregate
@@ -65,10 +122,10 @@ class DependencyBuilder:
         if src_asset_id == dst_asset_id:
             logger.debug(
                 "Skipping self-loop",
-                src_ip=str(aggregate.src_ip),
-                dst_ip=str(aggregate.dst_ip),
+                src_ip=src_ip,
+                dst_ip=dst_ip,
             )
-            return src_asset_id
+            return None
 
         # Get or create dependency
         dep_id = await self._upsert_dependency(

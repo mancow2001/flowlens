@@ -162,6 +162,20 @@ class ResolutionSettings(BaseSettings):
     stale_threshold_hours: int = Field(default=24, ge=1)
     new_dependency_lookback_minutes: int = Field(default=30, ge=5)
 
+    # External IP filtering
+    exclude_external_ips: bool = Field(
+        default=False,
+        description="Exclude external (non-private) IPs from dependency mapping"
+    )
+    exclude_external_sources: bool = Field(
+        default=False,
+        description="Exclude dependencies where the source is external"
+    )
+    exclude_external_targets: bool = Field(
+        default=False,
+        description="Exclude dependencies where the target is external"
+    )
+
 
 class APISettings(BaseSettings):
     """Query/API Service configuration."""

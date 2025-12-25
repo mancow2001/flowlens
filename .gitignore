@@ -4,3 +4,4 @@
 /src/flowlens/common/__pycache__
 /src/flowlens/models/__pycache__
 *.pyc
+.DS_Store
