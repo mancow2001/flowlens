@@ -114,8 +114,17 @@ async def get_topology_graph(
         for d in dependencies
     ]
 
+    # Filter nodes to only include those with at least one edge
+    connected_asset_ids = set()
+    for edge in edges:
+        connected_asset_ids.add(edge.source)
+        connected_asset_ids.add(edge.target)
+
+    # Only include nodes that have dependencies
+    filtered_nodes = [node for node in nodes if node.id in connected_asset_ids]
+
     return TopologyGraph(
-        nodes=nodes,
+        nodes=filtered_nodes,
         edges=edges,
         generated_at=datetime.utcnow(),
     )
