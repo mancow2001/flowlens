@@ -20,7 +20,12 @@ if TYPE_CHECKING:
 
 
 class AssetType(str, Enum):
-    """Types of assets in the dependency graph."""
+    """Types of assets in the dependency graph.
+
+    Note: The is_internal field on Asset tracks whether an asset is
+    internal or external to the network. All auto-discovered assets
+    start as UNKNOWN.
+    """
 
     SERVER = "server"
     WORKSTATION = "workstation"
@@ -33,7 +38,6 @@ class AssetType(str, Enum):
     CONTAINER = "container"
     VIRTUAL_MACHINE = "virtual_machine"
     CLOUD_SERVICE = "cloud_service"
-    EXTERNAL = "external"
     UNKNOWN = "unknown"
 
 

@@ -92,8 +92,8 @@ export default function Assets() {
               asset.asset_type === 'server' && 'bg-blue-600',
               asset.asset_type === 'database' && 'bg-purple-600',
               asset.asset_type === 'workstation' && 'bg-green-600',
-              asset.asset_type === 'external' && 'bg-orange-600',
-              !['server', 'database', 'workstation', 'external'].includes(
+              !asset.is_internal && 'bg-orange-600',
+              asset.is_internal && !['server', 'database', 'workstation'].includes(
                 asset.asset_type ?? ''
               ) && 'bg-slate-600'
             )}
