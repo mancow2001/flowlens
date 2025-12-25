@@ -23,23 +23,6 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
 
 type GroupingMode = 'none' | 'location' | 'environment' | 'datacenter' | 'type';
 
-// Colors for node types
-const NODE_COLORS: Record<string, string> = {
-  server: '#3b82f6',
-  database: '#8b5cf6',
-  workstation: '#10b981',
-  network_device: '#f59e0b',
-  load_balancer: '#06b6d4',
-  firewall: '#ef4444',
-  container: '#14b8a6',
-  cloud_service: '#6366f1',
-  router: '#f59e0b',
-  switch: '#f59e0b',
-  storage: '#8b5cf6',
-  virtual_machine: '#3b82f6',
-  unknown: '#6b7280',
-};
-
 // Colors for groups (used for hulls)
 const GROUP_COLORS = [
   '#3b82f6', // blue
