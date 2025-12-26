@@ -9,6 +9,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   TagIcon,
+  BeakerIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
 import clsx from 'clsx';
@@ -20,6 +21,7 @@ const navigation = [
   { name: 'Dependencies', href: '/dependencies', icon: ArrowsRightLeftIcon },
   { name: 'Alerts', href: '/alerts', icon: BellAlertIcon },
   { name: 'Changes', href: '/changes', icon: ClockIcon },
+  { name: 'Analysis', href: '/analysis', icon: BeakerIcon },
 ];
 
 const settingsNavigation = [

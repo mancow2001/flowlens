@@ -16,6 +16,8 @@ from flowlens.common.logging import get_logger
 from flowlens.models.change import Alert, AlertSeverity
 from flowlens.notifications.base import Notification, NotificationManager, NotificationPriority
 from flowlens.notifications.email import EmailChannel, EmailSettings, create_alert_notification
+from flowlens.notifications.webhook import WebhookChannel, WebhookSettings as WebhookChannelSettings
+from flowlens.api.websocket.manager import EventType, broadcast_alert_event
 from flowlens.schemas.alert import (
     AlertAcknowledge,
     AlertCreate,
@@ -59,6 +61,18 @@ def get_notification_manager() -> NotificationManager:
                 validate_certs=settings.notifications.email.validate_certs,
             )
             _notification_manager.register_channel(EmailChannel(email_settings))
+
+        # Register webhook channel if enabled
+        if settings.notifications.webhook.enabled and settings.notifications.webhook.url:
+            webhook_settings = WebhookChannelSettings(
+                url=settings.notifications.webhook.url,
+                secret=settings.notifications.webhook.secret.get_secret_value() if settings.notifications.webhook.secret else None,
+                timeout=settings.notifications.webhook.timeout,
+                retry_count=settings.notifications.webhook.retry_count,
+                retry_delay=settings.notifications.webhook.retry_delay,
+                headers=settings.notifications.webhook.headers,
+            )
+            _notification_manager.register_channel(WebhookChannel(webhook_settings))
 
     return _notification_manager
 
@@ -254,6 +268,20 @@ async def acknowledge_alert(
         acknowledged_by=data.acknowledged_by,
     )
 
+    # Broadcast via WebSocket
+    try:
+        await broadcast_alert_event(
+            EventType.ALERT_ACKNOWLEDGED,
+            alert_id,
+            {
+                "severity": alert.severity.value if hasattr(alert.severity, 'value') else alert.severity,
+                "title": alert.title,
+                "acknowledged_by": data.acknowledged_by,
+            },
+        )
+    except Exception as e:
+        logger.warning("Failed to broadcast alert acknowledged event", error=str(e))
+
     return AlertResponse.model_validate(alert)
 
 
@@ -309,6 +337,20 @@ async def resolve_alert(
         alert_id=str(alert_id),
         resolved_by=data.resolved_by,
     )
+
+    # Broadcast via WebSocket
+    try:
+        await broadcast_alert_event(
+            EventType.ALERT_RESOLVED,
+            alert_id,
+            {
+                "severity": alert.severity.value if hasattr(alert.severity, 'value') else alert.severity,
+                "title": alert.title,
+                "resolved_by": data.resolved_by,
+            },
+        )
+    except Exception as e:
+        logger.warning("Failed to broadcast alert resolved event", error=str(e))
 
     return AlertResponse.model_validate(alert)
 
@@ -554,6 +596,19 @@ async def list_notification_channels() -> dict:
             "port": settings.notifications.email.port,
             "from_address": settings.notifications.email.from_address,
         } if settings.notifications.email.enabled else None,
+    })
+
+    # Webhook channel
+    channels.append({
+        "name": "webhook",
+        "enabled": settings.notifications.webhook.enabled,
+        "registered": "webhook" in manager.channels,
+        "config": {
+            "url": settings.notifications.webhook.url,
+            "timeout": settings.notifications.webhook.timeout,
+            "retry_count": settings.notifications.webhook.retry_count,
+            "has_secret": settings.notifications.webhook.secret is not None,
+        } if settings.notifications.webhook.enabled else None,
     })
 
     return {

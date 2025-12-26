@@ -246,6 +246,33 @@ class EmailSettings(BaseSettings):
     alert_recipients: list[str] = Field(default_factory=list)
 
 
+class WebhookSettings(BaseSettings):
+    """Webhook notification configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="WEBHOOK_")
+
+    enabled: bool = False
+    url: str | None = None
+    secret: SecretStr | None = None  # For HMAC signature
+    timeout: int = Field(default=30, ge=1, le=120)
+    retry_count: int = Field(default=3, ge=0, le=10)
+    retry_delay: float = Field(default=1.0, ge=0.1, le=30.0)  # Base delay for exponential backoff
+
+    # Custom headers (as JSON string, parsed to dict)
+    headers_json: str | None = None
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """Parse custom headers from JSON string."""
+        if not self.headers_json:
+            return {}
+        import json
+        try:
+            return json.loads(self.headers_json)
+        except json.JSONDecodeError:
+            return {}
+
+
 class NotificationSettings(BaseSettings):
     """Notification system configuration."""
 
@@ -256,10 +283,11 @@ class NotificationSettings(BaseSettings):
 
     # Channel-specific settings
     email: EmailSettings = Field(default_factory=EmailSettings)
+    webhook: WebhookSettings = Field(default_factory=WebhookSettings)
 
     # Alert routing rules (severity -> channels)
-    critical_channels: list[str] = Field(default_factory=lambda: ["email"])
-    high_channels: list[str] = Field(default_factory=lambda: ["email"])
+    critical_channels: list[str] = Field(default_factory=lambda: ["email", "webhook"])
+    high_channels: list[str] = Field(default_factory=lambda: ["email", "webhook"])
     warning_channels: list[str] = Field(default_factory=list)
     info_channels: list[str] = Field(default_factory=list)
 

@@ -17,6 +17,14 @@ from flowlens.common.metrics import CHANGES_DETECTED
 from flowlens.models.asset import Asset
 from flowlens.models.change import Alert, AlertSeverity, ChangeEvent, ChangeType
 from flowlens.models.dependency import Dependency
+from flowlens.notifications.base import Notification, NotificationManager, NotificationPriority
+from flowlens.notifications.email import EmailChannel, EmailSettings, create_alert_notification
+from flowlens.notifications.webhook import WebhookChannel, WebhookSettings
+from flowlens.api.websocket.manager import (
+    EventType,
+    broadcast_alert_event,
+    broadcast_change_event,
+)
 
 logger = get_logger(__name__)
 
@@ -37,12 +45,144 @@ class ChangeDetector:
         Args:
             settings: Resolution settings.
         """
+        app_settings = get_settings()
         if settings is None:
-            settings = get_settings().resolution
+            settings = app_settings.resolution
 
         self._stale_threshold_hours = settings.stale_threshold_hours
         self._traffic_spike_threshold = 2.0  # 2x baseline
         self._traffic_drop_threshold = 0.5  # 50% of baseline
+
+        # Initialize notification manager
+        self._notification_manager: NotificationManager | None = None
+        self._notification_settings = app_settings.notifications
+
+    def _get_notification_manager(self) -> NotificationManager:
+        """Get or create notification manager singleton."""
+        if self._notification_manager is None:
+            self._notification_manager = NotificationManager()
+            settings = self._notification_settings
+
+            # Register email channel if enabled
+            if settings.email.enabled:
+                email_settings = EmailSettings(
+                    host=settings.email.host,
+                    port=settings.email.port,
+                    username=settings.email.username,
+                    password=settings.email.password.get_secret_value() if settings.email.password else None,
+                    use_tls=settings.email.use_tls,
+                    start_tls=settings.email.start_tls,
+                    from_address=settings.email.from_address,
+                    from_name=settings.email.from_name,
+                    timeout=settings.email.timeout,
+                    validate_certs=settings.email.validate_certs,
+                )
+                self._notification_manager.register_channel(EmailChannel(email_settings))
+
+            # Register webhook channel if enabled
+            if settings.webhook.enabled and settings.webhook.url:
+                webhook_settings = WebhookSettings(
+                    url=settings.webhook.url,
+                    secret=settings.webhook.secret.get_secret_value() if settings.webhook.secret else None,
+                    timeout=settings.webhook.timeout,
+                    retry_count=settings.webhook.retry_count,
+                    retry_delay=settings.webhook.retry_delay,
+                    headers=settings.webhook.headers,
+                )
+                self._notification_manager.register_channel(WebhookChannel(webhook_settings))
+
+        return self._notification_manager
+
+    async def _dispatch_notification(
+        self,
+        alert: Alert,
+        event: ChangeEvent,
+    ) -> list[str]:
+        """Dispatch notification for an alert.
+
+        Routes to appropriate channels based on severity.
+
+        Args:
+            alert: Alert to notify about.
+            event: Source change event.
+
+        Returns:
+            List of channels that received the notification.
+        """
+        if not self._notification_settings.enabled:
+            return []
+
+        manager = self._get_notification_manager()
+        settings = self._notification_settings
+
+        # Determine channels based on severity
+        severity_str = alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
+        channels: list[str] = []
+
+        if severity_str == "critical":
+            channels = settings.critical_channels
+        elif severity_str == "error":
+            channels = settings.high_channels
+        elif severity_str == "warning":
+            channels = settings.warning_channels
+        elif severity_str == "info":
+            channels = settings.info_channels
+
+        # Filter to only registered channels
+        available_channels = [c for c in channels if c in manager.channels]
+        if not available_channels:
+            return []
+
+        # Create notification
+        notification = create_alert_notification(
+            alert_title=alert.title,
+            alert_message=alert.message,
+            severity=severity_str,
+            alert_id=str(alert.id),
+        )
+
+        # Build recipients dict
+        recipients: dict[str, list[str]] = {}
+
+        if "email" in available_channels:
+            email_recipients = settings.email.alert_recipients
+            if email_recipients:
+                recipients["email"] = email_recipients
+
+        if "webhook" in available_channels:
+            # Webhook uses a single URL, not multiple recipients
+            # Use "default" as a placeholder recipient
+            recipients["webhook"] = ["default"]
+
+        if not recipients:
+            return []
+
+        # Send notifications
+        try:
+            results = await manager.send(notification, recipients)
+
+            # Track successful channels
+            sent_channels = []
+            for channel_name, channel_results in results.items():
+                if any(r.success for r in channel_results):
+                    sent_channels.append(channel_name)
+
+            logger.info(
+                "Alert notification dispatched",
+                alert_id=str(alert.id),
+                severity=severity_str,
+                channels=sent_channels,
+            )
+
+            return sent_channels
+
+        except Exception as e:
+            logger.error(
+                "Failed to dispatch alert notification",
+                alert_id=str(alert.id),
+                error=str(e),
+            )
+            return []
 
     async def detect_stale_dependencies(
         self,
@@ -184,6 +324,23 @@ class ChangeDetector:
             summary=summary,
         )
 
+        # Broadcast via WebSocket
+        try:
+            await broadcast_change_event(
+                EventType.CHANGE_DETECTED,
+                event.id,
+                {
+                    "change_type": change_type.value,
+                    "summary": summary,
+                    "impact_score": impact_score,
+                    "asset_id": str(asset_id) if asset_id else None,
+                    "dependency_id": str(dependency_id) if dependency_id else None,
+                },
+            )
+        except Exception as e:
+            # Don't fail the event creation if broadcast fails
+            logger.warning("Failed to broadcast change event", error=str(e))
+
         return event
 
     async def create_alert_from_event(
@@ -193,6 +350,7 @@ class ChangeDetector:
         severity: AlertSeverity | None = None,
         title: str | None = None,
         message: str | None = None,
+        send_notification: bool = True,
     ) -> Alert:
         """Create an alert from a change event.
 
@@ -202,6 +360,7 @@ class ChangeDetector:
             severity: Alert severity (auto-determined if not provided).
             title: Alert title (derived from event if not provided).
             message: Alert message (derived from event if not provided).
+            send_notification: Whether to send notification (default: True).
 
         Returns:
             Created alert.
@@ -236,6 +395,32 @@ class ChangeDetector:
             severity=severity.value,
             title=title,
         )
+
+        # Dispatch notification
+        if send_notification:
+            sent_channels = await self._dispatch_notification(alert, event)
+            if sent_channels:
+                alert.notification_sent = True
+                alert.notification_channels = sent_channels
+                await db.flush()
+
+        # Broadcast via WebSocket
+        try:
+            await broadcast_alert_event(
+                EventType.ALERT_CREATED,
+                alert.id,
+                {
+                    "severity": severity.value,
+                    "title": title,
+                    "message": message[:200] if message else None,  # Truncate for broadcast
+                    "change_type": event.change_type.value,
+                    "asset_id": str(alert.asset_id) if alert.asset_id else None,
+                    "dependency_id": str(alert.dependency_id) if alert.dependency_id else None,
+                },
+            )
+        except Exception as e:
+            # Don't fail the alert creation if broadcast fails
+            logger.warning("Failed to broadcast alert event", error=str(e))
 
         return alert
 
@@ -435,9 +620,496 @@ class ChangeDetector:
 
         return new_external
 
+    async def detect_traffic_anomalies(
+        self,
+        db: AsyncSession,
+    ) -> dict[str, list[UUID]]:
+        """Detect traffic anomalies (spikes and drops).
+
+        Compares 24h traffic to 7d average to find anomalies.
+
+        Args:
+            db: Database session.
+
+        Returns:
+            Dict with 'spikes' and 'drops' lists of dependency IDs.
+        """
+        # Find dependencies with traffic spikes (>2x baseline)
+        spike_result = await db.execute(
+            select(Dependency.id)
+            .where(
+                Dependency.valid_to.is_(None),
+                Dependency.bytes_last_7d > 0,
+                # 24h traffic * 7 > 7d traffic * spike_threshold (comparing daily average)
+                (Dependency.bytes_last_24h * 7) > (Dependency.bytes_last_7d * self._traffic_spike_threshold),
+            )
+            .limit(100)
+        )
+        spikes = [row[0] for row in spike_result.fetchall()]
+
+        # Find dependencies with traffic drops (<50% of baseline)
+        drop_result = await db.execute(
+            select(Dependency.id)
+            .where(
+                Dependency.valid_to.is_(None),
+                Dependency.bytes_last_7d > 1000000,  # At least 1MB over 7d to be significant
+                # 24h traffic * 7 < 7d traffic * drop_threshold (comparing daily average)
+                (Dependency.bytes_last_24h * 7) < (Dependency.bytes_last_7d * self._traffic_drop_threshold),
+            )
+            .limit(100)
+        )
+        drops = [row[0] for row in drop_result.fetchall()]
+
+        logger.info(
+            "Detected traffic anomalies",
+            spikes=len(spikes),
+            drops=len(drops),
+        )
+
+        return {"spikes": spikes, "drops": drops}
+
+    async def process_traffic_anomalies(
+        self,
+        db: AsyncSession,
+        anomalies: dict[str, list[UUID]],
+        create_alerts: bool = True,
+    ) -> int:
+        """Process traffic anomalies - create events and optionally alerts.
+
+        Args:
+            db: Database session.
+            anomalies: Dict with 'spikes' and 'drops' lists.
+            create_alerts: Whether to create alerts.
+
+        Returns:
+            Number of events created.
+        """
+        count = 0
+
+        # Process spikes
+        for dep_id in anomalies.get("spikes", []):
+            result = await db.execute(
+                select(Dependency).where(Dependency.id == dep_id)
+            )
+            dep = result.scalar_one_or_none()
+            if not dep:
+                continue
+
+            daily_avg = dep.bytes_last_7d / 7 if dep.bytes_last_7d > 0 else 0
+            spike_ratio = dep.bytes_last_24h / daily_avg if daily_avg > 0 else 0
+
+            event = await self.create_change_event(
+                db,
+                change_type=ChangeType.DEPENDENCY_TRAFFIC_SPIKE,
+                summary=f"Traffic spike detected: {spike_ratio:.1f}x normal",
+                dependency_id=dep_id,
+                source_asset_id=dep.source_asset_id,
+                target_asset_id=dep.target_asset_id,
+                previous_state={
+                    "bytes_7d_avg_daily": int(daily_avg),
+                },
+                new_state={
+                    "bytes_last_24h": dep.bytes_last_24h,
+                    "spike_ratio": round(spike_ratio, 2),
+                },
+                impact_score=min(50 + int(spike_ratio * 10), 100),
+                metadata={
+                    "port": dep.target_port,
+                    "protocol": dep.protocol,
+                },
+            )
+
+            if create_alerts:
+                await self.create_alert_from_event(db, event)
+            count += 1
+
+        # Process drops
+        for dep_id in anomalies.get("drops", []):
+            result = await db.execute(
+                select(Dependency).where(Dependency.id == dep_id)
+            )
+            dep = result.scalar_one_or_none()
+            if not dep:
+                continue
+
+            daily_avg = dep.bytes_last_7d / 7 if dep.bytes_last_7d > 0 else 0
+            drop_ratio = dep.bytes_last_24h / daily_avg if daily_avg > 0 else 0
+
+            event = await self.create_change_event(
+                db,
+                change_type=ChangeType.DEPENDENCY_TRAFFIC_DROP,
+                summary=f"Traffic drop detected: {drop_ratio:.0%} of normal",
+                dependency_id=dep_id,
+                source_asset_id=dep.source_asset_id,
+                target_asset_id=dep.target_asset_id,
+                previous_state={
+                    "bytes_7d_avg_daily": int(daily_avg),
+                },
+                new_state={
+                    "bytes_last_24h": dep.bytes_last_24h,
+                    "drop_ratio": round(drop_ratio, 2),
+                },
+                impact_score=min(60 + int((1 - drop_ratio) * 40), 100),
+                metadata={
+                    "port": dep.target_port,
+                    "protocol": dep.protocol,
+                },
+            )
+
+            if create_alerts:
+                await self.create_alert_from_event(db, event)
+            count += 1
+
+        return count
+
+    async def detect_new_assets(
+        self,
+        db: AsyncSession,
+        since: datetime | None = None,
+    ) -> list[UUID]:
+        """Detect newly discovered assets.
+
+        Args:
+            db: Database session.
+            since: Check for assets created after this time.
+
+        Returns:
+            List of new asset IDs.
+        """
+        if since is None:
+            since = datetime.utcnow() - timedelta(hours=1)
+
+        result = await db.execute(
+            select(Asset.id)
+            .where(
+                Asset.first_seen >= since,
+                Asset.deleted_at.is_(None),
+            )
+            .limit(100)
+        )
+
+        new_assets = [row[0] for row in result.fetchall()]
+
+        logger.info(
+            "Detected new assets",
+            count=len(new_assets),
+            since=since.isoformat(),
+        )
+
+        return new_assets
+
+    async def process_new_assets(
+        self,
+        db: AsyncSession,
+        asset_ids: list[UUID],
+        create_alerts: bool = True,
+    ) -> int:
+        """Process new assets - create events and optionally alerts.
+
+        Args:
+            db: Database session.
+            asset_ids: List of new asset IDs.
+            create_alerts: Whether to create alerts.
+
+        Returns:
+            Number of events created.
+        """
+        count = 0
+
+        for asset_id in asset_ids:
+            result = await db.execute(
+                select(Asset).where(Asset.id == asset_id)
+            )
+            asset = result.scalar_one_or_none()
+            if not asset:
+                continue
+
+            event = await self.create_change_event(
+                db,
+                change_type=ChangeType.ASSET_DISCOVERED,
+                summary=f"New asset discovered: {asset.name}",
+                asset_id=asset_id,
+                new_state={
+                    "name": asset.name,
+                    "ip_address": str(asset.ip_address),
+                    "asset_type": asset.asset_type.value if hasattr(asset.asset_type, 'value') else asset.asset_type,
+                    "is_internal": asset.is_internal,
+                },
+                metadata={
+                    "hostname": asset.hostname,
+                    "environment": asset.environment,
+                },
+            )
+
+            if create_alerts:
+                await self.create_alert_from_event(db, event)
+            count += 1
+
+        return count
+
+    async def detect_new_dependencies(
+        self,
+        db: AsyncSession,
+        since: datetime | None = None,
+    ) -> list[UUID]:
+        """Detect newly created dependencies.
+
+        Args:
+            db: Database session.
+            since: Check for dependencies created after this time.
+
+        Returns:
+            List of new dependency IDs.
+        """
+        if since is None:
+            since = datetime.utcnow() - timedelta(hours=1)
+
+        result = await db.execute(
+            select(Dependency.id)
+            .where(
+                Dependency.first_seen >= since,
+                Dependency.valid_to.is_(None),
+            )
+            .limit(100)
+        )
+
+        new_deps = [row[0] for row in result.fetchall()]
+
+        logger.info(
+            "Detected new dependencies",
+            count=len(new_deps),
+            since=since.isoformat(),
+        )
+
+        return new_deps
+
+    async def process_new_dependencies(
+        self,
+        db: AsyncSession,
+        dep_ids: list[UUID],
+        create_alerts: bool = True,
+    ) -> int:
+        """Process new dependencies - create events and optionally alerts.
+
+        Args:
+            db: Database session.
+            dep_ids: List of new dependency IDs.
+            create_alerts: Whether to create alerts.
+
+        Returns:
+            Number of events created.
+        """
+        count = 0
+
+        for dep_id in dep_ids:
+            result = await db.execute(
+                select(Dependency).where(Dependency.id == dep_id)
+            )
+            dep = result.scalar_one_or_none()
+            if not dep:
+                continue
+
+            # Get asset names
+            source_name = "Unknown"
+            target_name = "Unknown"
+
+            source_result = await db.execute(
+                select(Asset.name).where(Asset.id == dep.source_asset_id)
+            )
+            source_row = source_result.first()
+            if source_row:
+                source_name = source_row[0]
+
+            target_result = await db.execute(
+                select(Asset.name).where(Asset.id == dep.target_asset_id)
+            )
+            target_row = target_result.first()
+            if target_row:
+                target_name = target_row[0]
+
+            event = await self.create_change_event(
+                db,
+                change_type=ChangeType.DEPENDENCY_CREATED,
+                summary=f"New dependency: {source_name} → {target_name}:{dep.target_port}",
+                dependency_id=dep_id,
+                source_asset_id=dep.source_asset_id,
+                target_asset_id=dep.target_asset_id,
+                new_state={
+                    "target_port": dep.target_port,
+                    "protocol": dep.protocol,
+                },
+                metadata={
+                    "source_name": source_name,
+                    "target_name": target_name,
+                },
+            )
+
+            if create_alerts:
+                await self.create_alert_from_event(db, event)
+            count += 1
+
+        return count
+
+    async def process_offline_assets(
+        self,
+        db: AsyncSession,
+        asset_ids: list[UUID],
+        create_alerts: bool = True,
+    ) -> int:
+        """Process offline assets - create events and optionally alerts.
+
+        Args:
+            db: Database session.
+            asset_ids: List of offline asset IDs.
+            create_alerts: Whether to create alerts.
+
+        Returns:
+            Number of events created.
+        """
+        count = 0
+
+        for asset_id in asset_ids:
+            result = await db.execute(
+                select(Asset).where(Asset.id == asset_id)
+            )
+            asset = result.scalar_one_or_none()
+            if not asset:
+                continue
+
+            hours_offline = (datetime.utcnow() - asset.last_seen).total_seconds() / 3600
+
+            event = await self.create_change_event(
+                db,
+                change_type=ChangeType.ASSET_OFFLINE,
+                summary=f"Asset offline: {asset.name} (no activity for {hours_offline:.0f}h)",
+                asset_id=asset_id,
+                previous_state={
+                    "last_seen": asset.last_seen.isoformat(),
+                },
+                impact_score=80 if asset.is_critical else 40,
+                affected_assets_count=asset.connections_in + asset.connections_out,
+                metadata={
+                    "hours_offline": round(hours_offline, 1),
+                    "is_critical": asset.is_critical,
+                },
+            )
+
+            if create_alerts:
+                await self.create_alert_from_event(db, event)
+            count += 1
+
+        return count
+
+    async def process_new_external_connections(
+        self,
+        db: AsyncSession,
+        dep_ids: list[UUID],
+        create_alerts: bool = True,
+    ) -> int:
+        """Process new external connections - create events and optionally alerts.
+
+        Args:
+            db: Database session.
+            dep_ids: List of dependency IDs with external targets.
+            create_alerts: Whether to create alerts.
+
+        Returns:
+            Number of events created.
+        """
+        count = 0
+
+        for dep_id in dep_ids:
+            result = await db.execute(
+                select(Dependency).where(Dependency.id == dep_id)
+            )
+            dep = result.scalar_one_or_none()
+            if not dep:
+                continue
+
+            # Get asset info
+            source_result = await db.execute(
+                select(Asset).where(Asset.id == dep.source_asset_id)
+            )
+            source = source_result.scalar_one_or_none()
+
+            target_result = await db.execute(
+                select(Asset).where(Asset.id == dep.target_asset_id)
+            )
+            target = target_result.scalar_one_or_none()
+
+            source_name = source.name if source else "Unknown"
+            target_name = target.name if target else "Unknown"
+            target_ip = str(target.ip_address) if target else "Unknown"
+
+            event = await self.create_change_event(
+                db,
+                change_type=ChangeType.NEW_EXTERNAL_CONNECTION,
+                summary=f"New external connection: {source_name} → {target_name} ({target_ip})",
+                dependency_id=dep_id,
+                source_asset_id=dep.source_asset_id,
+                target_asset_id=dep.target_asset_id,
+                new_state={
+                    "target_port": dep.target_port,
+                    "protocol": dep.protocol,
+                    "target_ip": target_ip,
+                },
+                impact_score=50,  # External connections are moderately concerning
+                metadata={
+                    "source_name": source_name,
+                    "target_name": target_name,
+                },
+            )
+
+            if create_alerts:
+                await self.create_alert_from_event(db, event)
+            count += 1
+
+        return count
+
+    async def detect_critical_path_changes(
+        self,
+        db: AsyncSession,
+        since: datetime | None = None,
+    ) -> list[UUID]:
+        """Detect changes affecting critical assets.
+
+        Args:
+            db: Database session.
+            since: Check for changes after this time.
+
+        Returns:
+            List of dependency IDs affecting critical paths.
+        """
+        if since is None:
+            since = datetime.utcnow() - timedelta(hours=1)
+
+        # Find dependencies to/from critical assets that changed recently
+        result = await db.execute(
+            select(Dependency.id)
+            .join(Asset, (Dependency.source_asset_id == Asset.id) | (Dependency.target_asset_id == Asset.id))
+            .where(
+                Asset.is_critical == True,
+                Dependency.updated_at >= since,
+                Dependency.valid_to.is_(None),
+            )
+            .distinct()
+            .limit(50)
+        )
+
+        critical_deps = [row[0] for row in result.fetchall()]
+
+        logger.info(
+            "Detected critical path changes",
+            count=len(critical_deps),
+            since=since.isoformat(),
+        )
+
+        return critical_deps
+
     async def run_detection_cycle(
         self,
         db: AsyncSession,
+        since: datetime | None = None,
     ) -> dict[str, Any]:
         """Run a full detection cycle.
 
@@ -445,17 +1117,28 @@ class ChangeDetector:
         - Stale dependencies
         - Offline assets
         - New external connections
+        - Traffic anomalies (spikes/drops)
+        - New assets
+        - New dependencies
 
         Args:
             db: Database session.
+            since: Check for changes since this time (default: 1 hour ago).
 
         Returns:
             Summary of detected changes.
         """
+        if since is None:
+            since = datetime.utcnow() - timedelta(hours=1)
+
         results = {
             "stale_dependencies": 0,
             "offline_assets": 0,
             "new_external_connections": 0,
+            "traffic_spikes": 0,
+            "traffic_drops": 0,
+            "new_assets": 0,
+            "new_dependencies": 0,
             "events_created": 0,
             "alerts_created": 0,
         }
@@ -475,9 +1158,53 @@ class ChangeDetector:
         offline_assets = await self.detect_offline_assets(db)
         results["offline_assets"] = len(offline_assets)
 
+        if offline_assets:
+            events_created = await self.process_offline_assets(
+                db, offline_assets[:50]
+            )
+            results["events_created"] += events_created
+            results["alerts_created"] += events_created
+
         # Detect new external connections
-        new_external = await self.check_new_external_connections(db)
+        new_external = await self.check_new_external_connections(db, since)
         results["new_external_connections"] = len(new_external)
+
+        if new_external:
+            events_created = await self.process_new_external_connections(
+                db, new_external[:50]
+            )
+            results["events_created"] += events_created
+            results["alerts_created"] += events_created
+
+        # Detect traffic anomalies
+        anomalies = await self.detect_traffic_anomalies(db)
+        results["traffic_spikes"] = len(anomalies.get("spikes", []))
+        results["traffic_drops"] = len(anomalies.get("drops", []))
+
+        if anomalies.get("spikes") or anomalies.get("drops"):
+            events_created = await self.process_traffic_anomalies(db, anomalies)
+            results["events_created"] += events_created
+            results["alerts_created"] += events_created
+
+        # Detect new assets
+        new_assets = await self.detect_new_assets(db, since)
+        results["new_assets"] = len(new_assets)
+
+        if new_assets:
+            events_created = await self.process_new_assets(db, new_assets[:50])
+            results["events_created"] += events_created
+            results["alerts_created"] += events_created
+
+        # Detect new dependencies
+        new_deps = await self.detect_new_dependencies(db, since)
+        results["new_dependencies"] = len(new_deps)
+
+        if new_deps:
+            events_created = await self.process_new_dependencies(db, new_deps[:100])
+            results["events_created"] += events_created
+            results["alerts_created"] += events_created
+
+        await db.commit()
 
         logger.info(
             "Detection cycle complete",
