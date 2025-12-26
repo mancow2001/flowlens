@@ -313,6 +313,53 @@ class PagerDutySettings(BaseSettings):
     retry_delay: float = Field(default=1.0, ge=0.1, le=30.0)
 
 
+class ClassificationSettings(BaseSettings):
+    """Asset Classification Engine configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="CLASSIFICATION_")
+
+    # Worker settings
+    poll_interval_ms: int = Field(default=30000, ge=1000, le=300000)
+    batch_size: int = Field(default=100, ge=10, le=1000)
+    worker_count: int = Field(default=1, ge=1, le=8)
+
+    # Observation requirements
+    min_observation_hours: int = Field(default=24, ge=1, le=168)
+    min_flows_required: int = Field(default=100, ge=10, le=10000)
+
+    # Confidence thresholds
+    auto_update_confidence_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
+    high_confidence_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+    # Feature windows
+    feature_windows: list[str] = Field(
+        default_factory=lambda: ["5min", "1hour", "24hour"]
+    )
+
+    # Reclassification interval
+    reclassify_interval_hours: int = Field(default=24, ge=1, le=168)
+
+    # Port definitions for classification signals
+    db_ports: list[int] = Field(
+        default_factory=lambda: [1433, 1521, 3306, 5432, 27017, 6379, 9042, 7000]
+    )
+    storage_ports: list[int] = Field(
+        default_factory=lambda: [2049, 445, 3260, 111]
+    )
+    web_ports: list[int] = Field(
+        default_factory=lambda: [80, 443, 8080, 8443]
+    )
+    ssh_ports: list[int] = Field(
+        default_factory=lambda: [22]
+    )
+
+    # Well-known port threshold (ports <= this are well-known)
+    well_known_port_max: int = Field(default=1023, ge=0, le=65535)
+
+    # Ephemeral port threshold (ports >= this are ephemeral)
+    ephemeral_port_min: int = Field(default=32768, ge=1024, le=65535)
+
+
 class NotificationSettings(BaseSettings):
     """Notification system configuration."""
 
@@ -358,6 +405,7 @@ class Settings(BaseSettings):
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
     enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
     resolution: ResolutionSettings = Field(default_factory=ResolutionSettings)
+    classification: ClassificationSettings = Field(default_factory=ClassificationSettings)
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)

@@ -146,6 +146,30 @@ class Asset(SoftDeleteModel):
         nullable=False,
     )
 
+    # Auto-classification fields
+    classification_locked: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+    )
+
+    classification_confidence: Mapped[float | None] = mapped_column(
+        nullable=True,
+    )
+
+    classification_scores: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    last_classified_at: Mapped[datetime | None] = mapped_column(
+        nullable=True,
+    )
+
+    classification_method: Mapped[str | None] = mapped_column(
+        String(50),  # 'auto', 'manual', 'api'
+        nullable=True,
+    )
+
     # Ownership
     owner: Mapped[str | None] = mapped_column(
         String(255),

@@ -140,6 +140,30 @@ RESOLUTION_PROCESSED = Counter(
     "Total number of flow records processed by resolution",
 )
 
+# Classification metrics
+CLASSIFICATION_PROCESSED = Counter(
+    "flowlens_classification_processed_total",
+    "Total number of assets processed by classification engine",
+)
+
+CLASSIFICATION_ERRORS = Counter(
+    "flowlens_classification_errors_total",
+    "Total number of classification errors",
+    ["error_type"],
+)
+
+CLASSIFICATION_UPDATES = Counter(
+    "flowlens_classification_updates_total",
+    "Total number of asset type updates from classification",
+    ["from_type", "to_type"],
+)
+
+CLASSIFICATION_CONFIDENCE = Histogram(
+    "flowlens_classification_confidence",
+    "Distribution of classification confidence scores",
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
 # API metrics
 API_REQUESTS = Counter(
     "flowlens_api_requests_total",
