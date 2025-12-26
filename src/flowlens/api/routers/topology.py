@@ -65,7 +65,7 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
                     cr.location,
                     cr.asset_type,
                     cr.is_internal
-                FROM unnest(:ip_addrs::inet[]) AS ip_addr
+                FROM unnest(CAST(:ip_addrs AS inet[])) AS ip_addr
                 LEFT JOIN LATERAL (
                     SELECT
                         environment,

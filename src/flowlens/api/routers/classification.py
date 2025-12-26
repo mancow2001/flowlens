@@ -96,7 +96,7 @@ async def classify_ip(
 
     # Call the database function
     result = await db.execute(
-        text("SELECT * FROM get_ip_classification(:ip_addr::inet)"),
+        text("SELECT * FROM get_ip_classification(CAST(:ip_addr AS inet))"),
         {"ip_addr": ip_address},
     )
     row = result.fetchone()
@@ -144,7 +144,7 @@ async def classify_ip_debug(
 
     # Call the database function
     result = await db.execute(
-        text("SELECT * FROM get_all_ip_classifications(:ip_addr::inet)"),
+        text("SELECT * FROM get_all_ip_classifications(CAST(:ip_addr AS inet))"),
         {"ip_addr": ip_address},
     )
     rows = result.fetchall()
