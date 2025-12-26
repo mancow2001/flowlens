@@ -384,17 +384,24 @@ export default function AssetDetail() {
                   {blastRadius.total_affected}
                 </div>
                 <div className="text-sm text-slate-400">
-                  Potentially affected assets
+                  Potentially affected assets ({blastRadius.critical_affected} critical)
                 </div>
               </div>
-              {blastRadius.by_depth && Object.keys(blastRadius.by_depth).length > 0 && (
+              {blastRadius.affected_assets && blastRadius.affected_assets.length > 0 && (
                 <div className="space-y-2">
-                  {Object.entries(blastRadius.by_depth).map(([depth, count]) => (
-                    <div key={depth} className="flex justify-between">
-                      <span className="text-slate-400">Depth {depth}</span>
-                      <span className="text-white">{count} assets</span>
-                    </div>
-                  ))}
+                  {(() => {
+                    // Group affected assets by depth
+                    const byDepth: Record<number, number> = {};
+                    blastRadius.affected_assets.forEach((asset) => {
+                      byDepth[asset.depth] = (byDepth[asset.depth] || 0) + 1;
+                    });
+                    return Object.entries(byDepth).map(([depth, count]) => (
+                      <div key={depth} className="flex justify-between">
+                        <span className="text-slate-400">Depth {depth}</span>
+                        <span className="text-white">{count} assets</span>
+                      </div>
+                    ));
+                  })()}
                 </div>
               )}
             </div>

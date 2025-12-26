@@ -9,7 +9,6 @@ import type {
   AlertListResponse,
   ChangeEventListResponse,
   ImpactAnalysis,
-  BlastRadius,
   AlertSummary,
   ChangeEventSummary,
   SavedView,
