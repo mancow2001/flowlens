@@ -432,6 +432,8 @@ async def find_path(
     path = list(row.path)
 
     # Get edges along the path (check both directions since path is bidirectional)
+    # Note: There may be multiple dependencies between the same assets (different ports),
+    # so we use .first() instead of .scalar_one_or_none()
     edges = []
     for i in range(len(path) - 1):
         # Try forward direction first
@@ -440,9 +442,9 @@ async def find_path(
                 Dependency.source_asset_id == path[i],
                 Dependency.target_asset_id == path[i + 1],
                 Dependency.valid_to.is_(None),
-            )
+            ).limit(1)
         )
-        dep = edge_result.scalar_one_or_none()
+        dep = edge_result.scalar()
 
         # If not found, try reverse direction
         if not dep:
@@ -451,9 +453,9 @@ async def find_path(
                     Dependency.source_asset_id == path[i + 1],
                     Dependency.target_asset_id == path[i],
                     Dependency.valid_to.is_(None),
-                )
+                ).limit(1)
             )
-            dep = edge_result.scalar_one_or_none()
+            dep = edge_result.scalar()
 
         if dep:
             edges.append(
