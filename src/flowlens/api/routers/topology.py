@@ -75,7 +75,7 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
                         is_internal
                     FROM classification_rules
                     WHERE is_active = true
-                      AND ip_addr <<= cidr::inet
+                      AND ip_addr <<= cidr
                     ORDER BY masklen(cidr) DESC, priority ASC
                     LIMIT 1
                 ) cr ON true

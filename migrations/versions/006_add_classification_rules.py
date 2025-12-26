@@ -94,7 +94,7 @@ def upgrade() -> None:
                 cr.name as rule_name
             FROM classification_rules cr
             WHERE cr.is_active = true
-              AND ip_addr <<= cr.cidr::inet
+              AND ip_addr <<= cr.cidr
             ORDER BY
                 masklen(cr.cidr) DESC,  -- More specific CIDR first
                 cr.priority ASC          -- Lower priority number wins for ties
@@ -124,7 +124,7 @@ def upgrade() -> None:
             SELECT cr.id INTO winning_id
             FROM classification_rules cr
             WHERE cr.is_active = true
-              AND ip_addr <<= cr.cidr::inet
+              AND ip_addr <<= cr.cidr
             ORDER BY masklen(cr.cidr) DESC, cr.priority ASC
             LIMIT 1;
 
@@ -141,7 +141,7 @@ def upgrade() -> None:
                 (cr.id = winning_id) as is_winning
             FROM classification_rules cr
             WHERE cr.is_active = true
-              AND ip_addr <<= cr.cidr::inet
+              AND ip_addr <<= cr.cidr
             ORDER BY masklen(cr.cidr) DESC, cr.priority ASC;
         END;
         $$ LANGUAGE plpgsql;
