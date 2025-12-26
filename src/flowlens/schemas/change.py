@@ -46,7 +46,7 @@ class ChangeEventResponse(ChangeEventBase):
     affected_assets_count: int = 0
     is_processed: bool = False
     processed_at: datetime | None = None
-    metadata: dict | None = None
+    metadata: dict | None = Field(default=None, validation_alias="extra_data")
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +55,7 @@ class ChangeEventResponse(ChangeEventBase):
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class ChangeEventSummary(BaseModel):
