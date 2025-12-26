@@ -165,7 +165,10 @@ async def detect_spof(
 
     # Query to find assets with high inbound dependency count
     # and calculate a risk score
-    query = text("""
+    # Build query dynamically to avoid asyncpg type inference issues with NULL
+    env_filter = "AND a.environment = :environment" if environment else ""
+
+    query = text(f"""
         WITH dependency_counts AS (
             SELECT
                 d.target_asset_id,
@@ -192,19 +195,19 @@ async def detect_spof(
         FROM dependency_counts dc
         JOIN assets a ON a.id = dc.target_asset_id
         WHERE a.deleted_at IS NULL
-          AND (:environment IS NULL OR a.environment = :environment)
+          {env_filter}
         ORDER BY risk_score DESC
         LIMIT :limit
     """)
 
-    result = await db.execute(
-        query,
-        {
-            "min_dependents": min_dependents,
-            "environment": environment,
-            "limit": limit,
-        },
-    )
+    params: dict = {
+        "min_dependents": min_dependents,
+        "limit": limit,
+    }
+    if environment:
+        params["environment"] = environment
+
+    result = await db.execute(query, params)
     rows = result.fetchall()
 
     candidates = []
@@ -242,14 +245,15 @@ async def detect_spof(
         )
 
     # Get total analyzed count
-    count_result = await db.execute(
-        text("""
-            SELECT COUNT(DISTINCT id) FROM assets
-            WHERE deleted_at IS NULL
-              AND (:environment IS NULL OR environment = :environment)
-        """),
-        {"environment": environment},
-    )
+    # Build count query dynamically to avoid asyncpg type inference issues with NULL
+    count_env_filter = "AND environment = :environment" if environment else ""
+    count_query = text(f"""
+        SELECT COUNT(DISTINCT id) FROM assets
+        WHERE deleted_at IS NULL
+          {count_env_filter}
+    """)
+    count_params: dict = {"environment": environment} if environment else {}
+    count_result = await db.execute(count_query, count_params)
     total_analyzed = count_result.scalar() or 0
 
     return SPOFAnalysisResult(
