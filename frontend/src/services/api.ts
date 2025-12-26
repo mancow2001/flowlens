@@ -12,6 +12,9 @@ import type {
   BlastRadius,
   AlertSummary,
   ChangeEventSummary,
+  SavedView,
+  SavedViewSummary,
+  ViewConfig,
 } from '../types';
 
 const api = axios.create({
@@ -92,12 +95,24 @@ export const topologyApi = {
     asset_id?: string;
     depth?: number;
     include_inactive?: boolean;
+    as_of?: string;  // ISO timestamp for historical view
+    asset_types?: string[];
+    environments?: string[];
+    datacenters?: string[];
+    include_external?: boolean;
+    min_bytes_24h?: number;
   }): Promise<TopologyData> => {
     // POST with filter body
     const { data } = await api.post('/topology/graph', {
       asset_id: params?.asset_id,
       depth: params?.depth,
       include_inactive: params?.include_inactive,
+      as_of: params?.as_of,
+      asset_types: params?.asset_types,
+      environments: params?.environments,
+      datacenters: params?.datacenters,
+      include_external: params?.include_external,
+      min_bytes_24h: params?.min_bytes_24h,
     });
     return data;
   },
@@ -110,6 +125,55 @@ export const topologyApi = {
       params: { depth },
     });
     return data;
+  },
+};
+
+// Saved Views endpoints
+export const savedViewsApi = {
+  list: async (includePublic: boolean = true): Promise<SavedViewSummary[]> => {
+    const { data } = await api.get('/saved-views', {
+      params: { include_public: includePublic },
+    });
+    return data;
+  },
+
+  get: async (id: string): Promise<SavedView> => {
+    const { data } = await api.get(`/saved-views/${id}`);
+    return data;
+  },
+
+  getDefault: async (): Promise<SavedView | null> => {
+    const { data } = await api.get('/saved-views/default');
+    return data;
+  },
+
+  create: async (view: {
+    name: string;
+    description?: string;
+    is_public?: boolean;
+    is_default?: boolean;
+    config: ViewConfig;
+  }): Promise<SavedView> => {
+    const { data } = await api.post('/saved-views', view);
+    return data;
+  },
+
+  update: async (
+    id: string,
+    updates: Partial<{
+      name: string;
+      description: string;
+      is_public: boolean;
+      is_default: boolean;
+      config: ViewConfig;
+    }>
+  ): Promise<SavedView> => {
+    const { data } = await api.patch(`/saved-views/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/saved-views/${id}`);
   },
 };
 

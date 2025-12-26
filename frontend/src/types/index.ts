@@ -280,3 +280,51 @@ export interface DashboardStats {
   changes_24h: number;
   changes_7d: number;
 }
+
+// Saved view types
+export interface ViewFilters {
+  asset_types?: string[];
+  environments?: string[];
+  datacenters?: string[];
+  include_external: boolean;
+  min_bytes_24h: number;
+  as_of?: string;
+}
+
+export interface ViewZoom {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export interface ViewConfig {
+  filters: ViewFilters;
+  grouping: 'none' | 'location' | 'environment' | 'datacenter' | 'type';
+  zoom: ViewZoom;
+  selected_asset_ids: string[];
+  layout_positions: Record<string, { x: number; y: number }>;
+}
+
+export interface SavedView {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string | null;
+  is_public: boolean;
+  is_default: boolean;
+  config: ViewConfig;
+  last_accessed_at: string | null;
+  access_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedViewSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  is_default: boolean;
+  access_count: number;
+  created_at: string;
+}

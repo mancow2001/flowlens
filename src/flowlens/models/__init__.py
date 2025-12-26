@@ -5,6 +5,7 @@ from flowlens.models.base import Base
 from flowlens.models.change import Alert, AlertSeverity, ChangeEvent, ChangeType
 from flowlens.models.dependency import Dependency, DependencyHistory
 from flowlens.models.flow import FlowAggregate, FlowRecord
+from flowlens.models.saved_view import SavedView
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "ChangeType",
     "Alert",
     "AlertSeverity",
+    "SavedView",
 ]

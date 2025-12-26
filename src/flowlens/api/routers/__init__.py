@@ -7,6 +7,7 @@ from flowlens.api.routers import (
     assets,
     changes,
     dependencies,
+    saved_views,
     topology,
     ws,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "assets",
     "changes",
     "dependencies",
+    "saved_views",
     "topology",
     "ws",
 ]

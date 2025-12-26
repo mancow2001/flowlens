@@ -12,7 +12,7 @@
 |----------|--------|---------|
 | **Flow Ingestion** | 95% | NetFlow v5/v9, sFlow, IPFIX parsers with Kafka/PostgreSQL routing |
 | **Dependency Mapping** | 90% | Flow aggregation, dependency building, temporal validity |
-| **Visualization** | 85% | D3.js topology map, zoom/pan, hierarchical grouping, path highlighting |
+| **Visualization** | 95% | D3.js topology map, zoom/pan, hierarchical grouping, path highlighting, time-slider, saved views, export |
 | **Change Detection** | 90% | 13 change types, asset/dependency lifecycle tracking |
 | **Alerts** | 80% | Alert model, severity levels, acknowledgment, email notifications |
 | **Impact Analysis** | 95% | Blast radius, upstream/downstream, SPOF detection, path finding |
@@ -32,6 +32,9 @@
 | Internal/External node coloring (I/E indicators) | - | ✅ Done |
 | Convex hull group visualization | - | ✅ Done |
 | Dynamic legend with group counts | - | ✅ Done |
+| Historical topology (time-slider) | FR-VZ-006 | ✅ Done |
+| Saved views/dashboards | FR-VZ-008 | ✅ Done |
+| Diagram export (PNG/SVG) | FR-VZ-007 | ✅ Done |
 
 ---
 
@@ -63,9 +66,9 @@
 | Credential vault integration | FR-AD-005 | P1 | Medium | Not Started |
 | Software inventory extraction | FR-AD-008 | P1 | Medium | Not Started |
 | Packet capture integration | FR-DM-002 | P1 | High | Not Started |
-| Historical topology (time-slider) | FR-VZ-006 | P1 | Medium | Not Started |
-| Diagram export (PNG/SVG) | FR-VZ-007 | P1 | Low | Not Started |
-| Saved views/dashboards | FR-VZ-008 | P1 | Medium | Not Started |
+| Historical topology (time-slider) | FR-VZ-006 | P1 | Medium | Done |
+| Diagram export (PNG/SVG) | FR-VZ-007 | P1 | Low | Done |
+| Saved views/dashboards | FR-VZ-008 | P1 | Medium | Done |
 | PagerDuty integration | FR-CD-006 | P1 | Low | Not Started |
 | Alert suppression windows | FR-CD-007 | P1 | Medium | Not Started |
 | SSO (SAML/OIDC) | FR-IN-005 | P1 | High | Not Started |
@@ -207,16 +210,16 @@ The following prioritization is based on:
 
 ---
 
-### Sprint 8: Advanced Visualization
+### Sprint 8: Advanced Visualization ✅ COMPLETED
 *Polish and power-user features*
 
-| # | Feature | Effort | Rationale |
-|---|---------|--------|-----------|
-| 22 | **Historical topology (time-slider)** | Medium | Visualize changes over time; incident investigation |
-| 23 | **Saved views/dashboards** | Medium | User customization; team workflows |
-| 24 | **Diagram export (PNG/SVG)** | Low | Documentation; presentations |
+| # | Feature | Effort | Status |
+|---|---------|--------|--------|
+| 22 | **Historical topology (time-slider)** | Medium | ✅ Done |
+| 23 | **Saved views/dashboards** | Medium | ✅ Done |
+| 24 | **Diagram export (PNG/SVG)** | Low | ✅ Done |
 
-**Outcome**: Complete visualization feature set
+**Outcome**: Complete visualization feature set - ACHIEVED
 
 ---
 

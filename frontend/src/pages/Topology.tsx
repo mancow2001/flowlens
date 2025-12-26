@@ -1,11 +1,11 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
-import { topologyApi } from '../services/api';
-import type { TopologyNode, TopologyEdge } from '../types';
+import { topologyApi, savedViewsApi } from '../services/api';
+import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
 
 interface SimNode extends TopologyNode, d3.SimulationNodeDatum {}
 
@@ -142,9 +142,78 @@ function findConnectedNodes(
   return { upstream, downstream, connectedEdges };
 }
 
+// Format date for display
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Export SVG to file
+function exportSvgToFile(svgElement: SVGSVGElement, filename: string, format: 'svg' | 'png') {
+  const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
+
+  // Add white background for PNG export
+  if (format === 'png') {
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', '100%');
+    bg.setAttribute('height', '100%');
+    bg.setAttribute('fill', '#1e293b');
+    svgClone.insertBefore(bg, svgClone.firstChild);
+  }
+
+  const svgData = new XMLSerializer().serializeToString(svgClone);
+  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+
+  if (format === 'svg') {
+    const url = URL.createObjectURL(svgBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filename}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } else {
+    // Convert to PNG
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+
+    img.onload = () => {
+      canvas.width = img.width * 2; // 2x for retina
+      canvas.height = img.height * 2;
+      ctx.scale(2, 2);
+      ctx.drawImage(img, 0, 0);
+
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${filename}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }
+      }, 'image/png');
+    };
+
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  }
+}
+
 export default function Topology() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+
+  // State
   const [selectedNode, setSelectedNode] = useState<TopologyNode | null>(null);
   const [highlightedPaths, setHighlightedPaths] = useState<{
     upstream: Set<string>;
@@ -155,9 +224,54 @@ export default function Topology() {
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('none');
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
+  // Time slider state
+  const [historicalDate, setHistoricalDate] = useState<Date | null>(null);
+  const [showTimeSlider, setShowTimeSlider] = useState(false);
+
+  // Saved views state
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [viewName, setViewName] = useState('');
+  const [viewDescription, setViewDescription] = useState('');
+  const [viewIsPublic, setViewIsPublic] = useState(false);
+  const [selectedSavedView, setSelectedSavedView] = useState<string | null>(null);
+
+  // Export dropdown
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // Fetch topology data
   const { data: topology, isLoading } = useQuery({
-    queryKey: ['topology', 'graph'],
-    queryFn: () => topologyApi.getGraph(),
+    queryKey: ['topology', 'graph', historicalDate?.toISOString()],
+    queryFn: () => topologyApi.getGraph({
+      as_of: historicalDate?.toISOString(),
+    }),
+  });
+
+  // Fetch saved views
+  const { data: savedViews } = useQuery({
+    queryKey: ['saved-views'],
+    queryFn: () => savedViewsApi.list(),
+  });
+
+  // Save view mutation
+  const saveViewMutation = useMutation({
+    mutationFn: (data: { name: string; description?: string; is_public?: boolean; config: ViewConfig }) =>
+      savedViewsApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saved-views'] });
+      setShowSaveModal(false);
+      setViewName('');
+      setViewDescription('');
+      setViewIsPublic(false);
+    },
+  });
+
+  // Delete view mutation
+  const deleteViewMutation = useMutation({
+    mutationFn: (id: string) => savedViewsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saved-views'] });
+      setSelectedSavedView(null);
+    },
   });
 
   // Compute groups from nodes
@@ -234,6 +348,85 @@ export default function Topology() {
         .call(zoomRef.current.transform, d3.zoomIdentity);
     }
     clearSelection();
+  };
+
+  // Get current view config for saving
+  const getCurrentViewConfig = useCallback((): ViewConfig => {
+    let zoomState = { scale: 1, x: 0, y: 0 };
+    if (svgRef.current) {
+      const transform = d3.zoomTransform(svgRef.current);
+      zoomState = { scale: transform.k, x: transform.x, y: transform.y };
+    }
+
+    return {
+      filters: {
+        include_external: true,
+        min_bytes_24h: 0,
+        as_of: historicalDate?.toISOString(),
+      },
+      grouping: groupingMode,
+      zoom: zoomState,
+      selected_asset_ids: selectedNode ? [selectedNode.id] : [],
+      layout_positions: {},
+    };
+  }, [groupingMode, historicalDate, selectedNode]);
+
+  // Load a saved view
+  const loadSavedView = useCallback(async (viewId: string) => {
+    try {
+      const view = await savedViewsApi.get(viewId);
+
+      // Apply grouping
+      if (view.config.grouping) {
+        setGroupingMode(view.config.grouping);
+      }
+
+      // Apply historical date
+      if (view.config.filters?.as_of) {
+        setHistoricalDate(new Date(view.config.filters.as_of));
+        setShowTimeSlider(true);
+      } else {
+        setHistoricalDate(null);
+      }
+
+      // Apply zoom
+      if (svgRef.current && zoomRef.current && view.config.zoom) {
+        const svg = d3.select(svgRef.current);
+        svg.transition()
+          .duration(750)
+          .call(
+            zoomRef.current.transform,
+            d3.zoomIdentity
+              .translate(view.config.zoom.x, view.config.zoom.y)
+              .scale(view.config.zoom.scale)
+          );
+      }
+
+      setSelectedSavedView(viewId);
+    } catch (error) {
+      console.error('Failed to load saved view:', error);
+    }
+  }, []);
+
+  // Handle save view
+  const handleSaveView = () => {
+    if (!viewName.trim()) return;
+
+    saveViewMutation.mutate({
+      name: viewName,
+      description: viewDescription || undefined,
+      is_public: viewIsPublic,
+      config: getCurrentViewConfig(),
+    });
+  };
+
+  // Handle export
+  const handleExport = (format: 'svg' | 'png') => {
+    if (svgRef.current) {
+      const filename = `topology-${new Date().toISOString().split('T')[0]}`;
+      exportSvgToFile(svgRef.current, filename, format);
+    }
+    setShowExportMenu(false);
   };
 
   // D3 Force simulation
@@ -655,12 +848,77 @@ export default function Topology() {
         <div>
           <h1 className="text-2xl font-bold text-white">Topology Map</h1>
           <p className="text-slate-400 mt-1">
-            {selectedNode
+            {historicalDate
+              ? `Viewing topology as of ${formatDate(historicalDate)}`
+              : selectedNode
               ? `Showing dependencies for ${selectedNode.name}`
               : 'Click a node to highlight its dependencies'}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Time slider toggle */}
+          <Button
+            variant={showTimeSlider ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setShowTimeSlider(!showTimeSlider)}
+          >
+            Time Travel
+          </Button>
+
+          {/* Saved views dropdown */}
+          <div className="relative">
+            <select
+              value={selectedSavedView || ''}
+              onChange={(e) => {
+                if (e.target.value) {
+                  loadSavedView(e.target.value);
+                } else {
+                  setSelectedSavedView(null);
+                }
+              }}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="">Saved Views</option>
+              {savedViews?.map((view: SavedViewSummary) => (
+                <option key={view.id} value={view.id}>
+                  {view.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Save view button */}
+          <Button variant="secondary" size="sm" onClick={() => setShowSaveModal(true)}>
+            Save View
+          </Button>
+
+          {/* Export dropdown */}
+          <div className="relative">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowExportMenu(!showExportMenu)}
+            >
+              Export
+            </Button>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 w-32 bg-slate-700 border border-slate-600 rounded-lg shadow-lg z-10">
+                <button
+                  className="w-full px-4 py-2 text-left text-sm text-slate-100 hover:bg-slate-600 rounded-t-lg"
+                  onClick={() => handleExport('svg')}
+                >
+                  Export SVG
+                </button>
+                <button
+                  className="w-full px-4 py-2 text-left text-sm text-slate-100 hover:bg-slate-600 rounded-b-lg"
+                  onClick={() => handleExport('png')}
+                >
+                  Export PNG
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Grouping dropdown */}
           <select
             value={groupingMode}
@@ -683,6 +941,95 @@ export default function Topology() {
           </Button>
         </div>
       </div>
+
+      {/* Time Slider */}
+      {showTimeSlider && (
+        <Card className="mb-4">
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-slate-400">Historical View:</span>
+            <input
+              type="datetime-local"
+              value={historicalDate ? historicalDate.toISOString().slice(0, 16) : ''}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setHistoricalDate(new Date(e.target.value));
+                } else {
+                  setHistoricalDate(null);
+                }
+              }}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            {historicalDate && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setHistoricalDate(null)}
+              >
+                Clear
+              </Button>
+            )}
+            <div className="flex-1" />
+            <span className="text-xs text-slate-500">
+              View the topology as it existed at a specific point in time
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* Save View Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-96">
+            <h2 className="text-lg font-semibold text-white mb-4">Save View</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={viewName}
+                  onChange={(e) => setViewName(e.target.value)}
+                  placeholder="My View"
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
+                <textarea
+                  value={viewDescription}
+                  onChange={(e) => setViewDescription(e.target.value)}
+                  placeholder="Describe this view..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="is-public"
+                  checked={viewIsPublic}
+                  onChange={(e) => setViewIsPublic(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
+                />
+                <label htmlFor="is-public" className="text-sm text-slate-300">
+                  Share with team
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="ghost" onClick={() => setShowSaveModal(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveView}
+                  disabled={!viewName.trim() || saveViewMutation.isPending}
+                >
+                  {saveViewMutation.isPending ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
 
       <div className="flex-1 flex gap-4">
         {/* Graph Area */}
@@ -817,6 +1164,29 @@ export default function Topology() {
                   }
                 >
                   View Details
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {/* Saved View Actions */}
+          {selectedSavedView && (
+            <Card title="Current View">
+              <div className="space-y-3">
+                <p className="text-sm text-slate-300">
+                  {savedViews?.find((v: SavedViewSummary) => v.id === selectedSavedView)?.name}
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-red-400 hover:text-red-300"
+                  onClick={() => {
+                    if (confirm('Delete this saved view?')) {
+                      deleteViewMutation.mutate(selectedSavedView);
+                    }
+                  }}
+                >
+                  Delete View
                 </Button>
               </div>
             </Card>
