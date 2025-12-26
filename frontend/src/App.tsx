@@ -12,6 +12,7 @@ import Maintenance from './pages/Maintenance';
 import Changes from './pages/Changes';
 import ClassificationRules from './pages/ClassificationRules';
 import Analysis from './pages/Analysis';
+import SystemSettings from './pages/SystemSettings';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebSocketEvents } from './hooks/useWebSocketEvents';
 import { ToastContainer, toast } from './components/common/Toast';
@@ -53,6 +54,7 @@ function App() {
           <Route path="/settings/classification" element={<ClassificationRules />} />
           <Route path="/settings/alert-rules" element={<AlertRules />} />
           <Route path="/settings/maintenance" element={<Maintenance />} />
+          <Route path="/settings/system" element={<SystemSettings />} />
         </Routes>
       </Layout>
       <ToastContainer />

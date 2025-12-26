@@ -715,4 +715,111 @@ export const alertRulesApi = {
   },
 };
 
+// Settings types
+export interface FieldMetadata {
+  name: string;
+  label: string;
+  description: string | null;
+  field_type: 'string' | 'integer' | 'float' | 'boolean' | 'secret' | 'select' | 'list' | 'path' | 'ip_address';
+  required: boolean;
+  default: unknown;
+  min_value: number | null;
+  max_value: number | null;
+  options: string[] | null;
+  env_var: string;
+  restart_required: boolean;
+  is_secret: boolean;
+}
+
+export interface SettingsSection {
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  fields: FieldMetadata[];
+  restart_required: boolean;
+  has_connection_test: boolean;
+}
+
+export interface SettingsValue {
+  name: string;
+  value: unknown;
+  is_default: boolean;
+}
+
+export interface SettingsSectionData {
+  key: string;
+  values: SettingsValue[];
+}
+
+export interface SettingsResponse {
+  sections: SettingsSection[];
+  restart_required: boolean;
+}
+
+export interface SettingsSectionResponse {
+  section: SettingsSection;
+  data: SettingsSectionData;
+  restart_required: boolean;
+}
+
+export interface SettingsUpdateResponse {
+  success: boolean;
+  message: string;
+  restart_required: boolean;
+  updated_fields: string[];
+}
+
+export interface ConnectionTestResponse {
+  success: boolean;
+  message: string;
+  details: Record<string, unknown> | null;
+}
+
+export interface RestartResponse {
+  success: boolean;
+  message: string;
+  method: 'docker' | 'manual' | null;
+}
+
+// Settings API endpoints
+export const settingsApi = {
+  getAll: async (): Promise<SettingsResponse> => {
+    const { data } = await api.get('/settings');
+    return data;
+  },
+
+  getSection: async (sectionKey: string): Promise<SettingsSectionResponse> => {
+    const { data } = await api.get(`/settings/${sectionKey}`);
+    return data;
+  },
+
+  updateSection: async (sectionKey: string, values: Record<string, unknown>): Promise<SettingsUpdateResponse> => {
+    const { data } = await api.put(`/settings/${sectionKey}`, { values });
+    return data;
+  },
+
+  testConnection: async (service: string, testValues?: Record<string, unknown>): Promise<ConnectionTestResponse> => {
+    const { data } = await api.post(`/settings/test-connection/${service}`, {
+      test_values: testValues,
+    });
+    return data;
+  },
+
+  restart: async (): Promise<RestartResponse> => {
+    const { data } = await api.post('/settings/restart');
+    return data;
+  },
+
+  checkRestartRequired: async (): Promise<{ restart_required: boolean }> => {
+    const { data } = await api.get('/settings/restart-required');
+    return data;
+  },
+
+  clearRestartFlag: async (): Promise<{ message: string }> => {
+    const { data } = await api.post('/settings/clear-restart-flag');
+    return data;
+  },
+};
+
 export default api;
