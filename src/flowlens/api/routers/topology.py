@@ -32,6 +32,22 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
     if not ip_addresses:
         return {}
 
+    # First check if the classification_rules table exists
+    try:
+        table_check = await db.execute(
+            text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'classification_rules'
+                )
+            """)
+        )
+        table_exists = table_check.scalar()
+        if not table_exists:
+            return {}
+    except Exception:
+        return {}
+
     try:
         # Build a query that gets classifications for all IPs in one go
         # Using a lateral join with the classification function
@@ -75,7 +91,8 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
 
         return classifications
     except Exception:
-        # Table might not exist yet if migration hasn't run
+        # If query fails for any reason, just return empty and let the topology work
+        await db.rollback()
         return {}
 
 
