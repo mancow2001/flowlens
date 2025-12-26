@@ -67,6 +67,38 @@
 
 ---
 
+## Completed Features (Post-MVP)
+
+### Alert Rules Engine
+- [x] **AlertRule model** - Configurable rules with change type triggers, asset filters, templates
+- [x] **Alert rules API** - Full CRUD with toggle, test endpoints
+- [x] **Alert rules UI** - Management page with create/edit modal, enable/disable toggle
+- [x] **Default rules migration** - 5 pre-configured rules for common scenarios
+
+### Maintenance Windows
+- [x] **MaintenanceWindow model** - Schedule with asset/environment/datacenter scope
+- [x] **Maintenance API** - CRUD, active windows, asset check endpoints
+- [x] **Maintenance UI** - Scheduling modal, active window alerts, cancel functionality
+- [x] **PostgreSQL functions** - `is_asset_in_maintenance()`, `get_active_maintenance_windows()`
+
+### Notification Channels
+- [x] **Slack integration** - Block Kit formatting with priority colors/emojis
+- [x] **Microsoft Teams integration** - Adaptive Cards with FactSet metadata
+- [x] **PagerDuty integration** - Events API v2 with dedup, acknowledge, resolve
+
+### Topology Enhancements
+- [x] **Historical topology** - `as_of` parameter for point-in-time views
+- [x] **Topology filtering panel** - Filter by environment, datacenter, asset type
+- [x] **Filter URL sync** - Shareable filtered views via URL parameters
+- [x] **PNG/SVG export** - Canvas-based topology image export
+
+### Bulk Operations
+- [x] **Bulk asset update API** - `PATCH /assets/bulk` for environment, datacenter, critical
+- [x] **Bulk asset delete API** - `DELETE /assets/bulk` with soft delete
+- [x] **Bulk operations UI** - Multi-select with action toolbar
+
+---
+
 ## In Progress
 
 *Nothing currently in progress*
@@ -76,21 +108,14 @@
 ## Backlog - High Priority
 
 ### Backend Enhancements
-- [ ] **Historical topology time-slider** - Query topology at a specific point in time using `as_of` parameter
 - [ ] **Scheduled discovery scans** - Periodic re-discovery of assets via SSH/WMI/SNMP
-- [ ] **Alert rules engine** - Configurable rules for when to generate alerts (beyond default change detection)
-- [ ] **Maintenance windows** - Suppress alerts during scheduled maintenance periods
+- [ ] **Alert rule evaluation** - Wire rules to change_detector for dynamic alerting
 
 ### Frontend Enhancements
-- [ ] **Topology filtering panel** - Filter by environment, datacenter, asset type in topology view
-- [ ] **Historical topology playback** - Time-slider to view topology at past timestamps
-- [ ] **Bulk asset operations** - Select multiple assets for bulk tagging, classification
-- [ ] **Export topology as image** - PNG/SVG export of current topology view
+- [ ] **Recurring maintenance UI** - UI for recurring schedules (model supports it)
 
 ### API & Integration
 - [ ] **GraphQL API** - For complex nested queries
-- [ ] **Slack/Teams notifications** - Direct integration (currently webhook only)
-- [ ] **PagerDuty integration** - Native Events API v2 support
 
 ---
 
@@ -169,6 +194,32 @@ These features are explicitly excluded from FlowLens scope:
 - [ ] Optimize topology queries for large graphs (>10k nodes)
 - [ ] Add database connection pooling configuration
 - [ ] Add structured logging to all services
+
+---
+
+## Environment Variables (New Features)
+
+### Slack Notifications
+```bash
+SLACK_ENABLED=true
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx
+SLACK_DEFAULT_CHANNEL=#alerts
+SLACK_USERNAME=FlowLens
+SLACK_ICON_EMOJI=:bell:
+```
+
+### Microsoft Teams Notifications
+```bash
+TEAMS_ENABLED=true
+TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/xxx
+```
+
+### PagerDuty Notifications
+```bash
+PAGERDUTY_ENABLED=true
+PAGERDUTY_ROUTING_KEY=your-integration-key
+PAGERDUTY_SERVICE_NAME=FlowLens
+```
 
 ---
 
