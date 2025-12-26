@@ -2,6 +2,7 @@
 
 from flowlens.api.routers import (
     admin,
+    alert_rules,
     alerts,
     analysis,
     assets,
@@ -15,6 +16,7 @@ from flowlens.api.routers import (
 
 __all__ = [
     "admin",
+    "alert_rules",
     "alerts",
     "analysis",
     "assets",

@@ -7,6 +7,7 @@ import Assets from './pages/Assets';
 import AssetDetail from './pages/AssetDetail';
 import Dependencies from './pages/Dependencies';
 import Alerts from './pages/Alerts';
+import AlertRules from './pages/AlertRules';
 import Changes from './pages/Changes';
 import ClassificationRules from './pages/ClassificationRules';
 import Analysis from './pages/Analysis';
@@ -49,6 +50,7 @@ function App() {
           <Route path="/changes" element={<Changes />} />
           <Route path="/analysis" element={<Analysis />} />
           <Route path="/settings/classification" element={<ClassificationRules />} />
+          <Route path="/settings/alert-rules" element={<AlertRules />} />
         </Routes>
       </Layout>
       <ToastContainer />

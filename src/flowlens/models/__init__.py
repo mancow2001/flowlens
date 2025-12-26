@@ -1,5 +1,6 @@
 """SQLAlchemy database models."""
 
+from flowlens.models.alert_rule import AlertRule
 from flowlens.models.asset import Asset, AssetType, Service
 from flowlens.models.base import Base
 from flowlens.models.change import Alert, AlertSeverity, ChangeEvent, ChangeType
@@ -13,6 +14,7 @@ __all__ = [
     "Asset",
     "AssetType",
     "Service",
+    "AlertRule",
     "ClassificationRule",
     "Dependency",
     "DependencyHistory",

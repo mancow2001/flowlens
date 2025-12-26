@@ -506,4 +506,101 @@ export const assetBulkApi = {
   },
 };
 
+// Alert Rules endpoints
+export interface AlertRule {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  change_types: string[];
+  asset_filter: Record<string, unknown> | null;
+  severity: string;
+  title_template: string;
+  description_template: string;
+  notify_channels: string[] | null;
+  cooldown_minutes: number;
+  priority: number;
+  schedule: Record<string, unknown> | null;
+  tags: Record<string, unknown> | null;
+  last_triggered_at: string | null;
+  trigger_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertRuleSummary {
+  id: string;
+  name: string;
+  is_active: boolean;
+  change_types: string[];
+  severity: string;
+  cooldown_minutes: number;
+  priority: number;
+  trigger_count: number;
+  last_triggered_at: string | null;
+}
+
+export interface ChangeTypeInfo {
+  value: string;
+  label: string;
+  category: string;
+}
+
+export interface AlertRuleTestResult {
+  would_trigger: boolean;
+  reason: string | null;
+  rendered_title: string | null;
+  rendered_description: string | null;
+}
+
+export const alertRulesApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    isActive?: boolean;
+    severity?: string;
+    changeType?: string;
+  }): Promise<{ items: AlertRuleSummary[]; total: number; page: number; page_size: number }> => {
+    const { data } = await api.get('/alert-rules', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<AlertRule> => {
+    const { data } = await api.get(`/alert-rules/${id}`);
+    return data;
+  },
+
+  create: async (rule: Omit<AlertRule, 'id' | 'created_at' | 'updated_at' | 'last_triggered_at' | 'trigger_count'>): Promise<AlertRule> => {
+    const { data } = await api.post('/alert-rules', rule);
+    return data;
+  },
+
+  update: async (id: string, updates: Partial<AlertRule>): Promise<AlertRule> => {
+    const { data } = await api.patch(`/alert-rules/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/alert-rules/${id}`);
+  },
+
+  toggle: async (id: string): Promise<AlertRule> => {
+    const { data } = await api.post(`/alert-rules/${id}/toggle`);
+    return data;
+  },
+
+  test: async (id: string, changeType: string, assetData?: Record<string, unknown>): Promise<AlertRuleTestResult> => {
+    const { data } = await api.post(`/alert-rules/${id}/test`, {
+      change_type: changeType,
+      asset_data: assetData,
+    });
+    return data;
+  },
+
+  listChangeTypes: async (): Promise<ChangeTypeInfo[]> => {
+    const { data } = await api.get('/alert-rules/change-types');
+    return data;
+  },
+};
+
 export default api;

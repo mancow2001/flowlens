@@ -4,6 +4,8 @@ import * as d3 from 'd3';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
+import FilterPanel from '../components/topology/FilterPanel';
+import { useTopologyFilters } from '../hooks/useTopologyFilters';
 import { topologyApi, savedViewsApi } from '../services/api';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
 
@@ -255,6 +257,9 @@ export default function Topology() {
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
+  // Topology filters hook
+  const { filters, setFilters, resetFilters, hasActiveFilters } = useTopologyFilters();
+
   // State
   const [selectedNode, setSelectedNode] = useState<TopologyNode | null>(null);
   const [highlightedPaths, setHighlightedPaths] = useState<{
@@ -266,8 +271,11 @@ export default function Topology() {
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('none');
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
-  // Time slider state
-  const [historicalDate, setHistoricalDate] = useState<Date | null>(null);
+  // Time slider state - now synced with filters hook
+  const historicalDate = filters.asOf ? new Date(filters.asOf) : null;
+  const setHistoricalDate = useCallback((date: Date | null) => {
+    setFilters({ asOf: date?.toISOString() || null });
+  }, [setFilters]);
   const [showTimeSlider, setShowTimeSlider] = useState(false);
 
   // Saved views state
@@ -291,11 +299,16 @@ export default function Topology() {
   // Group positions for dragging (persisted across renders)
   const groupPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
-  // Fetch topology data
+  // Fetch topology data with filters
   const { data: topology, isLoading } = useQuery({
-    queryKey: ['topology', 'graph', historicalDate?.toISOString()],
+    queryKey: ['topology', 'graph', filters],
     queryFn: () => topologyApi.getGraph({
-      as_of: historicalDate?.toISOString(),
+      as_of: filters.asOf || undefined,
+      environments: filters.environments.length > 0 ? filters.environments : undefined,
+      datacenters: filters.datacenters.length > 0 ? filters.datacenters : undefined,
+      asset_types: filters.assetTypes.length > 0 ? filters.assetTypes : undefined,
+      include_external: filters.includeExternal,
+      min_bytes_24h: filters.minBytes24h > 0 ? filters.minBytes24h : undefined,
     }),
   });
 
@@ -1159,7 +1172,12 @@ export default function Topology() {
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Topology Map</h1>
+          <h1 className="text-2xl font-bold text-white">
+            Topology Map
+            {hasActiveFilters() && (
+              <span className="ml-2 text-sm font-normal text-primary-400">(Filtered)</span>
+            )}
+          </h1>
           <p className="text-slate-400 mt-1">
             {historicalDate
               ? `Viewing topology as of ${formatDate(historicalDate)}`
@@ -1345,6 +1363,14 @@ export default function Topology() {
       )}
 
       <div className="flex-1 flex gap-4">
+        {/* Filter Panel */}
+        <FilterPanel
+          filters={filters}
+          onFiltersChange={setFilters}
+          onReset={resetFilters}
+          hasActiveFilters={hasActiveFilters()}
+        />
+
         {/* Graph Area */}
         <div
           ref={containerRef}
