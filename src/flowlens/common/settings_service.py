@@ -77,6 +77,7 @@ def _get_section_object(settings: Settings, section_key: str) -> Any:
         "ingestion": settings.ingestion,
         "enrichment": settings.enrichment,
         "resolution": settings.resolution,
+        "classification": settings.classification,
         "api": settings.api,
         "auth": settings.auth,
         "logging": settings.logging,
