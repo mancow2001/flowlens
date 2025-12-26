@@ -875,7 +875,7 @@ export default function Topology() {
     // Add labels to nodes
     node
       .append('text')
-      .text((d) => d.isGroupNode ? d.name : d.name.substring(0, 12))
+      .text((d) => d.isGroupNode ? d.name : (d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name))
       .attr('dy', (d) => d.isGroupNode ? 55 : 35)
       .attr('text-anchor', 'middle')
       .attr('fill', '#e2e8f0')

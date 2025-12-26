@@ -233,7 +233,7 @@ export default function BlastRadiusTopology({
     // Add labels
     node
       .append('text')
-      .text(d => d.name.length > 15 ? d.name.substring(0, 12) + '...' : d.name)
+      .text(d => d.name.length > 20 ? d.name.substring(0, 17) + '...' : d.name)
       .attr('dy', d => d.isCenter ? 40 : 28)
       .attr('text-anchor', 'middle')
       .attr('fill', '#e2e8f0')
