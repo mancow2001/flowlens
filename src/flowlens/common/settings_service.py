@@ -499,6 +499,22 @@ def generate_docker_compose_yaml() -> str:
         "LOG_FORMAT": settings.logging.format,
     }
 
+    # Classification service environment
+    classification_env = {
+        **db_env,
+        "ENVIRONMENT": settings.environment,
+        "CLASSIFICATION_POLL_INTERVAL_MS": str(settings.classification.poll_interval_ms),
+        "CLASSIFICATION_BATCH_SIZE": str(settings.classification.batch_size),
+        "CLASSIFICATION_WORKER_COUNT": str(settings.classification.worker_count),
+        "CLASSIFICATION_MIN_OBSERVATION_HOURS": str(settings.classification.min_observation_hours),
+        "CLASSIFICATION_MIN_FLOWS_REQUIRED": str(settings.classification.min_flows_required),
+        "CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD": str(settings.classification.auto_update_confidence_threshold),
+        "CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD": str(settings.classification.high_confidence_threshold),
+        "CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS": str(settings.classification.reclassify_interval_hours),
+        "LOG_LEVEL": settings.logging.level,
+        "LOG_FORMAT": settings.logging.format,
+    }
+
     # Add notification settings to API env
     notif = settings.notifications
     if notif.email.enabled:
@@ -559,7 +575,7 @@ def generate_docker_compose_yaml() -> str:
             override_keys=list(_settings_overrides.keys()),
         )
         # Apply overrides to all environment dictionaries
-        for env_dict in [db_env, api_env, ingestion_env, enrichment_env, resolution_env]:
+        for env_dict in [db_env, api_env, ingestion_env, enrichment_env, resolution_env, classification_env]:
             for key, value in _settings_overrides.items():
                 # Only apply if this env dict contains this key or a related key
                 if key in env_dict:
@@ -580,6 +596,9 @@ def generate_docker_compose_yaml() -> str:
                         env_dict[key] = value
                 elif key.startswith("RESOLUTION_"):
                     if env_dict is resolution_env:
+                        env_dict[key] = value
+                elif key.startswith("CLASSIFICATION_"):
+                    if env_dict is classification_env:
                         env_dict[key] = value
                 elif key.startswith("LOG_"):
                     # Logging settings apply to all services
@@ -700,6 +719,20 @@ def generate_docker_compose_yaml() -> str:
                 "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
                 "healthcheck": {
                     "test": ["CMD", "pgrep", "-f", "flowlens.resolution.main"],
+                    "interval": "30s",
+                    "timeout": "10s",
+                    "retries": 3,
+                },
+                "restart": "unless-stopped",
+            },
+            "classification": {
+                "build": {"context": ".", "target": "production"},
+                "container_name": "flowlens-classification",
+                "command": ["python", "-m", "flowlens.classification.main"],
+                "environment": classification_env,
+                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
+                "healthcheck": {
+                    "test": ["CMD", "pgrep", "-f", "flowlens.classification.main"],
                     "interval": "30s",
                     "timeout": "10s",
                     "retries": 3,

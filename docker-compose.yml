@@ -164,6 +164,37 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Classification Service (auto-classifies assets based on behavioral features)
+  classification:
+    build:
+      context: .
+      target: production
+    container_name: flowlens-classification
+    command: ["python", "-m", "flowlens.classification.main"]
+    environment:
+      ENVIRONMENT: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: flowlens
+      POSTGRES_PASSWORD: flowlens
+      POSTGRES_DATABASE: flowlens
+      CLASSIFICATION_WORKER_COUNT: "1"
+      CLASSIFICATION_POLL_INTERVAL_MS: "30000"
+      CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.70"
+      CLASSIFICATION_MIN_OBSERVATION_HOURS: "24"
+      CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: json
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "flowlens.classification.main"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   # Frontend UI
   frontend:
     build:
