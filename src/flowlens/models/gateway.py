@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,10 +72,12 @@ class GatewayObservation(Base, UUIDMixin):
     )
 
     window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
     )
 
     window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
     )
 
@@ -99,6 +101,7 @@ class GatewayObservation(Base, UUIDMixin):
     )
 
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
     )
