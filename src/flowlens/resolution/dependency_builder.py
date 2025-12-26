@@ -3,7 +3,7 @@
 Creates and updates dependency edges from flow aggregates.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -200,10 +200,14 @@ class DependencyBuilder:
                 packets_count=packets_count,
                 flows_count=flows_count,
                 last_seen=window_end,
+                source_asset_id=source_asset_id,
+                target_asset_id=target_asset_id,
+                target_port=target_port,
+                protocol=protocol,
             )
             return dep_id
 
-        # Create new dependency
+        # Create new dependency - set rolling window bytes to initial value
         new_dep = Dependency(
             id=uuid4(),
             source_asset_id=source_asset_id,
@@ -213,6 +217,8 @@ class DependencyBuilder:
             bytes_total=bytes_count,
             packets_total=packets_count,
             flows_total=flows_count,
+            bytes_last_24h=bytes_count,  # Initial value is current bytes
+            bytes_last_7d=bytes_count,   # Initial value is current bytes
             first_seen=window_start,
             last_seen=window_end,
             dependency_type=dependency_type,
@@ -249,6 +255,77 @@ class DependencyBuilder:
 
         return new_dep.id
 
+    async def _calculate_rolling_bytes(
+        self,
+        db: AsyncSession,
+        source_asset_id: UUID,
+        target_asset_id: UUID,
+        target_port: int,
+        protocol: int,
+    ) -> tuple[int, int]:
+        """Calculate bytes for rolling time windows from flow aggregates.
+
+        Args:
+            db: Database session.
+            source_asset_id: Source asset ID.
+            target_asset_id: Target asset ID.
+            target_port: Target port.
+            protocol: Protocol number.
+
+        Returns:
+            Tuple of (bytes_last_24h, bytes_last_7d).
+        """
+        now = datetime.now(timezone.utc)
+        cutoff_24h = now - timedelta(hours=24)
+        cutoff_7d = now - timedelta(days=7)
+
+        # Get source and target asset IPs for aggregate lookup
+        from flowlens.models.asset import Asset
+
+        result = await db.execute(
+            select(Asset.ip_address).where(Asset.id == source_asset_id)
+        )
+        src_row = result.first()
+        src_ip = str(src_row[0]) if src_row else None
+
+        result = await db.execute(
+            select(Asset.ip_address).where(Asset.id == target_asset_id)
+        )
+        dst_row = result.first()
+        dst_ip = str(dst_row[0]) if dst_row else None
+
+        if not src_ip or not dst_ip:
+            return 0, 0
+
+        # Query flow aggregates for rolling windows
+        # 24h window
+        result_24h = await db.execute(
+            select(func.coalesce(func.sum(FlowAggregate.bytes_total), 0))
+            .where(
+                FlowAggregate.src_ip == src_ip,
+                FlowAggregate.dst_ip == dst_ip,
+                FlowAggregate.dst_port == target_port,
+                FlowAggregate.protocol == protocol,
+                FlowAggregate.window_start >= cutoff_24h,
+            )
+        )
+        bytes_24h = result_24h.scalar() or 0
+
+        # 7d window
+        result_7d = await db.execute(
+            select(func.coalesce(func.sum(FlowAggregate.bytes_total), 0))
+            .where(
+                FlowAggregate.src_ip == src_ip,
+                FlowAggregate.dst_ip == dst_ip,
+                FlowAggregate.dst_port == target_port,
+                FlowAggregate.protocol == protocol,
+                FlowAggregate.window_start >= cutoff_7d,
+            )
+        )
+        bytes_7d = result_7d.scalar() or 0
+
+        return int(bytes_24h), int(bytes_7d)
+
     async def _update_dependency(
         self,
         db: AsyncSession,
@@ -257,6 +334,10 @@ class DependencyBuilder:
         packets_count: int,
         flows_count: int,
         last_seen: datetime,
+        source_asset_id: UUID | None = None,
+        target_asset_id: UUID | None = None,
+        target_port: int | None = None,
+        protocol: int | None = None,
     ) -> None:
         """Update dependency metrics.
 
@@ -267,16 +348,31 @@ class DependencyBuilder:
             packets_count: Packets to add.
             flows_count: Flows to add.
             last_seen: New last_seen timestamp.
+            source_asset_id: Source asset ID (for rolling window calculation).
+            target_asset_id: Target asset ID (for rolling window calculation).
+            target_port: Target port (for rolling window calculation).
+            protocol: Protocol (for rolling window calculation).
         """
+        update_values = {
+            "bytes_total": Dependency.bytes_total + bytes_count,
+            "packets_total": Dependency.packets_total + packets_count,
+            "flows_total": Dependency.flows_total + flows_count,
+            "last_seen": func.greatest(Dependency.last_seen, last_seen),
+        }
+
+        # Calculate rolling window bytes if we have the required info
+        if source_asset_id and target_asset_id and target_port is not None and protocol is not None:
+            bytes_24h, bytes_7d = await self._calculate_rolling_bytes(
+                db, source_asset_id, target_asset_id, target_port, protocol
+            )
+            # Add current bytes_count since aggregate may not include it yet
+            update_values["bytes_last_24h"] = bytes_24h + bytes_count
+            update_values["bytes_last_7d"] = bytes_7d + bytes_count
+
         await db.execute(
             update(Dependency)
             .where(Dependency.id == dep_id)
-            .values(
-                bytes_total=Dependency.bytes_total + bytes_count,
-                packets_total=Dependency.packets_total + packets_count,
-                flows_total=Dependency.flows_total + flows_count,
-                last_seen=func.greatest(Dependency.last_seen, last_seen),
-            )
+            .values(**update_values)
         )
 
         DEPENDENCIES_UPDATED.inc()
@@ -413,6 +509,63 @@ class DependencyBuilder:
             dep_id=str(dep_id),
             reason=reason,
         )
+
+    async def refresh_rolling_bytes(
+        self,
+        db: AsyncSession,
+        batch_size: int = 100,
+    ) -> int:
+        """Refresh bytes_last_24h and bytes_last_7d for all active dependencies.
+
+        This is useful for backfilling existing dependencies that don't have
+        rolling window metrics populated.
+
+        Args:
+            db: Database session.
+            batch_size: Number of dependencies to process per batch.
+
+        Returns:
+            Number of dependencies updated.
+        """
+        from flowlens.models.asset import Asset
+
+        # Get all active dependencies
+        result = await db.execute(
+            select(
+                Dependency.id,
+                Dependency.source_asset_id,
+                Dependency.target_asset_id,
+                Dependency.target_port,
+                Dependency.protocol,
+            )
+            .where(Dependency.valid_to.is_(None))
+        )
+        dependencies = result.fetchall()
+
+        updated = 0
+        for dep_id, source_id, target_id, port, proto in dependencies:
+            bytes_24h, bytes_7d = await self._calculate_rolling_bytes(
+                db, source_id, target_id, port, proto
+            )
+
+            await db.execute(
+                update(Dependency)
+                .where(Dependency.id == dep_id)
+                .values(
+                    bytes_last_24h=bytes_24h,
+                    bytes_last_7d=bytes_7d,
+                )
+            )
+            updated += 1
+
+            if updated % batch_size == 0:
+                await db.flush()
+                logger.debug(f"Refreshed rolling bytes for {updated} dependencies")
+
+        await db.flush()
+        logger.info(f"Refreshed rolling bytes for {updated} total dependencies")
+
+        return updated
 
     @property
     def asset_mapper(self) -> AssetMapper:

@@ -402,3 +402,21 @@ async def get_asset_inbound_dependencies(
     dependencies = result.scalars().all()
 
     return [DependencySummary.model_validate(d) for d in dependencies]
+
+
+@router.post("/refresh-rolling-bytes", response_model=dict)
+async def refresh_rolling_bytes(
+    db: DbSession,
+    user: AuthenticatedUser,
+) -> dict:
+    """Refresh bytes_last_24h and bytes_last_7d for all active dependencies.
+
+    This recalculates rolling window metrics from flow aggregates.
+    Useful for backfilling existing dependencies.
+    """
+    from flowlens.resolution.dependency_builder import DependencyBuilder
+
+    builder = DependencyBuilder()
+    updated = await builder.refresh_rolling_bytes(db)
+
+    return {"updated": updated, "message": f"Refreshed rolling bytes for {updated} dependencies"}
