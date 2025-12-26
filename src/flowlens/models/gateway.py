@@ -227,13 +227,13 @@ class AssetGateway(Base, UUIDMixin, TimestampMixin, TemporalMixin):
     # Relationships
     source_asset: Mapped["Asset"] = relationship(
         "Asset",
-        foreign_keys=[source_asset_id],
+        foreign_keys="AssetGateway.source_asset_id",
         back_populates="gateway_relationships",
     )
 
     gateway_asset: Mapped["Asset"] = relationship(
         "Asset",
-        foreign_keys=[gateway_asset_id],
+        foreign_keys="AssetGateway.gateway_asset_id",
         back_populates="gateway_clients",
     )
 
