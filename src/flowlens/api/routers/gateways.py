@@ -118,7 +118,7 @@ async def get_gateways_for_asset(
             GatewayRelationship(
                 gateway_id=gateway.id,
                 gateway_asset_id=gateway.gateway_asset_id,
-                gateway_ip=gateway_asset.ip_address,
+                gateway_ip=str(gateway_asset.ip_address),
                 gateway_name=gateway_asset.name,
                 gateway_role=gateway.gateway_role,
                 is_default=gateway.is_default_gateway,
@@ -131,7 +131,7 @@ async def get_gateways_for_asset(
 
     return GatewayForAssetResponse(
         asset_id=asset.id,
-        asset_ip=asset.ip_address,
+        asset_ip=str(asset.ip_address),
         asset_name=asset.name,
         gateways=relationships,
         total_gateways=len(relationships),
@@ -173,7 +173,7 @@ async def get_gateway_clients(
             GatewayRelationship(
                 gateway_id=gateway.id,
                 gateway_asset_id=gateway.source_asset_id,
-                gateway_ip=source_asset.ip_address,
+                gateway_ip=str(source_asset.ip_address),
                 gateway_name=source_asset.name,
                 gateway_role=gateway.gateway_role,
                 is_default=gateway.is_default_gateway,
@@ -186,7 +186,7 @@ async def get_gateway_clients(
 
     return GatewayClientsResponse(
         gateway_id=gateway_asset.id,
-        gateway_ip=gateway_asset.ip_address,
+        gateway_ip=str(gateway_asset.ip_address),
         gateway_name=gateway_asset.name,
         clients=clients,
         total_clients=len(clients),
@@ -244,7 +244,7 @@ async def get_gateway_topology(
             GatewayTopologyNode(
                 id=str(asset_id),
                 name=asset.name,
-                ip_address=asset.ip_address,
+                ip_address=str(asset.ip_address),
                 asset_type=asset.asset_type.value if asset.asset_type else "unknown",
                 is_gateway=is_gateway,
                 client_count=client_count,
