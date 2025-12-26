@@ -821,6 +821,10 @@ export const settingsApi = {
     const { data } = await api.post('/settings/clear-restart-flag');
     return data;
   },
+
+  downloadDockerComposeUrl: (): string => {
+    return '/api/v1/settings/export/docker-compose.yml';
+  },
 };
 
 export default api;

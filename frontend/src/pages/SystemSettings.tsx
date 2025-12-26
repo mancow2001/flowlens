@@ -58,6 +58,7 @@ export default function SystemSettings() {
   const [hasChanges, setHasChanges] = useState(false);
   const [testingConnection, setTestingConnection] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [dockerMode, setDockerMode] = useState(false);
 
   // Fetch all sections metadata
   const { data: settingsData, isLoading: loadingSections } = useQuery({
@@ -80,6 +81,10 @@ export default function SystemSettings() {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['settings', activeTab] });
       setHasChanges(false);
+      // Track Docker mode for download button
+      if (result.docker_mode) {
+        setDockerMode(true);
+      }
       // Show success message
       alert(result.message);
     },
@@ -134,6 +139,17 @@ export default function SystemSettings() {
 
   const toggleSecretVisibility = (fieldName: string) => {
     setShowSecrets((prev) => ({ ...prev, [fieldName]: !prev[fieldName] }));
+  };
+
+  const handleDownloadDockerCompose = () => {
+    // Trigger download via hidden link
+    const url = settingsApi.downloadDockerComposeUrl();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'docker-compose.yml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const renderField = (field: FieldMetadata) => {
@@ -275,6 +291,29 @@ export default function SystemSettings() {
               Some settings have been changed that require a service restart to take effect.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Docker Mode Banner */}
+      {dockerMode && (
+        <div className="bg-blue-500/20 border border-blue-500/50 rounded-lg p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <ArrowDownTrayIcon className="w-6 h-6 text-blue-400 flex-shrink-0" />
+            <div>
+              <p className="text-blue-400 font-medium">Running in Docker mode</p>
+              <p className="text-blue-400/80 text-sm">
+                Settings have been applied to this session. Download the updated docker-compose.yml to persist changes.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={handleDownloadDockerCompose}
+            className="flex items-center gap-2 whitespace-nowrap"
+          >
+            <ArrowDownTrayIcon className="w-4 h-4" />
+            Download docker-compose.yml
+          </Button>
         </div>
       )}
 

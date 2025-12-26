@@ -391,6 +391,322 @@ def update_section_settings(
     return True, updated_fields, needs_restart, docker_mode
 
 
+def get_pending_overrides() -> dict[str, str]:
+    """Get all pending settings overrides (for Docker mode).
+
+    Returns:
+        Dictionary of env var names to values.
+    """
+    return _settings_overrides.copy()
+
+
+def generate_docker_compose_yaml() -> str:
+    """Generate a docker-compose.yml with current settings.
+
+    Reads the current settings (including any pending overrides) and
+    generates a complete docker-compose.yml file.
+
+    Returns:
+        YAML string of the docker-compose configuration.
+    """
+    import yaml
+
+    settings = get_settings()
+
+    # Build environment variables for each service
+    # Common database settings
+    db_env = {
+        "POSTGRES_HOST": "postgres",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_USER": settings.database.user,
+        "POSTGRES_PASSWORD": settings.database.password.get_secret_value(),
+        "POSTGRES_DATABASE": settings.database.database,
+    }
+
+    # API service environment
+    api_env = {
+        **db_env,
+        "ENVIRONMENT": settings.environment,
+        "DEBUG": str(settings.debug).lower(),
+        "API_HOST": settings.api.host,
+        "API_PORT": str(settings.api.port),
+        "API_WORKERS": str(settings.api.workers),
+        "API_CORS_ORIGINS": settings.api.cors_origins_str,
+        "API_RATE_LIMIT_REQUESTS": str(settings.api.rate_limit_requests),
+        "API_RATE_LIMIT_WINDOW_SECONDS": str(settings.api.rate_limit_window_seconds),
+        "API_DEFAULT_PAGE_SIZE": str(settings.api.default_page_size),
+        "API_MAX_PAGE_SIZE": str(settings.api.max_page_size),
+        "AUTH_ENABLED": str(settings.auth.enabled).lower(),
+        "AUTH_SECRET_KEY": settings.auth.secret_key.get_secret_value(),
+        "AUTH_ALGORITHM": settings.auth.algorithm,
+        "AUTH_ACCESS_TOKEN_EXPIRE_MINUTES": str(settings.auth.access_token_expire_minutes),
+        "AUTH_REFRESH_TOKEN_EXPIRE_DAYS": str(settings.auth.refresh_token_expire_days),
+        "LOG_LEVEL": settings.logging.level,
+        "LOG_FORMAT": settings.logging.format,
+    }
+
+    # Ingestion service environment
+    ingestion_env = {
+        **db_env,
+        "ENVIRONMENT": settings.environment,
+        "INGESTION_BIND_ADDRESS": str(settings.ingestion.bind_address),
+        "INGESTION_NETFLOW_PORT": str(settings.ingestion.netflow_port),
+        "INGESTION_SFLOW_PORT": str(settings.ingestion.sflow_port),
+        "INGESTION_BATCH_SIZE": str(settings.ingestion.batch_size),
+        "INGESTION_BATCH_TIMEOUT_MS": str(settings.ingestion.batch_timeout_ms),
+        "INGESTION_QUEUE_MAX_SIZE": str(settings.ingestion.queue_max_size),
+        "INGESTION_SAMPLE_THRESHOLD": str(settings.ingestion.sample_threshold),
+        "INGESTION_DROP_THRESHOLD": str(settings.ingestion.drop_threshold),
+        "INGESTION_SAMPLE_RATE": str(settings.ingestion.sample_rate),
+        "LOG_LEVEL": settings.logging.level,
+        "LOG_FORMAT": settings.logging.format,
+    }
+
+    # Enrichment service environment
+    enrichment_env = {
+        **db_env,
+        "ENVIRONMENT": settings.environment,
+        "ENRICHMENT_BATCH_SIZE": str(settings.enrichment.batch_size),
+        "ENRICHMENT_POLL_INTERVAL_MS": str(settings.enrichment.poll_interval_ms),
+        "ENRICHMENT_WORKER_COUNT": str(settings.enrichment.worker_count),
+        "ENRICHMENT_DNS_TIMEOUT": str(settings.enrichment.dns_timeout),
+        "ENRICHMENT_DNS_CACHE_TTL": str(settings.enrichment.dns_cache_ttl),
+        "ENRICHMENT_DNS_CACHE_SIZE": str(settings.enrichment.dns_cache_size),
+        "LOG_LEVEL": settings.logging.level,
+        "LOG_FORMAT": settings.logging.format,
+    }
+    if settings.enrichment.dns_servers:
+        enrichment_env["ENRICHMENT_DNS_SERVERS"] = ",".join(settings.enrichment.dns_servers)
+    if settings.enrichment.geoip_database_path:
+        enrichment_env["ENRICHMENT_GEOIP_DATABASE_PATH"] = str(settings.enrichment.geoip_database_path)
+
+    # Resolution service environment
+    resolution_env = {
+        **db_env,
+        "ENVIRONMENT": settings.environment,
+        "RESOLUTION_WINDOW_SIZE_MINUTES": str(settings.resolution.window_size_minutes),
+        "RESOLUTION_WORKER_COUNT": str(settings.resolution.worker_count),
+        "RESOLUTION_BATCH_SIZE": str(settings.resolution.batch_size),
+        "RESOLUTION_POLL_INTERVAL_MS": str(settings.resolution.poll_interval_ms),
+        "RESOLUTION_DETECTION_INTERVAL_MINUTES": str(settings.resolution.detection_interval_minutes),
+        "RESOLUTION_STALE_THRESHOLD_HOURS": str(settings.resolution.stale_threshold_hours),
+        "RESOLUTION_NEW_DEPENDENCY_LOOKBACK_MINUTES": str(settings.resolution.new_dependency_lookback_minutes),
+        "RESOLUTION_EXCLUDE_EXTERNAL_IPS": str(settings.resolution.exclude_external_ips).lower(),
+        "RESOLUTION_EXCLUDE_EXTERNAL_SOURCES": str(settings.resolution.exclude_external_sources).lower(),
+        "RESOLUTION_EXCLUDE_EXTERNAL_TARGETS": str(settings.resolution.exclude_external_targets).lower(),
+        "LOG_LEVEL": settings.logging.level,
+        "LOG_FORMAT": settings.logging.format,
+    }
+
+    # Add notification settings to API env
+    notif = settings.notifications
+    if notif.email.enabled:
+        api_env.update({
+            "EMAIL_ENABLED": "true",
+            "EMAIL_HOST": notif.email.host,
+            "EMAIL_PORT": str(notif.email.port),
+            "EMAIL_USE_TLS": str(notif.email.use_tls).lower(),
+            "EMAIL_START_TLS": str(notif.email.start_tls).lower(),
+            "EMAIL_FROM_ADDRESS": notif.email.from_address,
+            "EMAIL_FROM_NAME": notif.email.from_name,
+        })
+        if notif.email.username:
+            api_env["EMAIL_USERNAME"] = notif.email.username
+        if notif.email.password:
+            api_env["EMAIL_PASSWORD"] = notif.email.password.get_secret_value()
+        if notif.email.alert_recipients:
+            api_env["EMAIL_ALERT_RECIPIENTS"] = ",".join(notif.email.alert_recipients)
+
+    if notif.slack.enabled and notif.slack.webhook_url:
+        api_env.update({
+            "SLACK_ENABLED": "true",
+            "SLACK_WEBHOOK_URL": notif.slack.webhook_url,
+            "SLACK_USERNAME": notif.slack.username,
+            "SLACK_ICON_EMOJI": notif.slack.icon_emoji,
+        })
+        if notif.slack.default_channel:
+            api_env["SLACK_DEFAULT_CHANNEL"] = notif.slack.default_channel
+
+    if notif.pagerduty.enabled and notif.pagerduty.routing_key:
+        api_env.update({
+            "PAGERDUTY_ENABLED": "true",
+            "PAGERDUTY_ROUTING_KEY": notif.pagerduty.routing_key,
+            "PAGERDUTY_SERVICE_NAME": notif.pagerduty.service_name,
+        })
+
+    if notif.webhook.enabled and notif.webhook.url:
+        api_env.update({
+            "WEBHOOK_ENABLED": "true",
+            "WEBHOOK_URL": notif.webhook.url,
+            "WEBHOOK_TIMEOUT": str(notif.webhook.timeout),
+            "WEBHOOK_RETRY_COUNT": str(notif.webhook.retry_count),
+        })
+        if notif.webhook.secret:
+            api_env["WEBHOOK_SECRET"] = notif.webhook.secret.get_secret_value()
+
+    if notif.teams.enabled and notif.teams.webhook_url:
+        api_env.update({
+            "TEAMS_ENABLED": "true",
+            "TEAMS_WEBHOOK_URL": notif.teams.webhook_url,
+        })
+
+    # Build the compose structure
+    compose = {
+        "version": "3.8",
+        "services": {
+            "postgres": {
+                "image": "postgres:15-alpine",
+                "container_name": "flowlens-postgres",
+                "environment": {
+                    "POSTGRES_USER": settings.database.user,
+                    "POSTGRES_PASSWORD": settings.database.password.get_secret_value(),
+                    "POSTGRES_DB": settings.database.database,
+                },
+                "volumes": ["postgres_data:/var/lib/postgresql/data"],
+                "ports": [f"{settings.database.port}:5432"],
+                "healthcheck": {
+                    "test": ["CMD-SHELL", f"pg_isready -U {settings.database.user}"],
+                    "interval": "10s",
+                    "timeout": "5s",
+                    "retries": 5,
+                },
+                "restart": "unless-stopped",
+            },
+            "migrations": {
+                "build": {"context": ".", "target": "production"},
+                "container_name": "flowlens-migrations",
+                "command": ["alembic", "upgrade", "head"],
+                "environment": db_env,
+                "depends_on": {"postgres": {"condition": "service_healthy"}},
+            },
+            "api": {
+                "build": {"context": ".", "target": "production"},
+                "container_name": "flowlens-api",
+                "command": ["python", "-m", "flowlens.api.main"],
+                "environment": api_env,
+                "ports": [f"{settings.api.port}:8000"],
+                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
+                "healthcheck": {
+                    "test": ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/admin/health/live')"],
+                    "interval": "30s",
+                    "timeout": "10s",
+                    "retries": 3,
+                },
+                "restart": "unless-stopped",
+            },
+            "ingestion": {
+                "build": {"context": ".", "target": "production"},
+                "container_name": "flowlens-ingestion",
+                "command": ["python", "-m", "flowlens.ingestion.main"],
+                "environment": ingestion_env,
+                "ports": [
+                    f"{settings.ingestion.netflow_port}:{settings.ingestion.netflow_port}/udp",
+                    f"{settings.ingestion.sflow_port}:{settings.ingestion.sflow_port}/udp",
+                ],
+                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
+                "healthcheck": {
+                    "test": ["CMD", "pgrep", "-f", "flowlens.ingestion.main"],
+                    "interval": "30s",
+                    "timeout": "10s",
+                    "retries": 3,
+                },
+                "restart": "unless-stopped",
+            },
+            "enrichment": {
+                "build": {"context": ".", "target": "production"},
+                "container_name": "flowlens-enrichment",
+                "command": ["python", "-m", "flowlens.enrichment.main"],
+                "environment": enrichment_env,
+                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
+                "healthcheck": {
+                    "test": ["CMD", "pgrep", "-f", "flowlens.enrichment.main"],
+                    "interval": "30s",
+                    "timeout": "10s",
+                    "retries": 3,
+                },
+                "restart": "unless-stopped",
+            },
+            "resolution": {
+                "build": {"context": ".", "target": "production"},
+                "container_name": "flowlens-resolution",
+                "command": ["python", "-m", "flowlens.resolution.main"],
+                "environment": resolution_env,
+                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
+                "healthcheck": {
+                    "test": ["CMD", "pgrep", "-f", "flowlens.resolution.main"],
+                    "interval": "30s",
+                    "timeout": "10s",
+                    "retries": 3,
+                },
+                "restart": "unless-stopped",
+            },
+            "frontend": {
+                "build": {"context": "./frontend", "target": "production"},
+                "container_name": "flowlens-frontend",
+                "ports": ["3000:80"],
+                "depends_on": ["api"],
+                "healthcheck": {
+                    "test": ["CMD", "curl", "-f", "http://localhost/"],
+                    "interval": "30s",
+                    "timeout": "10s",
+                    "retries": 3,
+                },
+                "restart": "unless-stopped",
+            },
+        },
+        "volumes": {"postgres_data": None},
+        "networks": {"default": {"name": "flowlens-network"}},
+    }
+
+    # Add Redis if enabled
+    if settings.redis.enabled:
+        compose["services"]["redis"] = {
+            "image": "redis:7-alpine",
+            "container_name": "flowlens-redis",
+            "ports": [f"{settings.redis.port}:6379"],
+            "healthcheck": {
+                "test": ["CMD", "redis-cli", "ping"],
+                "interval": "10s",
+                "timeout": "5s",
+                "retries": 5,
+            },
+            "restart": "unless-stopped",
+        }
+        redis_env = {
+            "REDIS_ENABLED": "true",
+            "REDIS_HOST": "redis",
+            "REDIS_PORT": "6379",
+        }
+        if settings.redis.password:
+            redis_env["REDIS_PASSWORD"] = settings.redis.password.get_secret_value()
+        # Add to all services
+        for svc in ["api", "ingestion", "enrichment", "resolution"]:
+            compose["services"][svc]["environment"].update(redis_env)
+            if "depends_on" not in compose["services"][svc]:
+                compose["services"][svc]["depends_on"] = {}
+            if isinstance(compose["services"][svc]["depends_on"], list):
+                compose["services"][svc]["depends_on"].append("redis")
+            else:
+                compose["services"][svc]["depends_on"]["redis"] = {"condition": "service_healthy"}
+
+    # Generate YAML with nice formatting
+    # Custom representer to handle None values
+    def represent_none(dumper, _):
+        return dumper.represent_scalar('tag:yaml.org,2002:null', '')
+
+    yaml.add_representer(type(None), represent_none)
+
+    # Add header comment
+    header = """# FlowLens Docker Compose Configuration
+# Generated from System Settings on {date}
+#
+# To use: docker compose up -d
+#
+""".format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    return header + yaml.dump(compose, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
 def is_restart_required() -> bool:
     """Check if a restart is required due to settings changes.
 
