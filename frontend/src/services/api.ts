@@ -336,4 +336,157 @@ export const adminApi = {
   },
 };
 
+// Classification Rules endpoints
+export interface ClassificationRule {
+  id: string;
+  name: string;
+  description: string | null;
+  cidr: string;
+  priority: number;
+  environment: string | null;
+  datacenter: string | null;
+  location: string | null;
+  asset_type: string | null;
+  is_internal: boolean | null;
+  default_owner: string | null;
+  default_team: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClassificationRuleSummary {
+  id: string;
+  name: string;
+  cidr: string;
+  environment: string | null;
+  datacenter: string | null;
+  location: string | null;
+  is_active: boolean;
+}
+
+export interface IPClassificationResult {
+  ip_address: string;
+  matched: boolean;
+  rule_id: string | null;
+  rule_name: string | null;
+  environment: string | null;
+  datacenter: string | null;
+  location: string | null;
+  asset_type: string | null;
+  is_internal: boolean | null;
+}
+
+export interface AssetImportPreview {
+  total_rows: number;
+  to_create: number;
+  to_update: number;
+  to_skip: number;
+  errors: number;
+  validations: Array<{
+    row_number: number;
+    ip_address: string;
+    status: 'create' | 'update' | 'skip' | 'error';
+    message: string | null;
+    changes: Record<string, { old: unknown; new: unknown }> | null;
+  }>;
+}
+
+export interface AssetImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  error_details: string[] | null;
+}
+
+export const classificationApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    is_active?: boolean;
+    environment?: string;
+    datacenter?: string;
+  }): Promise<{ items: ClassificationRuleSummary[]; total: number; page: number; page_size: number }> => {
+    const { data } = await api.get('/classification-rules', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<ClassificationRule> => {
+    const { data } = await api.get(`/classification-rules/${id}`);
+    return data;
+  },
+
+  create: async (rule: Omit<ClassificationRule, 'id' | 'created_at' | 'updated_at'>): Promise<ClassificationRule> => {
+    const { data } = await api.post('/classification-rules', rule);
+    return data;
+  },
+
+  update: async (id: string, updates: Partial<ClassificationRule>): Promise<ClassificationRule> => {
+    const { data } = await api.patch(`/classification-rules/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/classification-rules/${id}`);
+  },
+
+  classifyIp: async (ip: string): Promise<IPClassificationResult> => {
+    const { data } = await api.get(`/classification-rules/classify/${ip}`);
+    return data;
+  },
+
+  listEnvironments: async (): Promise<string[]> => {
+    const { data } = await api.get('/classification-rules/environments/list');
+    return data;
+  },
+
+  listDatacenters: async (): Promise<string[]> => {
+    const { data } = await api.get('/classification-rules/datacenters/list');
+    return data;
+  },
+
+  listLocations: async (): Promise<string[]> => {
+    const { data } = await api.get('/classification-rules/locations/list');
+    return data;
+  },
+};
+
+// Asset bulk operations
+export const assetBulkApi = {
+  exportUrl: (format: 'csv' | 'json' = 'csv', params?: {
+    assetType?: string;
+    environment?: string;
+    datacenter?: string;
+    isInternal?: boolean;
+  }): string => {
+    const queryParams = new URLSearchParams();
+    queryParams.set('format', format);
+    if (params?.assetType) queryParams.set('assetType', params.assetType);
+    if (params?.environment) queryParams.set('environment', params.environment);
+    if (params?.datacenter) queryParams.set('datacenter', params.datacenter);
+    if (params?.isInternal !== undefined) queryParams.set('isInternal', String(params.isInternal));
+    return `/api/v1/assets/export?${queryParams.toString()}`;
+  },
+
+  previewImport: async (file: File): Promise<AssetImportPreview> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/assets/import/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  import: async (file: File, skipErrors: boolean = false): Promise<AssetImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/assets/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { skipErrors },
+    });
+    return data;
+  },
+};
+
 export default api;

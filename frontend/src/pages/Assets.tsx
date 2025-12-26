@@ -1,13 +1,18 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import {
+  MagnifyingGlassIcon,
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/outline';
 import Card from '../components/common/Card';
 import Table from '../components/common/Table';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
-import { assetApi } from '../services/api';
+import { assetApi, assetBulkApi, AssetImportPreview } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import type { Asset, AssetType } from '../types';
 import clsx from 'clsx';
@@ -30,10 +35,16 @@ const ASSET_TYPES: { value: AssetType | ''; label: string }[] = [
 
 export default function Assets() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [assetType, setAssetType] = useState<AssetType | ''>('');
   const [isInternal, setIsInternal] = useState<boolean | undefined>(undefined);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<AssetImportPreview | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['assets', page, search, assetType, isInternal],
@@ -47,6 +58,55 @@ export default function Assets() {
       }),
     placeholderData: (prev) => prev,
   });
+
+  const previewMutation = useMutation({
+    mutationFn: (file: File) => assetBulkApi.previewImport(file),
+    onSuccess: (data) => {
+      setImportPreview(data);
+      setImportError(null);
+    },
+    onError: (error: Error) => {
+      setImportError(error.message);
+      setImportPreview(null);
+    },
+  });
+
+  const importMutation = useMutation({
+    mutationFn: ({ file, skipErrors }: { file: File; skipErrors: boolean }) =>
+      assetBulkApi.import(file, skipErrors),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      setShowImportModal(false);
+      setImportFile(null);
+      setImportPreview(null);
+      alert(`Import complete: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped, ${result.errors} errors`);
+    },
+    onError: (error: Error) => {
+      setImportError(error.message);
+    },
+  });
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImportFile(file);
+      previewMutation.mutate(file);
+    }
+  };
+
+  const handleImport = () => {
+    if (importFile) {
+      importMutation.mutate({ file: importFile, skipErrors: true });
+    }
+  };
+
+  const handleExport = (format: 'csv' | 'json') => {
+    const url = assetBulkApi.exportUrl(format, {
+      assetType: assetType || undefined,
+      isInternal,
+    });
+    window.open(url, '_blank');
+  };
 
   // Get a display character for the asset avatar
   // I = Internal, E = External
@@ -132,6 +192,34 @@ export default function Assets() {
           <p className="text-slate-400 mt-1">
             {data?.total ?? 0} assets discovered
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Export dropdown */}
+          <div className="relative group">
+            <Button variant="secondary">
+              <ArrowDownTrayIcon className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+            <div className="absolute right-0 mt-1 w-40 bg-slate-800 border border-slate-700 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+              <button
+                onClick={() => handleExport('csv')}
+                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-t-lg"
+              >
+                Export as CSV
+              </button>
+              <button
+                onClick={() => handleExport('json')}
+                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-b-lg"
+              >
+                Export as JSON
+              </button>
+            </div>
+          </div>
+          {/* Import button */}
+          <Button variant="primary" onClick={() => setShowImportModal(true)}>
+            <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
+            Import
+          </Button>
         </div>
       </div>
 
@@ -241,6 +329,174 @@ export default function Assets() {
           </div>
         )}
       </Card>
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">Import Assets</h2>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportFile(null);
+                  setImportPreview(null);
+                  setImportError(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* File Upload */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Upload CSV or JSON file
+                </label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center cursor-pointer hover:border-primary-500 transition-colors"
+                >
+                  {importFile ? (
+                    <div>
+                      <p className="text-white font-medium">{importFile.name}</p>
+                      <p className="text-sm text-slate-400 mt-1">
+                        Click to choose a different file
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <ArrowUpTrayIcon className="w-8 h-8 mx-auto text-slate-400 mb-2" />
+                      <p className="text-slate-300">
+                        Click to upload or drag and drop
+                      </p>
+                      <p className="text-sm text-slate-400 mt-1">
+                        CSV or JSON files only
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Error */}
+              {importError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400">
+                  {importError}
+                </div>
+              )}
+
+              {/* Preview */}
+              {importPreview && (
+                <div className="space-y-3">
+                  <h3 className="text-white font-medium">Import Preview</h3>
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="p-3 bg-slate-700/50 rounded-lg text-center">
+                      <div className="text-2xl font-bold text-white">
+                        {importPreview.total_rows}
+                      </div>
+                      <div className="text-xs text-slate-400">Total Rows</div>
+                    </div>
+                    <div className="p-3 bg-green-500/20 rounded-lg text-center">
+                      <div className="text-2xl font-bold text-green-400">
+                        {importPreview.to_create}
+                      </div>
+                      <div className="text-xs text-slate-400">New Assets</div>
+                    </div>
+                    <div className="p-3 bg-blue-500/20 rounded-lg text-center">
+                      <div className="text-2xl font-bold text-blue-400">
+                        {importPreview.to_update}
+                      </div>
+                      <div className="text-xs text-slate-400">Updates</div>
+                    </div>
+                    <div className="p-3 bg-red-500/20 rounded-lg text-center">
+                      <div className="text-2xl font-bold text-red-400">
+                        {importPreview.errors}
+                      </div>
+                      <div className="text-xs text-slate-400">Errors</div>
+                    </div>
+                  </div>
+
+                  {/* Validation details */}
+                  {importPreview.validations.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto border border-slate-700 rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-700/50 sticky top-0">
+                          <tr className="text-left text-slate-400">
+                            <th className="px-3 py-2">Row</th>
+                            <th className="px-3 py-2">IP Address</th>
+                            <th className="px-3 py-2">Status</th>
+                            <th className="px-3 py-2">Details</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700">
+                          {importPreview.validations.slice(0, 50).map((v) => (
+                            <tr key={v.row_number} className="text-slate-300">
+                              <td className="px-3 py-2">{v.row_number}</td>
+                              <td className="px-3 py-2 font-mono">{v.ip_address || '-'}</td>
+                              <td className="px-3 py-2">
+                                <Badge
+                                  variant={
+                                    v.status === 'create'
+                                      ? 'success'
+                                      : v.status === 'update'
+                                      ? 'info'
+                                      : v.status === 'error'
+                                      ? 'error'
+                                      : 'default'
+                                  }
+                                >
+                                  {v.status}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-2 text-slate-400">{v.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {importPreview.validations.length > 50 && (
+                        <p className="px-3 py-2 text-slate-400 text-sm text-center">
+                          ... and {importPreview.validations.length - 50} more rows
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-700">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setImportFile(null);
+                    setImportPreview(null);
+                    setImportError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={!importPreview || importMutation.isPending}
+                  onClick={handleImport}
+                >
+                  {importMutation.isPending ? 'Importing...' : 'Import Assets'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

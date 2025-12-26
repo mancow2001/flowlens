@@ -18,6 +18,7 @@ class TopologyNode(BaseModel):
     is_critical: bool
     environment: str | None = None
     datacenter: str | None = None
+    location: str | None = None  # Dynamic from CIDR rules
 
     # Metrics for sizing
     connections_in: int
@@ -60,10 +61,12 @@ class TopologyFilter(BaseModel):
     asset_types: list[str] | None = None
     environments: list[str] | None = None
     datacenters: list[str] | None = None
+    locations: list[str] | None = None
     include_external: bool = True
     min_bytes_24h: int = 0
     max_depth: int = Field(5, ge=1, le=10)
     as_of: datetime | None = None  # Point-in-time query
+    use_cidr_classification: bool = True  # Apply CIDR rules for dynamic grouping
 
 
 class TraversalNode(BaseModel):

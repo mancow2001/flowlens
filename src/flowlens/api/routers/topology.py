@@ -23,6 +23,57 @@ from flowlens.schemas.topology import (
 router = APIRouter(prefix="/topology", tags=["topology"])
 
 
+async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> dict[str, dict]:
+    """Get CIDR classifications for a batch of IP addresses.
+
+    Returns a dict mapping IP address to classification attributes.
+    """
+    if not ip_addresses:
+        return {}
+
+    # Build a query that gets classifications for all IPs in one go
+    # Using a lateral join with the classification function
+    result = await db.execute(
+        text("""
+            SELECT
+                ip_addr,
+                cr.environment,
+                cr.datacenter,
+                cr.location,
+                cr.asset_type,
+                cr.is_internal
+            FROM unnest(:ip_addrs::inet[]) AS ip_addr
+            LEFT JOIN LATERAL (
+                SELECT
+                    environment,
+                    datacenter,
+                    location,
+                    asset_type,
+                    is_internal
+                FROM classification_rules
+                WHERE is_active = true
+                  AND ip_addr <<= cidr::inet
+                ORDER BY masklen(cidr) DESC, priority ASC
+                LIMIT 1
+            ) cr ON true
+        """),
+        {"ip_addrs": ip_addresses},
+    )
+
+    classifications = {}
+    for row in result.fetchall():
+        ip = str(row.ip_addr)
+        classifications[ip] = {
+            "environment": row.environment,
+            "datacenter": row.datacenter,
+            "location": row.location,
+            "asset_type": row.asset_type,
+            "is_internal": row.is_internal,
+        }
+
+    return classifications
+
+
 @router.post("/graph", response_model=TopologyGraph)
 async def get_topology_graph(
     filters: TopologyFilter,
@@ -32,6 +83,8 @@ async def get_topology_graph(
     """Get topology graph with optional filtering.
 
     Returns nodes and edges for visualization.
+    When use_cidr_classification is True (default), environment, datacenter,
+    and location are dynamically determined from CIDR classification rules.
     """
     # Build asset query
     asset_query = select(Asset).where(Asset.deleted_at.is_(None))
@@ -40,35 +93,57 @@ async def get_topology_graph(
         asset_query = asset_query.where(Asset.id.in_(filters.asset_ids))
     if filters.asset_types:
         asset_query = asset_query.where(Asset.asset_type.in_(filters.asset_types))
-    if filters.environments:
-        asset_query = asset_query.where(Asset.environment.in_(filters.environments))
-    if filters.datacenters:
-        asset_query = asset_query.where(Asset.datacenter.in_(filters.datacenters))
+    # Note: environment/datacenter/location filtering happens after CIDR classification
     if not filters.include_external:
         asset_query = asset_query.where(Asset.is_internal == True)
 
     # Get assets
     asset_result = await db.execute(asset_query)
     assets = asset_result.scalars().all()
-    asset_ids = {a.id for a in assets}
 
-    # Build nodes
-    nodes = [
-        TopologyNode(
+    # Get CIDR classifications if enabled
+    classifications = {}
+    if filters.use_cidr_classification and assets:
+        ip_addresses = [str(a.ip_address) for a in assets]
+        classifications = await get_cidr_classifications(db, ip_addresses)
+
+    # Build nodes with CIDR-based attributes
+    nodes = []
+    for a in assets:
+        ip_str = str(a.ip_address)
+        cidr_class = classifications.get(ip_str, {})
+
+        # Use CIDR classification if available, otherwise fall back to asset fields
+        environment = cidr_class.get("environment") or a.environment
+        datacenter = cidr_class.get("datacenter") or a.datacenter
+        location = cidr_class.get("location")
+        is_internal = cidr_class.get("is_internal") if cidr_class.get("is_internal") is not None else a.is_internal
+
+        nodes.append(TopologyNode(
             id=a.id,
             name=a.name,
             label=a.display_name or a.name,
             asset_type=a.asset_type.value if hasattr(a.asset_type, 'value') else a.asset_type,
-            ip_address=str(a.ip_address),
-            is_internal=a.is_internal,
+            ip_address=ip_str,
+            is_internal=is_internal,
             is_critical=a.is_critical,
-            environment=a.environment,
-            datacenter=a.datacenter,
+            environment=environment,
+            datacenter=datacenter,
+            location=location,
             connections_in=a.connections_in,
             connections_out=a.connections_out,
-        )
-        for a in assets
-    ]
+        ))
+
+    # Apply environment/datacenter/location filters after CIDR classification
+    if filters.environments:
+        nodes = [n for n in nodes if n.environment in filters.environments]
+    if filters.datacenters:
+        nodes = [n for n in nodes if n.datacenter in filters.datacenters]
+    if filters.locations:
+        nodes = [n for n in nodes if n.location in filters.locations]
+
+    # Get the filtered asset IDs
+    asset_ids = {n.id for n in nodes}
 
     # Build dependency query
     dep_query = select(Dependency).where(

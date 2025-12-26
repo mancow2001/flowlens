@@ -8,6 +8,7 @@ import AssetDetail from './pages/AssetDetail';
 import Dependencies from './pages/Dependencies';
 import Alerts from './pages/Alerts';
 import Changes from './pages/Changes';
+import ClassificationRules from './pages/ClassificationRules';
 import { useWebSocket } from './hooks/useWebSocket';
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
         <Route path="/dependencies" element={<Dependencies />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/changes" element={<Changes />} />
+        <Route path="/settings/classification" element={<ClassificationRules />} />
       </Routes>
     </Layout>
   );

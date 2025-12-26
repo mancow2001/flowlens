@@ -194,3 +194,65 @@ class ApplicationWithAssets(ApplicationResponse):
     """Application with its member assets."""
 
     assets: list[AssetSummary]
+
+
+# Bulk import/export schemas
+class AssetExportRow(BaseModel):
+    """Single row in asset export (CSV/JSON)."""
+
+    ip_address: str
+    name: str
+    hostname: str | None = None
+    asset_type: str | None = None
+    owner: str | None = None
+    team: str | None = None
+    description: str | None = None
+    is_critical: bool = False
+    environment: str | None = None
+    datacenter: str | None = None
+    tags: str | None = None  # JSON string for CSV compatibility
+
+
+class AssetImportRow(BaseModel):
+    """Single row for asset import."""
+
+    ip_address: str
+    name: str | None = None
+    hostname: str | None = None
+    asset_type: str | None = None
+    owner: str | None = None
+    team: str | None = None
+    description: str | None = None
+    is_critical: bool | None = None
+    tags: str | None = None  # JSON string
+
+
+class AssetImportValidation(BaseModel):
+    """Validation result for a single import row."""
+
+    row_number: int
+    ip_address: str
+    status: str  # "create", "update", "skip", "error"
+    message: str | None = None
+    changes: dict[str, dict[str, Any]] | None = None  # field -> {old, new}
+
+
+class AssetImportPreview(BaseModel):
+    """Preview of what an import will do before committing."""
+
+    total_rows: int
+    to_create: int
+    to_update: int
+    to_skip: int
+    errors: int
+    validations: list[AssetImportValidation]
+
+
+class AssetImportResult(BaseModel):
+    """Result of committing an asset import."""
+
+    created: int
+    updated: int
+    skipped: int
+    errors: int
+    error_details: list[str] | None = None

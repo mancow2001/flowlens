@@ -1,9 +1,13 @@
 """Asset API endpoints."""
 
+import csv
+import io
+import json
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -12,6 +16,11 @@ from flowlens.models.asset import Asset, AssetType, Service
 from flowlens.models.dependency import Dependency
 from flowlens.schemas.asset import (
     AssetCreate,
+    AssetExportRow,
+    AssetImportPreview,
+    AssetImportResult,
+    AssetImportRow,
+    AssetImportValidation,
     AssetList,
     AssetResponse,
     AssetSummary,
@@ -421,3 +430,465 @@ async def get_asset_dependencies(
         ))
 
     return response
+
+
+# =============================================================================
+# Bulk Export/Import Endpoints
+# =============================================================================
+
+
+@router.get("/export", response_class=StreamingResponse)
+async def export_assets(
+    db: DbSession,
+    user: AuthenticatedUser,
+    format: Literal["csv", "json"] = Query("csv"),
+    asset_type: AssetType | None = Query(None, alias="assetType"),
+    environment: str | None = None,
+    datacenter: str | None = None,
+    is_internal: bool | None = Query(None, alias="isInternal"),
+) -> StreamingResponse:
+    """Export all assets to CSV or JSON format.
+
+    Exported data includes editable fields that can be modified and re-imported.
+    Fields like environment and datacenter from static asset data are included
+    (CIDR-based classifications are not included in export as they're dynamic).
+    """
+    # Build query with optional filters
+    query = select(Asset).where(Asset.deleted_at.is_(None))
+
+    if asset_type:
+        query = query.where(Asset.asset_type == asset_type)
+    if environment:
+        query = query.where(Asset.environment == environment)
+    if datacenter:
+        query = query.where(Asset.datacenter == datacenter)
+    if is_internal is not None:
+        query = query.where(Asset.is_internal == is_internal)
+
+    query = query.order_by(Asset.ip_address)
+
+    result = await db.execute(query)
+    assets = result.scalars().all()
+
+    # Build export rows
+    rows = []
+    for a in assets:
+        rows.append(AssetExportRow(
+            ip_address=str(a.ip_address),
+            name=a.name,
+            hostname=a.hostname,
+            asset_type=a.asset_type.value if hasattr(a.asset_type, 'value') else str(a.asset_type),
+            owner=a.owner,
+            team=a.team,
+            description=a.description,
+            is_critical=a.is_critical,
+            environment=a.environment,
+            datacenter=a.datacenter,
+            tags=json.dumps(a.tags) if a.tags else None,
+        ))
+
+    if format == "json":
+        # JSON export
+        content = json.dumps([r.model_dump() for r in rows], indent=2)
+        return StreamingResponse(
+            iter([content]),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=assets-export.json"},
+        )
+    else:
+        # CSV export
+        output = io.StringIO()
+        fieldnames = [
+            "ip_address", "name", "hostname", "asset_type", "owner", "team",
+            "description", "is_critical", "environment", "datacenter", "tags"
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row.model_dump())
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=assets-export.csv"},
+        )
+
+
+@router.post("/import/preview", response_model=AssetImportPreview)
+async def preview_asset_import(
+    db: DbSession,
+    user: AuthenticatedUser,
+    file: UploadFile = File(...),
+) -> AssetImportPreview:
+    """Preview what an asset import will do before committing.
+
+    Accepts CSV or JSON file. Matches assets by IP address.
+    Returns a preview of creates, updates, and any errors.
+    """
+    content = await file.read()
+    content_str = content.decode("utf-8")
+
+    # Parse file based on content type or extension
+    rows: list[dict] = []
+    filename = file.filename or ""
+
+    if filename.endswith(".json") or file.content_type == "application/json":
+        try:
+            rows = json.loads(content_str)
+            if not isinstance(rows, list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="JSON file must contain an array of objects",
+                )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON: {e}",
+            )
+    else:
+        # Assume CSV
+        try:
+            reader = csv.DictReader(io.StringIO(content_str))
+            rows = list(reader)
+        except csv.Error as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid CSV: {e}",
+            )
+
+    if not rows:
+        return AssetImportPreview(
+            total_rows=0,
+            to_create=0,
+            to_update=0,
+            to_skip=0,
+            errors=0,
+            validations=[],
+        )
+
+    # Get existing assets by IP for comparison
+    ip_addresses = [r.get("ip_address", "") for r in rows if r.get("ip_address")]
+    existing_query = select(Asset).where(
+        Asset.deleted_at.is_(None),
+        cast(Asset.ip_address, String).in_(ip_addresses),
+    )
+    existing_result = await db.execute(existing_query)
+    existing_assets = {str(a.ip_address): a for a in existing_result.scalars().all()}
+
+    # Validate each row
+    validations = []
+    to_create = 0
+    to_update = 0
+    to_skip = 0
+    errors = 0
+
+    for idx, row in enumerate(rows, start=1):
+        ip = row.get("ip_address", "").strip()
+
+        if not ip:
+            validations.append(AssetImportValidation(
+                row_number=idx,
+                ip_address="",
+                status="error",
+                message="Missing ip_address",
+            ))
+            errors += 1
+            continue
+
+        # Validate IP format
+        try:
+            import ipaddress
+            ipaddress.ip_address(ip)
+        except ValueError:
+            validations.append(AssetImportValidation(
+                row_number=idx,
+                ip_address=ip,
+                status="error",
+                message=f"Invalid IP address format: {ip}",
+            ))
+            errors += 1
+            continue
+
+        existing = existing_assets.get(ip)
+
+        if existing:
+            # Check for changes
+            changes = {}
+            for field in ["name", "hostname", "owner", "team", "description"]:
+                new_val = row.get(field, "").strip() if row.get(field) else None
+                old_val = getattr(existing, field)
+                if new_val and new_val != old_val:
+                    changes[field] = {"old": old_val, "new": new_val}
+
+            # Handle is_critical (bool)
+            if "is_critical" in row and row["is_critical"] != "":
+                new_critical = str(row["is_critical"]).lower() in ("true", "1", "yes")
+                if new_critical != existing.is_critical:
+                    changes["is_critical"] = {"old": existing.is_critical, "new": new_critical}
+
+            # Handle asset_type
+            if row.get("asset_type"):
+                new_type = row["asset_type"].strip()
+                old_type = existing.asset_type.value if hasattr(existing.asset_type, 'value') else str(existing.asset_type)
+                if new_type and new_type != old_type:
+                    # Validate asset type
+                    valid_types = [t.value for t in AssetType]
+                    if new_type not in valid_types:
+                        validations.append(AssetImportValidation(
+                            row_number=idx,
+                            ip_address=ip,
+                            status="error",
+                            message=f"Invalid asset_type: {new_type}. Valid types: {', '.join(valid_types)}",
+                        ))
+                        errors += 1
+                        continue
+                    changes["asset_type"] = {"old": old_type, "new": new_type}
+
+            if changes:
+                validations.append(AssetImportValidation(
+                    row_number=idx,
+                    ip_address=ip,
+                    status="update",
+                    message=f"Will update {len(changes)} field(s)",
+                    changes=changes,
+                ))
+                to_update += 1
+            else:
+                validations.append(AssetImportValidation(
+                    row_number=idx,
+                    ip_address=ip,
+                    status="skip",
+                    message="No changes detected",
+                ))
+                to_skip += 1
+        else:
+            # New asset - requires name
+            name = row.get("name", "").strip() if row.get("name") else None
+            if not name:
+                validations.append(AssetImportValidation(
+                    row_number=idx,
+                    ip_address=ip,
+                    status="error",
+                    message="New asset requires a name",
+                ))
+                errors += 1
+                continue
+
+            validations.append(AssetImportValidation(
+                row_number=idx,
+                ip_address=ip,
+                status="create",
+                message=f"Will create new asset: {name}",
+            ))
+            to_create += 1
+
+    return AssetImportPreview(
+        total_rows=len(rows),
+        to_create=to_create,
+        to_update=to_update,
+        to_skip=to_skip,
+        errors=errors,
+        validations=validations,
+    )
+
+
+@router.post("/import", response_model=AssetImportResult)
+async def import_assets(
+    db: DbSession,
+    user: AuthenticatedUser,
+    file: UploadFile = File(...),
+    skip_errors: bool = Query(False, alias="skipErrors"),
+) -> AssetImportResult:
+    """Import assets from CSV or JSON file.
+
+    Matches assets by IP address. Updates existing assets or creates new ones.
+    Blank values in the import file are ignored (won't overwrite existing data).
+    """
+    content = await file.read()
+    content_str = content.decode("utf-8")
+
+    # Parse file
+    rows: list[dict] = []
+    filename = file.filename or ""
+
+    if filename.endswith(".json") or file.content_type == "application/json":
+        try:
+            rows = json.loads(content_str)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON: {e}",
+            )
+    else:
+        try:
+            reader = csv.DictReader(io.StringIO(content_str))
+            rows = list(reader)
+        except csv.Error as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid CSV: {e}",
+            )
+
+    if not rows:
+        return AssetImportResult(
+            created=0,
+            updated=0,
+            skipped=0,
+            errors=0,
+        )
+
+    # Get existing assets
+    ip_addresses = [r.get("ip_address", "") for r in rows if r.get("ip_address")]
+    existing_query = select(Asset).where(
+        Asset.deleted_at.is_(None),
+        cast(Asset.ip_address, String).in_(ip_addresses),
+    )
+    existing_result = await db.execute(existing_query)
+    existing_assets = {str(a.ip_address): a for a in existing_result.scalars().all()}
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors = 0
+    error_details = []
+
+    for idx, row in enumerate(rows, start=1):
+        ip = row.get("ip_address", "").strip()
+
+        if not ip:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: Missing ip_address")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: Missing ip_address",
+            )
+
+        # Validate IP
+        try:
+            import ipaddress
+            ipaddress.ip_address(ip)
+        except ValueError:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: Invalid IP address: {ip}")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: Invalid IP address: {ip}",
+            )
+
+        existing = existing_assets.get(ip)
+
+        if existing:
+            # Update existing asset
+            has_changes = False
+            for field in ["name", "hostname", "owner", "team", "description"]:
+                new_val = row.get(field, "").strip() if row.get(field) else None
+                if new_val:  # Only update if value provided
+                    if new_val != getattr(existing, field):
+                        setattr(existing, field, new_val)
+                        has_changes = True
+
+            # Handle is_critical
+            if "is_critical" in row and row["is_critical"] != "":
+                new_critical = str(row["is_critical"]).lower() in ("true", "1", "yes")
+                if new_critical != existing.is_critical:
+                    existing.is_critical = new_critical
+                    has_changes = True
+
+            # Handle asset_type
+            if row.get("asset_type"):
+                new_type = row["asset_type"].strip()
+                if new_type:
+                    try:
+                        existing.asset_type = AssetType(new_type)
+                        has_changes = True
+                    except ValueError:
+                        if skip_errors:
+                            errors += 1
+                            error_details.append(f"Row {idx}: Invalid asset_type: {new_type}")
+                            continue
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Row {idx}: Invalid asset_type: {new_type}",
+                        )
+
+            # Handle tags (JSON string)
+            if row.get("tags"):
+                try:
+                    new_tags = json.loads(row["tags"])
+                    if new_tags != existing.tags:
+                        existing.tags = new_tags
+                        has_changes = True
+                except json.JSONDecodeError:
+                    if skip_errors:
+                        errors += 1
+                        error_details.append(f"Row {idx}: Invalid tags JSON")
+                        continue
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Row {idx}: Invalid tags JSON",
+                    )
+
+            if has_changes:
+                updated += 1
+            else:
+                skipped += 1
+        else:
+            # Create new asset
+            name = row.get("name", "").strip() if row.get("name") else None
+            if not name:
+                if skip_errors:
+                    errors += 1
+                    error_details.append(f"Row {idx}: New asset requires a name")
+                    continue
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Row {idx}: New asset requires a name",
+                )
+
+            asset_type_str = row.get("asset_type", "").strip() if row.get("asset_type") else "unknown"
+            try:
+                asset_type = AssetType(asset_type_str)
+            except ValueError:
+                asset_type = AssetType.UNKNOWN
+
+            is_critical = False
+            if "is_critical" in row and row["is_critical"] != "":
+                is_critical = str(row["is_critical"]).lower() in ("true", "1", "yes")
+
+            tags = None
+            if row.get("tags"):
+                try:
+                    tags = json.loads(row["tags"])
+                except json.JSONDecodeError:
+                    pass
+
+            new_asset = Asset(
+                ip_address=ip,
+                name=name,
+                hostname=row.get("hostname", "").strip() if row.get("hostname") else None,
+                asset_type=asset_type,
+                owner=row.get("owner", "").strip() if row.get("owner") else None,
+                team=row.get("team", "").strip() if row.get("team") else None,
+                description=row.get("description", "").strip() if row.get("description") else None,
+                is_critical=is_critical,
+                environment=row.get("environment", "").strip() if row.get("environment") else None,
+                datacenter=row.get("datacenter", "").strip() if row.get("datacenter") else None,
+                tags=tags,
+            )
+            db.add(new_asset)
+            created += 1
+
+    await db.flush()
+
+    return AssetImportResult(
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+        error_details=error_details if error_details else None,
+    )

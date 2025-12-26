@@ -1,28 +1,90 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftIcon,
   ArrowUpIcon,
   ArrowDownIcon,
+  PencilIcon,
+  CheckIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import Table from '../components/common/Table';
 import { LoadingPage } from '../components/common/Loading';
-import { assetApi, analysisApi } from '../services/api';
+import { assetApi, analysisApi, classificationApi } from '../services/api';
 import { formatDateTime, formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
-import type { Dependency } from '../types';
+import type { Dependency, Asset } from '../types';
+
+const ASSET_TYPES = [
+  'server',
+  'workstation',
+  'database',
+  'load_balancer',
+  'firewall',
+  'router',
+  'switch',
+  'storage',
+  'container',
+  'virtual_machine',
+  'cloud_service',
+  'unknown',
+];
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<Asset>>({});
 
   const { data: asset, isLoading: assetLoading } = useQuery({
     queryKey: ['assets', id],
     queryFn: () => assetApi.get(id!),
     enabled: !!id,
   });
+
+  // Get CIDR classification for this asset
+  const { data: cidrClassification } = useQuery({
+    queryKey: ['classification', asset?.ip_address],
+    queryFn: () => classificationApi.classifyIp(asset!.ip_address),
+    enabled: !!asset?.ip_address,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (updates: Partial<Asset>) => assetApi.update(id!, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets', id] });
+      setIsEditing(false);
+      setEditForm({});
+    },
+  });
+
+  const handleStartEdit = () => {
+    if (asset) {
+      setEditForm({
+        name: asset.name,
+        hostname: asset.hostname,
+        asset_type: asset.asset_type,
+        owner: asset.owner,
+        team: asset.team,
+        description: asset.description,
+        is_critical: asset.is_critical,
+      });
+      setIsEditing(true);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditForm({});
+  };
+
+  const handleSaveEdit = () => {
+    updateMutation.mutate(editForm);
+  };
 
   const { data: dependencies } = useQuery({
     queryKey: ['assets', id, 'dependencies'],
@@ -127,24 +189,82 @@ export default function AssetDetail() {
             {asset.name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">{asset.name}</h1>
+            {isEditing ? (
+              <input
+                type="text"
+                value={editForm.name || ''}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                className="text-2xl font-bold bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            ) : (
+              <h1 className="text-2xl font-bold text-white">{asset.name}</h1>
+            )}
             <div className="flex items-center gap-2 mt-1">
-              <Badge>{asset.asset_type?.replace('_', ' ') ?? 'Unknown'}</Badge>
-              {asset.is_critical && <Badge variant="error">Critical</Badge>}
+              {isEditing ? (
+                <select
+                  value={editForm.asset_type || ''}
+                  onChange={(e) => setEditForm({ ...editForm, asset_type: e.target.value as Asset['asset_type'] })}
+                  className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  {ASSET_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type.replace('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Badge>{asset.asset_type?.replace('_', ' ') ?? 'Unknown'}</Badge>
+              )}
+              {isEditing ? (
+                <label className="flex items-center gap-1 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_critical || false}
+                    onChange={(e) => setEditForm({ ...editForm, is_critical: e.target.checked })}
+                    className="rounded border-slate-600 bg-slate-700 text-primary-500"
+                  />
+                  Critical
+                </label>
+              ) : (
+                asset.is_critical && <Badge variant="error">Critical</Badge>
+              )}
               {!asset.is_internal && <Badge variant="warning">External</Badge>}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => navigate('/topology')}>
-            View in Topology
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => document.getElementById('blast-radius')?.scrollIntoView({ behavior: 'smooth' })}
-          >
-            Run Impact Analysis
-          </Button>
+          {isEditing ? (
+            <>
+              <Button variant="ghost" onClick={handleCancelEdit}>
+                <XMarkIcon className="w-4 h-4 mr-1" />
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSaveEdit}
+                disabled={updateMutation.isPending}
+              >
+                <CheckIcon className="w-4 h-4 mr-1" />
+                {updateMutation.isPending ? 'Saving...' : 'Save'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={handleStartEdit}>
+                <PencilIcon className="w-4 h-4 mr-1" />
+                Edit
+              </Button>
+              <Button variant="secondary" onClick={() => navigate('/topology')}>
+                View in Topology
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => document.getElementById('blast-radius')?.scrollIntoView({ behavior: 'smooth' })}
+              >
+                Run Impact Analysis
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -184,27 +304,73 @@ export default function AssetDetail() {
           </dl>
         </Card>
 
-        {/* Timestamps */}
-        <Card title="Activity">
+        {/* Ownership & Classification */}
+        <Card title="Ownership & Classification">
           <dl className="space-y-3">
             <div>
-              <dt className="text-sm text-slate-400">First Seen</dt>
-              <dd className="text-white">
-                {formatDateTime(asset.first_seen)}
-              </dd>
+              <dt className="text-sm text-slate-400">Owner</dt>
+              {isEditing ? (
+                <input
+                  type="text"
+                  value={editForm.owner || ''}
+                  onChange={(e) => setEditForm({ ...editForm, owner: e.target.value })}
+                  placeholder="e.g., john.doe@example.com"
+                  className="w-full mt-1 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              ) : (
+                <dd className="text-white">{asset.owner || '-'}</dd>
+              )}
             </div>
             <div>
-              <dt className="text-sm text-slate-400">Last Seen</dt>
-              <dd className="text-white">{formatDateTime(asset.last_seen)}</dd>
+              <dt className="text-sm text-slate-400">Team</dt>
+              {isEditing ? (
+                <input
+                  type="text"
+                  value={editForm.team || ''}
+                  onChange={(e) => setEditForm({ ...editForm, team: e.target.value })}
+                  placeholder="e.g., Platform Team"
+                  className="w-full mt-1 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              ) : (
+                <dd className="text-white">{asset.team || '-'}</dd>
+              )}
             </div>
             <div>
-              <dt className="text-sm text-slate-400">Created</dt>
-              <dd className="text-white">{formatDateTime(asset.created_at)}</dd>
+              <dt className="text-sm text-slate-400">Description</dt>
+              {isEditing ? (
+                <textarea
+                  value={editForm.description || ''}
+                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  placeholder="Asset description..."
+                  rows={2}
+                  className="w-full mt-1 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              ) : (
+                <dd className="text-white">{asset.description || '-'}</dd>
+              )}
             </div>
-            <div>
-              <dt className="text-sm text-slate-400">Updated</dt>
-              <dd className="text-white">{formatDateTime(asset.updated_at)}</dd>
-            </div>
+            {/* CIDR Classification */}
+            {cidrClassification?.matched && (
+              <div className="pt-3 mt-3 border-t border-slate-700">
+                <dt className="text-sm text-slate-400 mb-2">
+                  CIDR Classification
+                  <span className="ml-2 text-xs text-slate-500">
+                    (from rule: {cidrClassification.rule_name})
+                  </span>
+                </dt>
+                <div className="flex flex-wrap gap-2">
+                  {cidrClassification.environment && (
+                    <Badge>Env: {cidrClassification.environment}</Badge>
+                  )}
+                  {cidrClassification.datacenter && (
+                    <Badge>DC: {cidrClassification.datacenter}</Badge>
+                  )}
+                  {cidrClassification.location && (
+                    <Badge>Loc: {cidrClassification.location}</Badge>
+                  )}
+                </div>
+              </div>
+            )}
           </dl>
         </Card>
 
