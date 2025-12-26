@@ -373,38 +373,48 @@ async def find_path(
             )
 
     # Use BFS to find shortest path
-    # The query stops expanding paths that already reached the target
+    # Search bidirectionally - treat dependencies as undirected edges for path finding
+    # This finds paths regardless of which direction the traffic flows
     result = await db.execute(
         text("""
-            WITH RECURSIVE path_search AS (
-                SELECT
-                    source_asset_id,
-                    target_asset_id,
-                    ARRAY[source_asset_id, target_asset_id] AS path,
-                    1 AS depth,
-                    (target_asset_id = :target_id) AS found
+            WITH RECURSIVE
+            -- Create bidirectional edges view
+            edges AS (
+                SELECT source_asset_id AS from_id, target_asset_id AS to_id
                 FROM dependencies
-                WHERE source_asset_id = :source_id
-                  AND valid_to IS NULL
+                WHERE valid_to IS NULL
+                UNION
+                SELECT target_asset_id AS from_id, source_asset_id AS to_id
+                FROM dependencies
+                WHERE valid_to IS NULL
+            ),
+            path_search AS (
+                SELECT
+                    from_id,
+                    to_id,
+                    ARRAY[from_id, to_id] AS path,
+                    1 AS depth,
+                    (to_id = :target_id) AS found
+                FROM edges
+                WHERE from_id = :source_id
 
                 UNION ALL
 
                 SELECT
-                    d.source_asset_id,
-                    d.target_asset_id,
-                    ps.path || d.target_asset_id,
+                    e.from_id,
+                    e.to_id,
+                    ps.path || e.to_id,
                     ps.depth + 1,
-                    (d.target_asset_id = :target_id) AS found
+                    (e.to_id = :target_id) AS found
                 FROM path_search ps
-                JOIN dependencies d ON d.source_asset_id = ps.target_asset_id
+                JOIN edges e ON e.from_id = ps.to_id
                 WHERE ps.depth < :max_depth
-                  AND d.valid_to IS NULL
-                  AND NOT d.target_asset_id = ANY(ps.path)
+                  AND NOT e.to_id = ANY(ps.path)
                   AND NOT ps.found  -- Stop expanding paths that found target
             )
             SELECT path, depth
             FROM path_search
-            WHERE target_asset_id = :target_id
+            WHERE to_id = :target_id
             ORDER BY depth
             LIMIT 1
         """),
@@ -421,9 +431,10 @@ async def find_path(
 
     path = list(row.path)
 
-    # Get edges along the path
+    # Get edges along the path (check both directions since path is bidirectional)
     edges = []
     for i in range(len(path) - 1):
+        # Try forward direction first
         edge_result = await db.execute(
             select(Dependency).where(
                 Dependency.source_asset_id == path[i],
@@ -432,6 +443,18 @@ async def find_path(
             )
         )
         dep = edge_result.scalar_one_or_none()
+
+        # If not found, try reverse direction
+        if not dep:
+            edge_result = await db.execute(
+                select(Dependency).where(
+                    Dependency.source_asset_id == path[i + 1],
+                    Dependency.target_asset_id == path[i],
+                    Dependency.valid_to.is_(None),
+                )
+            )
+            dep = edge_result.scalar_one_or_none()
+
         if dep:
             edges.append(
                 TopologyEdge(
