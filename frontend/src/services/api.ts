@@ -768,6 +768,7 @@ export interface SettingsUpdateResponse {
   message: string;
   restart_required: boolean;
   updated_fields: string[];
+  docker_mode: boolean;
 }
 
 export interface ConnectionTestResponse {

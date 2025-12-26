@@ -96,6 +96,7 @@ class SettingsUpdateResponse(BaseModel):
     message: str
     restart_required: bool = False
     updated_fields: list[str] = Field(default_factory=list)
+    docker_mode: bool = False  # True if running in Docker (env file not writable)
 
 
 class ConnectionTestRequest(BaseModel):

@@ -169,7 +169,7 @@ async def update_section(
         fields=list(request.values.keys()),
     )
 
-    success, updated_fields, restart_required = update_section_settings(
+    success, updated_fields, restart_required, docker_mode = update_section_settings(
         section_key,
         request.values,
         user_id=admin.sub,
@@ -182,7 +182,9 @@ async def update_section(
         )
 
     message = f"Updated {len(updated_fields)} setting(s)"
-    if restart_required:
+    if docker_mode:
+        message += ". Running in Docker - settings applied to current session but require updating docker-compose.yml for persistence."
+    elif restart_required:
         message += ". Restart required for changes to take effect."
 
     return SettingsUpdateResponse(
@@ -190,6 +192,7 @@ async def update_section(
         message=message,
         restart_required=restart_required,
         updated_fields=updated_fields,
+        docker_mode=docker_mode,
     )
 
 

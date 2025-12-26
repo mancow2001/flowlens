@@ -1,16 +1,21 @@
 """Settings management service.
 
 Handles reading, updating, and persisting application settings.
+
+In Docker deployments, settings are stored in the database since .env files
+are not writable. For local development, settings can be written to .env.
 """
 
+import json
 import os
-import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import SecretStr
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.common.config import Settings, get_settings
 from flowlens.common.logging import get_logger
@@ -25,11 +30,15 @@ from flowlens.schemas.settings import (
 
 logger = get_logger(__name__)
 
-# Path to .env file
+# Path to .env file (may not be writable in Docker)
 ENV_FILE_PATH = Path(__file__).parent.parent.parent.parent / ".env"
 
 # Track if restart is required
 _restart_required = False
+
+# In-memory override store for Docker environments
+# These overrides are applied when get_settings() is called
+_settings_overrides: dict[str, str] = {}
 
 
 def _get_nested_attr(obj: Any, path: str) -> Any:
@@ -284,7 +293,7 @@ def update_section_settings(
     section_key: str,
     values: dict[str, Any],
     user_id: str | None = None,
-) -> tuple[bool, list[str], bool]:
+) -> tuple[bool, list[str], bool, bool]:
     """Update settings for a section.
 
     Args:
@@ -293,13 +302,13 @@ def update_section_settings(
         user_id: ID of user making the change (for audit).
 
     Returns:
-        Tuple of (success, updated_fields, restart_required).
+        Tuple of (success, updated_fields, restart_required, docker_mode).
     """
     global _restart_required
 
     section_info = get_section_by_key(section_key)
     if not section_info:
-        return False, [], False
+        return False, [], False, False
 
     # Build env var updates
     env_updates = {}
@@ -329,33 +338,57 @@ def update_section_settings(
         updated_fields.append(field.name)
 
     if not env_updates:
-        return True, [], False
+        return True, [], False, False
 
-    # Write to .env file
+    # Try to write to .env file first
+    env_file_written = False
     try:
         write_env_file(env_updates)
+        env_file_written = True
+        logger.info("Settings written to .env file")
+    except PermissionError:
+        # Docker environment - .env file not writable
+        # Store in memory and apply to environment
+        logger.info(
+            "Cannot write to .env file (Docker environment), "
+            "storing settings in memory. Changes require container restart."
+        )
+        for key, value in env_updates.items():
+            _settings_overrides[key] = value
+            # Also set in current process environment
+            os.environ[key] = value
     except Exception as e:
         logger.error("Failed to write .env file", error=str(e))
-        return False, [], False
+        # Still try to apply to environment
+        for key, value in env_updates.items():
+            _settings_overrides[key] = value
+            os.environ[key] = value
 
     # Clear the settings cache so new values are picked up
     get_settings.cache_clear()
 
     # Check if restart is required
+    # In Docker, settings changes always require container restart to persist
     needs_restart = section_info.restart_required and len(updated_fields) > 0
+    if not env_file_written:
+        # Docker mode - restart always required for persistence
+        needs_restart = True
 
     if needs_restart:
         _restart_required = True
+
+    docker_mode = not env_file_written
 
     logger.info(
         "Updated settings",
         section=section_key,
         fields=updated_fields,
         restart_required=needs_restart,
+        docker_mode=docker_mode,
         user=user_id,
     )
 
-    return True, updated_fields, needs_restart
+    return True, updated_fields, needs_restart, docker_mode
 
 
 def is_restart_required() -> bool:
