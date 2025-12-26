@@ -1,0 +1,408 @@
+import { useRef, useEffect, useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import * as d3 from 'd3';
+import { topologyApi } from '../../services/api';
+import Loading from '../common/Loading';
+import type { TopologyNode, TopologyEdge } from '../../types';
+
+interface SimNode extends TopologyNode, d3.SimulationNodeDatum {
+  isCenter?: boolean;
+  hopDistance?: number;
+}
+
+interface SimLink extends d3.SimulationLinkDatum<SimNode> {
+  id: string;
+  target_port: number;
+  protocol: number;
+  is_critical: boolean;
+}
+
+interface BlastRadiusTopologyProps {
+  centerId: string;
+  maxHops: number;
+  onHopsChange: (hops: number) => void;
+}
+
+// Color scale based on hop distance
+const HOP_COLORS = [
+  '#ef4444', // 0 hops (center) - red
+  '#f97316', // 1 hop - orange
+  '#eab308', // 2 hops - yellow
+  '#22c55e', // 3 hops - green
+  '#06b6d4', // 4 hops - cyan
+  '#8b5cf6', // 5 hops - purple
+];
+
+export default function BlastRadiusTopology({
+  centerId,
+  maxHops,
+  onHopsChange,
+}: BlastRadiusTopologyProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
+  const [hoveredNode, setHoveredNode] = useState<SimNode | null>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Fetch subgraph data
+  const { data: subgraph, isLoading, error } = useQuery({
+    queryKey: ['topology', 'subgraph', centerId, maxHops],
+    queryFn: () => topologyApi.getSubgraph(centerId, maxHops),
+    enabled: !!centerId,
+  });
+
+  // Calculate hop distances for each node
+  const nodesWithHops = useMemo(() => {
+    if (!subgraph) return [];
+
+    // Build adjacency list
+    const adjacency = new Map<string, string[]>();
+    subgraph.edges.forEach(edge => {
+      if (!adjacency.has(edge.source)) adjacency.set(edge.source, []);
+      if (!adjacency.has(edge.target)) adjacency.set(edge.target, []);
+      adjacency.get(edge.source)!.push(edge.target);
+      adjacency.get(edge.target)!.push(edge.source);
+    });
+
+    // BFS to calculate hop distances
+    const distances = new Map<string, number>();
+    distances.set(centerId, 0);
+    const queue = [centerId];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const currentDist = distances.get(current)!;
+      const neighbors = adjacency.get(current) || [];
+
+      for (const neighbor of neighbors) {
+        if (!distances.has(neighbor)) {
+          distances.set(neighbor, currentDist + 1);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    return subgraph.nodes.map(node => ({
+      ...node,
+      isCenter: node.id === centerId,
+      hopDistance: distances.get(node.id) ?? maxHops,
+    }));
+  }, [subgraph, centerId, maxHops]);
+
+  // Handle resize
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        setDimensions({ width: Math.max(width, 400), height: Math.max(height, 400) });
+      }
+    };
+
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
+
+  // Reset view function
+  const resetView = () => {
+    if (svgRef.current && zoomRef.current) {
+      const svg = d3.select(svgRef.current);
+      svg.transition()
+        .duration(750)
+        .call(zoomRef.current.transform, d3.zoomIdentity);
+    }
+  };
+
+  // D3 visualization
+  useEffect(() => {
+    if (!svgRef.current || !subgraph || nodesWithHops.length === 0) return;
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('*').remove();
+
+    const { width, height } = dimensions;
+
+    // Create nodes and links
+    const nodes: SimNode[] = nodesWithHops.map(n => ({ ...n }));
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+    const links: SimLink[] = subgraph.edges
+      .filter((e: TopologyEdge) => nodeMap.has(e.source) && nodeMap.has(e.target))
+      .map((e: TopologyEdge) => ({
+        ...e,
+        source: nodeMap.get(e.source)!,
+        target: nodeMap.get(e.target)!,
+      }));
+
+    // Create zoom behavior
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.2, 3])
+      .on('zoom', (event) => {
+        container.attr('transform', event.transform);
+      });
+
+    zoomRef.current = zoom;
+    svg.call(zoom);
+
+    // Container for zoom/pan
+    const container = svg.append('g');
+
+    // Create radial force simulation - center node in middle, others radiate out
+    const simulation = d3
+      .forceSimulation<SimNode>(nodes)
+      .force(
+        'link',
+        d3
+          .forceLink<SimNode, SimLink>(links)
+          .id(d => d.id)
+          .distance(80)
+      )
+      .force('charge', d3.forceManyBody().strength(-300))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide().radius(35))
+      .force('radial', d3.forceRadial<SimNode>(
+        d => (d.hopDistance ?? 1) * 100,
+        width / 2,
+        height / 2
+      ).strength(0.5));
+
+    // Arrow marker
+    const defs = svg.append('defs');
+    defs.append('marker')
+      .attr('id', 'blast-arrowhead')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 20)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 5)
+      .attr('markerHeight', 5)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10,0 L 0,5')
+      .attr('fill', '#475569');
+
+    // Create links
+    const link = container
+      .append('g')
+      .attr('class', 'links')
+      .selectAll('line')
+      .data(links)
+      .join('line')
+      .attr('stroke', '#475569')
+      .attr('stroke-width', 1.5)
+      .attr('stroke-opacity', 0.6)
+      .attr('marker-end', 'url(#blast-arrowhead)');
+
+    // Create drag behavior
+    const drag = d3
+      .drag<SVGGElement, SimNode>()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      })
+      .on('drag', (event, d) => {
+        d.fx = event.x;
+        d.fy = event.y;
+      })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      });
+
+    // Create node groups
+    const node = container
+      .append('g')
+      .attr('class', 'nodes')
+      .selectAll<SVGGElement, SimNode>('g')
+      .data(nodes)
+      .join('g')
+      .attr('class', 'node')
+      .style('cursor', 'pointer')
+      .call(drag);
+
+    // Add circles
+    node
+      .append('circle')
+      .attr('r', d => d.isCenter ? 25 : 15)
+      .attr('fill', d => HOP_COLORS[Math.min(d.hopDistance ?? 0, HOP_COLORS.length - 1)])
+      .attr('stroke', d => d.isCenter ? '#ffffff' : d.is_critical ? '#ef4444' : '#1e293b')
+      .attr('stroke-width', d => d.isCenter ? 3 : d.is_critical ? 2 : 1.5);
+
+    // Add labels
+    node
+      .append('text')
+      .text(d => d.name.length > 15 ? d.name.substring(0, 12) + '...' : d.name)
+      .attr('dy', d => d.isCenter ? 40 : 28)
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#e2e8f0')
+      .attr('font-size', d => d.isCenter ? 12 : 10)
+      .attr('font-weight', d => d.isCenter ? 'bold' : 'normal');
+
+    // Add hop distance label inside node
+    node
+      .append('text')
+      .text(d => d.isCenter ? 'C' : d.hopDistance?.toString() ?? '')
+      .attr('dy', 4)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'white')
+      .attr('font-size', d => d.isCenter ? 14 : 11)
+      .attr('font-weight', 'bold');
+
+    // Hover effects
+    node
+      .on('mouseenter', function(_, d) {
+        d3.select(this).select('circle')
+          .attr('stroke', '#3b82f6')
+          .attr('stroke-width', 3);
+        setHoveredNode(d);
+      })
+      .on('mouseleave', function(_, d) {
+        d3.select(this).select('circle')
+          .attr('stroke', d.isCenter ? '#ffffff' : d.is_critical ? '#ef4444' : '#1e293b')
+          .attr('stroke-width', d.isCenter ? 3 : d.is_critical ? 2 : 1.5);
+        setHoveredNode(null);
+      });
+
+    // Update positions
+    simulation.on('tick', () => {
+      link
+        .attr('x1', d => (d.source as SimNode).x!)
+        .attr('y1', d => (d.source as SimNode).y!)
+        .attr('x2', d => (d.target as SimNode).x!)
+        .attr('y2', d => (d.target as SimNode).y!);
+
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+    return () => {
+      simulation.stop();
+    };
+  }, [subgraph, nodesWithHops, dimensions]);
+
+  if (isLoading) {
+    return (
+      <div className="h-96 flex items-center justify-center">
+        <Loading />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-96 flex items-center justify-center text-red-400">
+        Failed to load topology data
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="flex items-center justify-between bg-slate-700/50 p-4 rounded-lg">
+        <div className="flex items-center gap-4">
+          <label className="text-sm text-slate-300">
+            Max Hops: <span className="font-bold text-white">{maxHops}</span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="5"
+            value={maxHops}
+            onChange={(e) => onHopsChange(Number(e.target.value))}
+            className="w-48 h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
+          />
+          <div className="flex gap-1">
+            {[1, 2, 3, 4, 5].map(hop => (
+              <button
+                key={hop}
+                onClick={() => onHopsChange(hop)}
+                className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
+                  maxHops === hop
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-slate-600 text-slate-300 hover:bg-slate-500'
+                }`}
+              >
+                {hop}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          onClick={resetView}
+          className="px-3 py-1.5 text-sm bg-slate-600 hover:bg-slate-500 text-white rounded transition-colors"
+        >
+          Reset View
+        </button>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 text-sm">
+        <span className="text-slate-400">Hop Distance:</span>
+        {HOP_COLORS.slice(0, maxHops + 1).map((color, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <div
+              className="w-4 h-4 rounded-full"
+              style={{ backgroundColor: color }}
+            />
+            <span className="text-slate-300">
+              {i === 0 ? 'Center' : `${i} hop${i > 1 ? 's' : ''}`}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Graph container */}
+      <div
+        ref={containerRef}
+        className="h-[500px] bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
+      >
+        <svg
+          ref={svgRef}
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+          preserveAspectRatio="xMidYMid meet"
+        />
+
+        {/* Hover tooltip */}
+        {hoveredNode && (
+          <div className="absolute top-4 right-4 bg-slate-900 border border-slate-700 rounded-lg p-3 shadow-lg max-w-xs">
+            <p className="font-medium text-white">{hoveredNode.name}</p>
+            <p className="text-sm text-slate-400 mt-1">{hoveredNode.ip_address}</p>
+            <div className="flex items-center gap-2 mt-2">
+              <span
+                className="inline-block w-3 h-3 rounded-full"
+                style={{ backgroundColor: HOP_COLORS[Math.min(hoveredNode.hopDistance ?? 0, HOP_COLORS.length - 1)] }}
+              />
+              <span className="text-sm text-slate-300">
+                {hoveredNode.isCenter ? 'Center asset' : `${hoveredNode.hopDistance} hop${(hoveredNode.hopDistance ?? 0) > 1 ? 's' : ''} away`}
+              </span>
+            </div>
+            {hoveredNode.is_critical && (
+              <span className="inline-block mt-2 px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">
+                Critical Asset
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Stats */}
+      <div className="flex items-center gap-6 text-sm text-slate-400">
+        <span>
+          <span className="text-white font-medium">{nodesWithHops.length}</span> assets affected
+        </span>
+        <span>
+          <span className="text-white font-medium">{subgraph?.edges.length ?? 0}</span> connections
+        </span>
+        <span>
+          <span className="text-white font-medium">
+            {nodesWithHops.filter(n => n.is_critical && !n.isCenter).length}
+          </span> critical assets in blast radius
+        </span>
+      </div>
+    </div>
+  );
+}

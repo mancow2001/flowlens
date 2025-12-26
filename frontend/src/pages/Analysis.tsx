@@ -6,11 +6,12 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import { analysisApi, assetApi } from '../services/api';
-import type { SPOFCandidate } from '../types';
+import type { SPOFCandidate, Asset } from '../types';
 import Card from '../components/common/Card';
 import Loading from '../components/common/Loading';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
+import BlastRadiusTopology from '../components/analysis/BlastRadiusTopology';
 
 type TabType = 'spof' | 'blast-radius' | 'path-finder';
 
@@ -178,8 +179,9 @@ function SPOFAnalysis() {
 }
 
 function BlastRadiusAnalysis() {
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [maxHops, setMaxHops] = useState(3);
 
   // Search for assets
   const { data: searchResults } = useQuery({
@@ -188,18 +190,26 @@ function BlastRadiusAnalysis() {
     enabled: searchQuery.length >= 2,
   });
 
-  // Get blast radius for selected asset
-  const { data: blastRadius, isLoading, error } = useQuery({
-    queryKey: ['blast-radius', selectedAssetId],
-    queryFn: () => analysisApi.getBlastRadius(selectedAssetId!, 5),
-    enabled: !!selectedAssetId,
-  });
-
   return (
     <div className="space-y-4">
+      {/* Asset search */}
       <Card>
         <div className="p-4">
-          <h3 className="font-semibold text-white mb-4">Select an Asset</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-white">Select an Asset to Analyze</h3>
+            {selectedAsset && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-400">Selected:</span>
+                <Badge>{selectedAsset.name}</Badge>
+                <button
+                  onClick={() => setSelectedAsset(null)}
+                  className="text-slate-400 hover:text-white text-sm"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
           <div className="relative">
             <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
@@ -211,19 +221,28 @@ function BlastRadiusAnalysis() {
             />
           </div>
 
-          {searchResults?.items && searchResults.items.length > 0 && (
-            <div className="mt-2 border border-slate-600 rounded-lg overflow-hidden">
+          {searchResults?.items && searchResults.items.length > 0 && searchQuery.length >= 2 && (
+            <div className="mt-2 border border-slate-600 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
               {searchResults.items.map((asset) => (
                 <button
                   key={asset.id}
                   onClick={() => {
-                    setSelectedAssetId(asset.id);
+                    setSelectedAsset(asset);
                     setSearchQuery('');
                   }}
-                  className="w-full px-4 py-2 text-left hover:bg-slate-700 transition-colors border-b border-slate-600 last:border-b-0"
+                  className={`w-full px-4 py-2 text-left hover:bg-slate-700 transition-colors border-b border-slate-600 last:border-b-0 ${
+                    selectedAsset?.id === asset.id ? 'bg-slate-700' : ''
+                  }`}
                 >
-                  <p className="text-white">{asset.name}</p>
-                  <p className="text-sm text-slate-400">{asset.ip_address}</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white">{asset.name}</p>
+                      <p className="text-sm text-slate-400">{asset.ip_address}</p>
+                    </div>
+                    {asset.is_critical && (
+                      <Badge variant="error" size="sm">Critical</Badge>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
@@ -231,84 +250,39 @@ function BlastRadiusAnalysis() {
         </div>
       </Card>
 
-      {selectedAssetId && (
+      {/* Topology visualization */}
+      {selectedAsset ? (
         <Card>
-          {isLoading ? (
-            <div className="p-8">
-              <Loading />
-            </div>
-          ) : error ? (
-            <div className="p-8 text-center text-red-400">
-              Failed to load blast radius analysis
-            </div>
-          ) : blastRadius ? (
-            <BlastRadiusResultDisplay blastRadius={blastRadius} />
-          ) : null}
+          <div className="p-4 border-b border-slate-700">
+            <h3 className="font-semibold text-white">
+              Blast Radius Topology: {selectedAsset.name}
+            </h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Visualizing assets within {maxHops} hop{maxHops > 1 ? 's' : ''} of the selected asset.
+              Drag nodes to rearrange. Scroll to zoom.
+            </p>
+          </div>
+          <div className="p-4">
+            <BlastRadiusTopology
+              centerId={selectedAsset.id}
+              maxHops={maxHops}
+              onHopsChange={setMaxHops}
+            />
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div className="p-12 text-center">
+            <MagnifyingGlassIcon className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+            <p className="text-slate-400">
+              Search and select an asset above to visualize its blast radius topology
+            </p>
+            <p className="text-sm text-slate-500 mt-2">
+              The blast radius shows all assets that could be affected if the selected asset fails
+            </p>
+          </div>
         </Card>
       )}
-    </div>
-  );
-}
-
-interface BlastRadiusData {
-  asset_id: string;
-  asset_name: string;
-  total_affected: number;
-  critical_affected: number;
-  affected_assets: Array<{ id: string; name: string; depth: number; is_critical: boolean }>;
-  max_depth: number;
-  calculated_at: string;
-}
-
-function BlastRadiusResultDisplay({ blastRadius }: { blastRadius: BlastRadiusData }) {
-  // Group affected assets by depth
-  const byDepth: Record<number, number> = {};
-  blastRadius.affected_assets.forEach((asset) => {
-    byDepth[asset.depth] = (byDepth[asset.depth] || 0) + 1;
-  });
-
-  return (
-    <div>
-      <div className="p-4 border-b border-slate-700">
-        <h3 className="font-semibold text-white">
-          Blast Radius: {blastRadius.asset_name}
-        </h3>
-        <p className="text-sm text-slate-400 mt-1">
-          {blastRadius.total_affected} assets would be affected ({blastRadius.critical_affected} critical)
-        </p>
-      </div>
-
-      {/* Depth breakdown */}
-      {Object.keys(byDepth).length > 0 && (
-        <div className="p-4 border-b border-slate-700">
-          <h4 className="text-sm font-medium text-slate-300 mb-3">Impact by Distance</h4>
-          <div className="grid grid-cols-5 gap-2">
-            {Object.entries(byDepth).map(([depth, count]) => (
-              <div key={depth} className="text-center p-2 bg-slate-700 rounded-lg">
-                <p className="text-lg font-semibold text-white">{count}</p>
-                <p className="text-xs text-slate-400">Hop {depth}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Affected assets list */}
-      <div className="divide-y divide-slate-700">
-        {blastRadius.affected_assets.map((asset) => (
-          <div key={asset.id} className="p-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-white">{asset.name}</span>
-              {asset.is_critical && (
-                <Badge variant="error" size="sm">Critical</Badge>
-              )}
-            </div>
-            <Badge variant={asset.depth === 1 ? 'error' : asset.depth === 2 ? 'warning' : 'info'} size="sm">
-              {asset.depth} hop{asset.depth !== 1 ? 's' : ''} away
-            </Badge>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
