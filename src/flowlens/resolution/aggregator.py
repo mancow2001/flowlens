@@ -17,6 +17,7 @@ from flowlens.common.config import ResolutionSettings, get_settings
 from flowlens.common.logging import get_logger
 from flowlens.common.metrics import AGGREGATION_WINDOW_DURATION
 from flowlens.models.flow import FlowAggregate, FlowRecord
+from flowlens.models.gateway import GatewayObservation
 
 logger = get_logger(__name__)
 
@@ -101,6 +102,10 @@ class AggregationBucket:
     src_asset_id: UUID | None = None
     dst_asset_id: UUID | None = None
 
+    # Gateway tracking
+    gateway_bytes: dict = field(default_factory=dict)  # gateway_ip -> bytes
+    exporter_ip: str | None = None
+
     def add(
         self,
         bytes_count: int,
@@ -109,6 +114,8 @@ class AggregationBucket:
         dst_ip: str,
         src_asset_id: UUID | None = None,
         dst_asset_id: UUID | None = None,
+        gateway_ip: str | None = None,
+        exporter_ip: str | None = None,
     ) -> None:
         """Add flow to bucket."""
         self.bytes_total += bytes_count
@@ -124,12 +131,26 @@ class AggregationBucket:
         if dst_asset_id:
             self.dst_asset_id = dst_asset_id
 
+        # Track gateway information
+        if gateway_ip and gateway_ip not in ("0.0.0.0", ""):
+            self.gateway_bytes[gateway_ip] = self.gateway_bytes.get(gateway_ip, 0) + bytes_count
+
+        if exporter_ip:
+            self.exporter_ip = exporter_ip
+
     @property
     def bytes_avg(self) -> float:
         """Average bytes per flow."""
         if self.flows_count == 0:
             return 0.0
         return self.bytes_total / self.flows_count
+
+    @property
+    def primary_gateway_ip(self) -> str | None:
+        """Get the primary gateway based on traffic volume."""
+        if not self.gateway_bytes:
+            return None
+        return max(self.gateway_bytes.items(), key=lambda x: x[1])[0]
 
 
 class FlowAggregator:
@@ -249,6 +270,13 @@ class FlowAggregator:
                 if enrichment.get("dst_asset_id"):
                     dst_asset_id = UUID(enrichment["dst_asset_id"])
 
+            # Extract gateway info from extended_fields
+            gateway_ip = None
+            if flow.extended_fields:
+                gateway_ip = flow.extended_fields.get("next_hop")
+                if gateway_ip in ("0.0.0.0", "", None):
+                    gateway_ip = None
+
             buckets[key].add(
                 bytes_count=flow.bytes_count,
                 packets_count=flow.packets_count,
@@ -256,6 +284,8 @@ class FlowAggregator:
                 dst_ip=norm_dst,
                 src_asset_id=src_asset_id,
                 dst_asset_id=dst_asset_id,
+                gateway_ip=gateway_ip,
+                exporter_ip=str(flow.exporter_ip) if flow.exporter_ip else None,
             )
 
         # Upsert aggregates
@@ -334,6 +364,8 @@ class FlowAggregator:
             unique_destinations=len(bucket.unique_destinations),
             src_asset_id=bucket.src_asset_id,
             dst_asset_id=bucket.dst_asset_id,
+            primary_gateway_ip=bucket.primary_gateway_ip,
+            exporter_ip=bucket.exporter_ip,
         )
 
         # On conflict, update counters
@@ -350,10 +382,28 @@ class FlowAggregator:
                 "bytes_min": func.least(FlowAggregate.bytes_min, bucket.bytes_min),
                 "src_asset_id": bucket.src_asset_id,
                 "dst_asset_id": bucket.dst_asset_id,
+                "primary_gateway_ip": bucket.primary_gateway_ip,
+                "exporter_ip": bucket.exporter_ip,
             },
         )
 
         await db.execute(stmt)
+
+        # Create gateway observations for later processing
+        for gateway_ip, gw_bytes in bucket.gateway_bytes.items():
+            observation = GatewayObservation(
+                id=uuid4(),
+                source_ip=key.src_ip,
+                gateway_ip=gateway_ip,
+                destination_ip=key.dst_ip,
+                observation_source="next_hop",
+                exporter_ip=bucket.exporter_ip,
+                window_start=window_start,
+                window_end=window_end,
+                bytes_total=gw_bytes,
+                flows_count=bucket.flows_count,
+            )
+            db.add(observation)
 
     async def get_pending_windows(
         self,

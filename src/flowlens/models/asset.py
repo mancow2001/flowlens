@@ -17,6 +17,7 @@ from flowlens.models.base import SoftDeleteModel, TimestampMixin, UUIDMixin, Bas
 
 if TYPE_CHECKING:
     from flowlens.models.dependency import Dependency
+    from flowlens.models.gateway import AssetGateway
 
 
 class AssetType(str, Enum):
@@ -258,6 +259,19 @@ class Asset(SoftDeleteModel):
         "Dependency",
         foreign_keys="Dependency.target_asset_id",
         back_populates="target_asset",
+    )
+
+    # Gateway relationships
+    gateway_relationships: Mapped[list["AssetGateway"]] = relationship(
+        "AssetGateway",
+        foreign_keys="AssetGateway.source_asset_id",
+        back_populates="source_asset",
+    )
+
+    gateway_clients: Mapped[list["AssetGateway"]] = relationship(
+        "AssetGateway",
+        foreign_keys="AssetGateway.gateway_asset_id",
+        back_populates="gateway_asset",
     )
 
     __table_args__ = (

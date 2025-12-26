@@ -318,6 +318,18 @@ class FlowAggregate(Base):
         index=True,
     )
 
+    # Gateway information (populated during aggregation)
+    primary_gateway_ip: Mapped[str | None] = mapped_column(
+        INET,
+        nullable=True,
+        index=True,
+    )
+
+    exporter_ip: Mapped[str | None] = mapped_column(
+        INET,
+        nullable=True,
+    )
+
     # Processing status
     is_processed: Mapped[bool] = mapped_column(
         default=False,

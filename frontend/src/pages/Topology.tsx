@@ -6,7 +6,7 @@ import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import FilterPanel from '../components/topology/FilterPanel';
 import { useTopologyFilters } from '../hooks/useTopologyFilters';
-import { topologyApi, savedViewsApi } from '../services/api';
+import { topologyApi, savedViewsApi, gatewayApi } from '../services/api';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
 
 interface SimNode extends TopologyNode, d3.SimulationNodeDatum {
@@ -29,6 +29,10 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   isAggregated?: boolean;
   aggregatedCount?: number;
   originalEdgeIds?: string[];
+  // Gateway edge properties
+  isGatewayEdge?: boolean;
+  gatewayRole?: string;
+  confidence?: number;
 }
 
 type GroupingMode = 'none' | 'location' | 'environment' | 'datacenter' | 'type';
@@ -296,6 +300,9 @@ export default function Topology() {
   // Collapsed groups state
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
+  // Gateway visualization state
+  const [showGateways, setShowGateways] = useState(false);
+
   // Group positions for dragging (persisted across renders)
   const groupPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
@@ -310,6 +317,16 @@ export default function Topology() {
       include_external: filters.includeExternal,
       min_bytes_24h: filters.minBytes24h > 0 ? filters.minBytes24h : undefined,
     }),
+  });
+
+  // Fetch gateway topology data (only when showGateways is enabled)
+  const { data: gatewayTopology } = useQuery({
+    queryKey: ['gateway-topology', filters.asOf],
+    queryFn: () => gatewayApi.getTopology({
+      min_confidence: 0.6,
+      as_of: filters.asOf || undefined,
+    }),
+    enabled: showGateways,
   });
 
   // Fetch saved views
@@ -380,7 +397,7 @@ export default function Topology() {
   // Filter nodes based on legend visibility settings and handle collapsed groups
   const filteredTopology = useMemo((): {
     nodes: (TopologyNode & { isGroupNode?: boolean; groupKey?: string; groupNodeCount?: number })[];
-    edges: (TopologyEdge & { isAggregated?: boolean; aggregatedCount?: number; originalEdgeIds?: string[] })[];
+    edges: (TopologyEdge & { isAggregated?: boolean; aggregatedCount?: number; originalEdgeIds?: string[]; isGatewayEdge?: boolean; gatewayRole?: string; confidence?: number })[];
   } | null => {
     if (!topology) return null;
 
@@ -398,9 +415,36 @@ export default function Topology() {
     // If no grouping or no collapsed groups, return filtered topology
     if (groupingMode === 'none' || collapsedGroups.size === 0) {
       const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
-      const filteredEdges = topology.edges.filter(edge =>
-        visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
-      );
+      const filteredEdges: (TopologyEdge & { isGatewayEdge?: boolean; gatewayRole?: string; confidence?: number })[] =
+        topology.edges.filter(edge =>
+          visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
+        );
+
+      // Add gateway edges if enabled
+      if (showGateways && gatewayTopology) {
+        gatewayTopology.edges.forEach(gwEdge => {
+          // Only add if both source and target are visible
+          if (visibleNodeIds.has(gwEdge.source) && visibleNodeIds.has(gwEdge.target)) {
+            filteredEdges.push({
+              id: `gw-${gwEdge.id}`,
+              source: gwEdge.source,
+              target: gwEdge.target,
+              target_port: 0,
+              protocol: 0,
+              protocol_name: null,
+              service_type: 'gateway',
+              bytes_total: gwEdge.bytes_total,
+              bytes_last_24h: 0,
+              is_critical: false,
+              last_seen: '',
+              isGatewayEdge: true,
+              gatewayRole: gwEdge.gateway_role,
+              confidence: gwEdge.confidence,
+            });
+          }
+        });
+      }
+
       return { nodes: visibleNodes, edges: filteredEdges };
     }
 
@@ -457,7 +501,7 @@ export default function Topology() {
     });
 
     // Build edges with aggregation for collapsed groups
-    const resultEdges: (TopologyEdge & { isAggregated?: boolean; aggregatedCount?: number; originalEdgeIds?: string[] })[] = [];
+    const resultEdges: (TopologyEdge & { isAggregated?: boolean; aggregatedCount?: number; originalEdgeIds?: string[]; isGatewayEdge?: boolean; gatewayRole?: string; confidence?: number })[] = [];
     const edgeAggregationMap = new Map<string, TopologyEdge & { isAggregated: boolean; aggregatedCount: number; originalEdgeIds: string[] }>();
 
     topology.edges.forEach(edge => {
@@ -506,8 +550,45 @@ export default function Topology() {
 
     edgeAggregationMap.forEach(edge => resultEdges.push(edge));
 
+    // Add gateway edges if enabled (for grouped view)
+    if (showGateways && gatewayTopology) {
+      const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
+      gatewayTopology.edges.forEach(gwEdge => {
+        // Only add if both source and target are visible
+        if (visibleNodeIds.has(gwEdge.source) && visibleNodeIds.has(gwEdge.target)) {
+          // Check if nodes are in collapsed groups
+          const sourceGroupKey = nodeToGroupMap.get(gwEdge.source);
+          const targetGroupKey = nodeToGroupMap.get(gwEdge.target);
+          const sourceIsCollapsed = sourceGroupKey && collapsedGroups.has(sourceGroupKey);
+          const targetIsCollapsed = targetGroupKey && collapsedGroups.has(targetGroupKey);
+          const actualSource = sourceIsCollapsed ? `group-${sourceGroupKey}` : gwEdge.source;
+          const actualTarget = targetIsCollapsed ? `group-${targetGroupKey}` : gwEdge.target;
+
+          // Skip self-loops
+          if (actualSource === actualTarget) return;
+
+          resultEdges.push({
+            id: `gw-${gwEdge.id}`,
+            source: actualSource,
+            target: actualTarget,
+            target_port: 0,
+            protocol: 0,
+            protocol_name: null,
+            service_type: 'gateway',
+            bytes_total: gwEdge.bytes_total,
+            bytes_last_24h: 0,
+            is_critical: false,
+            last_seen: '',
+            isGatewayEdge: true,
+            gatewayRole: gwEdge.gateway_role,
+            confidence: gwEdge.confidence,
+          });
+        }
+      });
+    }
+
     return { nodes: resultNodes, edges: resultEdges };
-  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode, collapsedGroups, nodeToGroupMap]);
+  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode, collapsedGroups, nodeToGroupMap, showGateways, gatewayTopology]);
 
   // Handle node selection and path highlighting
   const handleNodeClick = useCallback((node: TopologyNode) => {
@@ -767,19 +848,38 @@ export default function Topology() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#eab308');
 
-    // Create links - with support for aggregated edges
+    // Gateway arrow (purple)
+    defs.append('marker')
+      .attr('id', 'arrowhead-gateway')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#a855f7');
+
+    // Create links - with support for aggregated edges and gateway edges
     const link = container
       .append('g')
       .attr('class', 'links')
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('class', 'edge')
-      .attr('stroke', '#475569')
-      .attr('stroke-width', (d) => d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1
-        ? Math.min(2 + d.aggregatedCount, 8) : 2)
-      .attr('stroke-opacity', 0.6)
-      .attr('marker-end', 'url(#arrowhead)');
+      .attr('class', (d) => d.isGatewayEdge ? 'edge gateway-edge' : 'edge')
+      .attr('stroke', (d) => d.isGatewayEdge ? '#a855f7' : '#475569')
+      .attr('stroke-width', (d) => {
+        if (d.isGatewayEdge) return 2;
+        if (d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1) {
+          return Math.min(2 + d.aggregatedCount, 8);
+        }
+        return 2;
+      })
+      .attr('stroke-opacity', (d) => d.isGatewayEdge ? 0.8 : 0.6)
+      .attr('stroke-dasharray', (d) => d.isGatewayEdge ? '6,3' : 'none')
+      .attr('marker-end', (d) => d.isGatewayEdge ? 'url(#arrowhead-gateway)' : 'url(#arrowhead)');
 
     // Create drag behavior for individual nodes
     const dragBehavior = d3
@@ -1187,6 +1287,15 @@ export default function Topology() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Show Gateways toggle */}
+          <Button
+            variant={showGateways ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setShowGateways(!showGateways)}
+          >
+            {showGateways ? 'Hide Gateways' : 'Show Gateways'}
+          </Button>
+
           {/* Time slider toggle */}
           <Button
             variant={showTimeSlider ? 'primary' : 'secondary'}
@@ -1427,6 +1536,21 @@ export default function Topology() {
                   </span>
                 </label>
               </div>
+
+              {showGateways && (
+                <>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">Gateway Edges</div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 border-t-2 border-dashed border-purple-500" />
+                      <span className="text-sm text-slate-300">Gateway Route</span>
+                      <span className="text-xs text-slate-500">
+                        ({gatewayTopology?.edges.length || 0})
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {selectedNode && (
                 <>

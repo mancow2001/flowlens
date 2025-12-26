@@ -354,3 +354,84 @@ export interface SavedViewSummary {
   access_count: number;
   created_at: string;
 }
+
+// Gateway types
+export interface GatewayRelationship {
+  gateway_id: string;
+  gateway_asset_id: string;
+  gateway_ip: string;
+  gateway_name: string;
+  gateway_role: GatewayRole;
+  is_default: boolean;
+  traffic_share: number | null;
+  bytes_total: number;
+  confidence: number;
+  last_seen: string;
+}
+
+export type GatewayRole = 'primary' | 'secondary' | 'ecmp';
+
+export interface AssetGatewayResponse {
+  id: string;
+  source_asset_id: string;
+  gateway_asset_id: string;
+  destination_network: string | null;
+  gateway_role: GatewayRole;
+  is_default_gateway: boolean;
+  bytes_total: number;
+  flows_total: number;
+  bytes_last_24h: number;
+  bytes_last_7d: number;
+  traffic_share: number | null;
+  confidence: number;
+  confidence_scores: Record<string, number> | null;
+  first_seen: string;
+  last_seen: string;
+  inference_method: string;
+  valid_from: string;
+  valid_to: string | null;
+}
+
+export interface GatewayListResponse extends PaginatedResponse<AssetGatewayResponse> {}
+
+export interface GatewayTopologyNode {
+  id: string;
+  name: string;
+  ip_address: string;
+  asset_type: string;
+  is_gateway: boolean;
+  client_count: number;
+}
+
+export interface GatewayTopologyEdge {
+  id: string;
+  source: string;
+  target: string;
+  gateway_role: GatewayRole;
+  is_default: boolean;
+  traffic_share: number | null;
+  confidence: number;
+  bytes_total: number;
+}
+
+export interface GatewayTopologyData {
+  nodes: GatewayTopologyNode[];
+  edges: GatewayTopologyEdge[];
+  generated_at: string;
+}
+
+export interface GatewayForAssetResponse {
+  asset_id: string;
+  asset_ip: string;
+  asset_name: string;
+  gateways: GatewayRelationship[];
+  total_gateways: number;
+}
+
+export interface GatewayClientsResponse {
+  gateway_id: string;
+  gateway_ip: string;
+  gateway_name: string;
+  clients: GatewayRelationship[];
+  total_clients: number;
+}

@@ -21,6 +21,7 @@ from flowlens.resolution.aggregator import FlowAggregator
 from flowlens.resolution.asset_mapper import AssetMapper
 from flowlens.resolution.change_detector import ChangeDetector
 from flowlens.resolution.dependency_builder import DependencyBuilder
+from flowlens.resolution.gateway_inference import GatewayInferenceService
 
 logger = get_logger(__name__)
 
@@ -56,11 +57,14 @@ class ResolutionWorker:
         self._aggregator = FlowAggregator(settings)
         self._dependency_builder = DependencyBuilder(asset_mapper, protocol_resolver)
         self._change_detector = ChangeDetector(settings)
+        self._gateway_inference = GatewayInferenceService()
 
         # State
         self._running = False
         self._processed_count = 0
+        self._gateways_processed = 0
         self._last_detection_run = datetime.min
+        self._last_gateway_run = datetime.min
 
     async def start(self) -> None:
         """Start the resolution worker."""
@@ -77,6 +81,9 @@ class ResolutionWorker:
                     deps_processed = await self._process_dependencies()
                     self._processed_count += deps_processed
                     RESOLUTION_PROCESSED.inc(deps_processed)
+
+                # Process gateway observations
+                await self._maybe_process_gateways()
 
                 # Run change detection periodically
                 await self._maybe_run_detection()
@@ -163,6 +170,34 @@ class ResolutionWorker:
             await db.commit()
             return count
 
+    async def _maybe_process_gateways(self) -> None:
+        """Process gateway observations periodically.
+
+        Runs every 30 seconds to process accumulated gateway observations.
+        """
+        now = datetime.utcnow()
+
+        # Run every 30 seconds
+        if (now - self._last_gateway_run).total_seconds() < 30:
+            return
+
+        self._last_gateway_run = now
+
+        try:
+            async with get_session() as db:
+                # Process observations into gateway relationships
+                processed = await self._gateway_inference.process_observations(db)
+                self._gateways_processed += processed
+
+                # Update traffic shares
+                if processed > 0:
+                    await self._gateway_inference.calculate_traffic_shares(db)
+
+                await db.commit()
+        except Exception as e:
+            logger.error("Gateway inference failed", error=str(e))
+            RESOLUTION_ERRORS.labels(error_type="gateway_inference").inc()
+
     async def _maybe_run_detection(self) -> None:
         """Run change detection if interval has passed."""
         now = datetime.utcnow()
@@ -192,10 +227,13 @@ class ResolutionWorker:
         return {
             "running": self._running,
             "processed_count": self._processed_count,
+            "gateways_processed": self._gateways_processed,
             "asset_cache_size": self._dependency_builder.asset_mapper.cache_size,
             "last_detection_run": self._last_detection_run.isoformat(),
+            "last_gateway_run": self._last_gateway_run.isoformat(),
         }
 
     async def cleanup(self) -> None:
         """Cleanup resources."""
         self._dependency_builder.asset_mapper.clear_cache()
+        self._gateway_inference.clear_cache()

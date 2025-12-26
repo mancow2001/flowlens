@@ -14,9 +14,9 @@ import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import Table from '../components/common/Table';
 import { LoadingPage } from '../components/common/Loading';
-import { assetApi, analysisApi, classificationApi } from '../services/api';
+import { assetApi, analysisApi, classificationApi, gatewayApi } from '../services/api';
 import { formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
-import type { Dependency, Asset } from '../types';
+import type { Dependency, Asset, GatewayRelationship } from '../types';
 
 const ASSET_TYPES = [
   'server',
@@ -96,6 +96,20 @@ export default function AssetDetail() {
     queryKey: ['analysis', 'blast-radius', id],
     queryFn: () => analysisApi.getBlastRadius(id!, 3),
     enabled: !!id,
+  });
+
+  // Get gateways for this asset
+  const { data: gatewayData } = useQuery({
+    queryKey: ['gateways', 'for-asset', id],
+    queryFn: () => gatewayApi.getForAsset(id!),
+    enabled: !!id,
+  });
+
+  // Get clients if this asset is a router (gateway)
+  const { data: gatewayClients } = useQuery({
+    queryKey: ['gateways', 'clients', id],
+    queryFn: () => gatewayApi.getClients(id!),
+    enabled: !!id && asset?.asset_type === 'router',
   });
 
   if (assetLoading) {
@@ -472,6 +486,163 @@ export default function AssetDetail() {
           emptyMessage="No downstream dependencies"
         />
       </Card>
+
+      {/* Gateways Section */}
+      {(gatewayData?.gateways && gatewayData.gateways.length > 0) && (
+        <Card
+          title={
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              Gateways ({gatewayData.total_gateways})
+            </div>
+          }
+        >
+          <Table
+            columns={[
+              {
+                key: 'gateway',
+                header: 'Gateway',
+                render: (gw: GatewayRelationship) => (
+                  <div>
+                    <div className="font-medium text-white">{gw.gateway_name}</div>
+                    <div className="text-sm text-slate-400">{gw.gateway_ip}</div>
+                  </div>
+                ),
+              },
+              {
+                key: 'role',
+                header: 'Role',
+                render: (gw: GatewayRelationship) => (
+                  <div className="flex items-center gap-2">
+                    <Badge variant={gw.is_default ? 'success' : 'default'}>
+                      {gw.gateway_role}
+                    </Badge>
+                    {gw.is_default && <span className="text-xs text-slate-400">(default)</span>}
+                  </div>
+                ),
+              },
+              {
+                key: 'traffic_share',
+                header: 'Traffic Share',
+                render: (gw: GatewayRelationship) => (
+                  <span className="text-slate-300">
+                    {gw.traffic_share ? `${(gw.traffic_share * 100).toFixed(1)}%` : '-'}
+                  </span>
+                ),
+              },
+              {
+                key: 'traffic',
+                header: 'Total Traffic',
+                render: (gw: GatewayRelationship) => (
+                  <span className="text-slate-300">{formatBytes(gw.bytes_total)}</span>
+                ),
+              },
+              {
+                key: 'confidence',
+                header: 'Confidence',
+                render: (gw: GatewayRelationship) => (
+                  <div className="flex items-center gap-2">
+                    <div className="w-16 h-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500 rounded-full"
+                        style={{ width: `${gw.confidence * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-slate-400">{(gw.confidence * 100).toFixed(0)}%</span>
+                  </div>
+                ),
+              },
+              {
+                key: 'last_seen',
+                header: 'Last Seen',
+                render: (gw: GatewayRelationship) => (
+                  <span className="text-slate-400">{formatRelativeTime(gw.last_seen)}</span>
+                ),
+              },
+            ]}
+            data={gatewayData.gateways}
+            keyExtractor={(gw) => gw.gateway_id}
+            onRowClick={(gw) => navigate(`/assets/${gw.gateway_asset_id}`)}
+            emptyMessage="No gateways detected"
+          />
+        </Card>
+      )}
+
+      {/* Gateway Clients (for routers) */}
+      {(gatewayClients?.clients && gatewayClients.clients.length > 0) && (
+        <Card
+          title={
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              Gateway Clients ({gatewayClients.total_clients})
+            </div>
+          }
+        >
+          <p className="text-sm text-slate-400 mb-4">
+            Assets that use this device as a gateway to reach other networks.
+          </p>
+          <Table
+            columns={[
+              {
+                key: 'client',
+                header: 'Client',
+                render: (gw: GatewayRelationship) => (
+                  <div>
+                    <div className="font-medium text-white">{gw.gateway_name}</div>
+                    <div className="text-sm text-slate-400">{gw.gateway_ip}</div>
+                  </div>
+                ),
+              },
+              {
+                key: 'role',
+                header: 'Role',
+                render: (gw: GatewayRelationship) => (
+                  <Badge variant={gw.is_default ? 'success' : 'default'}>
+                    {gw.is_default ? 'Default Gateway' : gw.gateway_role}
+                  </Badge>
+                ),
+              },
+              {
+                key: 'traffic',
+                header: 'Traffic',
+                render: (gw: GatewayRelationship) => (
+                  <span className="text-slate-300">{formatBytes(gw.bytes_total)}</span>
+                ),
+              },
+              {
+                key: 'confidence',
+                header: 'Confidence',
+                render: (gw: GatewayRelationship) => (
+                  <div className="flex items-center gap-2">
+                    <div className="w-16 h-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500 rounded-full"
+                        style={{ width: `${gw.confidence * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-slate-400">{(gw.confidence * 100).toFixed(0)}%</span>
+                  </div>
+                ),
+              },
+              {
+                key: 'last_seen',
+                header: 'Last Seen',
+                render: (gw: GatewayRelationship) => (
+                  <span className="text-slate-400">{formatRelativeTime(gw.last_seen)}</span>
+                ),
+              },
+            ]}
+            data={gatewayClients.clients}
+            keyExtractor={(gw) => gw.gateway_id}
+            onRowClick={(gw) => navigate(`/assets/${gw.gateway_asset_id}`)}
+            emptyMessage="No clients using this gateway"
+          />
+        </Card>
+      )}
 
       {/* Tags and Metadata */}
       {((asset.tags && Object.keys(asset.tags).length > 0) ||

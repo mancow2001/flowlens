@@ -15,6 +15,11 @@ import type {
   SavedViewSummary,
   ViewConfig,
   SPOFAnalysisResult,
+  GatewayListResponse,
+  GatewayForAssetResponse,
+  GatewayClientsResponse,
+  GatewayTopologyData,
+  AssetGatewayResponse,
 } from '../types';
 
 const api = axios.create({
@@ -824,6 +829,43 @@ export const settingsApi = {
 
   downloadDockerComposeUrl: (): string => {
     return '/api/v1/settings/export/docker-compose.yml';
+  },
+};
+
+// Gateway endpoints
+export const gatewayApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    asset_id?: string;
+    role?: string;
+    min_confidence?: number;
+  }): Promise<GatewayListResponse> => {
+    const { data } = await api.get('/gateways', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<AssetGatewayResponse> => {
+    const { data } = await api.get(`/gateways/${id}`);
+    return data;
+  },
+
+  getForAsset: async (assetId: string): Promise<GatewayForAssetResponse> => {
+    const { data } = await api.get(`/gateways/for-asset/${assetId}`);
+    return data;
+  },
+
+  getClients: async (gatewayAssetId: string): Promise<GatewayClientsResponse> => {
+    const { data } = await api.get(`/gateways/clients/${gatewayAssetId}`);
+    return data;
+  },
+
+  getTopology: async (params?: {
+    min_confidence?: number;
+    as_of?: string;
+  }): Promise<GatewayTopologyData> => {
+    const { data } = await api.get('/gateways/topology', { params });
+    return data;
   },
 };
 
