@@ -121,8 +121,12 @@ export const topologyApi = {
     assetId: string,
     depth: number = 2
   ): Promise<TopologyData> => {
-    const { data } = await api.get(`/topology/subgraph/${assetId}`, {
-      params: { depth },
+    // POST with SubgraphRequest body
+    const { data } = await api.post('/topology/subgraph', {
+      center_asset_id: assetId,
+      depth: depth,
+      direction: 'both',
+      include_external: true,
     });
     return data;
   },
