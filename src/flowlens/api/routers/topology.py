@@ -27,51 +27,56 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
     """Get CIDR classifications for a batch of IP addresses.
 
     Returns a dict mapping IP address to classification attributes.
+    Returns empty dict if classification_rules table doesn't exist yet.
     """
     if not ip_addresses:
         return {}
 
-    # Build a query that gets classifications for all IPs in one go
-    # Using a lateral join with the classification function
-    result = await db.execute(
-        text("""
-            SELECT
-                ip_addr,
-                cr.environment,
-                cr.datacenter,
-                cr.location,
-                cr.asset_type,
-                cr.is_internal
-            FROM unnest(:ip_addrs::inet[]) AS ip_addr
-            LEFT JOIN LATERAL (
+    try:
+        # Build a query that gets classifications for all IPs in one go
+        # Using a lateral join with the classification function
+        result = await db.execute(
+            text("""
                 SELECT
-                    environment,
-                    datacenter,
-                    location,
-                    asset_type,
-                    is_internal
-                FROM classification_rules
-                WHERE is_active = true
-                  AND ip_addr <<= cidr::inet
-                ORDER BY masklen(cidr) DESC, priority ASC
-                LIMIT 1
-            ) cr ON true
-        """),
-        {"ip_addrs": ip_addresses},
-    )
+                    ip_addr,
+                    cr.environment,
+                    cr.datacenter,
+                    cr.location,
+                    cr.asset_type,
+                    cr.is_internal
+                FROM unnest(:ip_addrs::inet[]) AS ip_addr
+                LEFT JOIN LATERAL (
+                    SELECT
+                        environment,
+                        datacenter,
+                        location,
+                        asset_type,
+                        is_internal
+                    FROM classification_rules
+                    WHERE is_active = true
+                      AND ip_addr <<= cidr::inet
+                    ORDER BY masklen(cidr) DESC, priority ASC
+                    LIMIT 1
+                ) cr ON true
+            """),
+            {"ip_addrs": ip_addresses},
+        )
 
-    classifications = {}
-    for row in result.fetchall():
-        ip = str(row.ip_addr)
-        classifications[ip] = {
-            "environment": row.environment,
-            "datacenter": row.datacenter,
-            "location": row.location,
-            "asset_type": row.asset_type,
-            "is_internal": row.is_internal,
-        }
+        classifications = {}
+        for row in result.fetchall():
+            ip = str(row.ip_addr)
+            classifications[ip] = {
+                "environment": row.environment,
+                "datacenter": row.datacenter,
+                "location": row.location,
+                "asset_type": row.asset_type,
+                "is_internal": row.is_internal,
+            }
 
-    return classifications
+        return classifications
+    except Exception:
+        # Table might not exist yet if migration hasn't run
+        return {}
 
 
 @router.post("/graph", response_model=TopologyGraph)
