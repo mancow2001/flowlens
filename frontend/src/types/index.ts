@@ -46,6 +46,7 @@ export type AssetType =
   | 'container'
   | 'virtual_machine'
   | 'cloud_service'
+  | 'group'
   | 'unknown';
 
 export interface Service {
@@ -130,8 +131,11 @@ export interface TopologyNode {
   is_critical: boolean;
   environment: string | null;
   datacenter: string | null;
+  location?: string | null;
   connections_in: number;
   connections_out: number;
+  bytes_in_24h?: number;
+  bytes_out_24h?: number;
   x?: number;
   y?: number;
 }

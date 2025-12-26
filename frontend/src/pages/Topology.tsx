@@ -7,7 +7,11 @@ import { LoadingPage } from '../components/common/Loading';
 import { topologyApi, savedViewsApi } from '../services/api';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
 
-interface SimNode extends TopologyNode, d3.SimulationNodeDatum {}
+interface SimNode extends TopologyNode, d3.SimulationNodeDatum {
+  isGroupNode?: boolean;
+  groupKey?: string;
+  groupNodeCount?: number;
+}
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   id: string;
@@ -19,6 +23,10 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   bytes_last_24h: number;
   is_critical: boolean;
   last_seen: string;
+  // Aggregation properties for collapsed groups
+  isAggregated?: boolean;
+  aggregatedCount?: number;
+  originalEdgeIds?: string[];
 }
 
 type GroupingMode = 'none' | 'location' | 'environment' | 'datacenter' | 'type';
@@ -60,7 +68,7 @@ function computeHull(points: [number, number][]): [number, number][] | null {
 }
 
 // Generate smooth hull path with padding
-function hullPath(hull: [number, number][], padding: number = 30): string {
+function hullPath(hull: [number, number][], padding: number = 40): string {
   if (!hull || hull.length < 3) return '';
 
   // Add padding by moving points outward from centroid
@@ -277,6 +285,12 @@ export default function Topology() {
   const [showInternal, setShowInternal] = useState(true);
   const [showExternal, setShowExternal] = useState(true);
 
+  // Collapsed groups state
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // Group positions for dragging (persisted across renders)
+  const groupPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
   // Fetch topology data
   const { data: topology, isLoading } = useQuery({
     queryKey: ['topology', 'graph', historicalDate?.toISOString()],
@@ -339,35 +353,148 @@ export default function Topology() {
     return colorMap;
   }, [groups]);
 
-  // Filter nodes based on legend visibility settings
-  const filteredTopology = useMemo((): { nodes: TopologyNode[]; edges: TopologyEdge[] } | null => {
+  // Build node-to-group mapping
+  const nodeToGroupMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (topology && groupingMode !== 'none') {
+      topology.nodes.forEach(node => {
+        map.set(node.id, getGroupKey(node, groupingMode));
+      });
+    }
+    return map;
+  }, [topology, groupingMode]);
+
+  // Filter nodes based on legend visibility settings and handle collapsed groups
+  const filteredTopology = useMemo((): {
+    nodes: (TopologyNode & { isGroupNode?: boolean; groupKey?: string; groupNodeCount?: number })[];
+    edges: (TopologyEdge & { isAggregated?: boolean; aggregatedCount?: number; originalEdgeIds?: string[] })[];
+  } | null => {
     if (!topology) return null;
 
-    const filteredNodes = topology.nodes.filter(node => {
-      // Filter by internal/external visibility
+    // First, filter by visibility
+    const visibleNodes = topology.nodes.filter(node => {
       if (!showInternal && node.is_internal) return false;
       if (!showExternal && !node.is_internal) return false;
-
-      // Filter by group visibility (only when grouping is active)
       if (groupingMode !== 'none') {
         const groupKey = getGroupKey(node, groupingMode);
         if (hiddenGroups.has(groupKey)) return false;
       }
-
       return true;
     });
 
-    const visibleNodeIds = new Set(filteredNodes.map(n => n.id));
+    // If no grouping or no collapsed groups, return filtered topology
+    if (groupingMode === 'none' || collapsedGroups.size === 0) {
+      const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
+      const filteredEdges = topology.edges.filter(edge =>
+        visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
+      );
+      return { nodes: visibleNodes, edges: filteredEdges };
+    }
 
-    const filteredEdges = topology.edges.filter(edge =>
-      visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
-    );
+    // Build nodes list with group nodes for collapsed groups
+    const resultNodes: (TopologyNode & { isGroupNode?: boolean; groupKey?: string; groupNodeCount?: number })[] = [];
+    const collapsedNodeIds = new Set<string>();
 
-    return {
-      nodes: filteredNodes,
-      edges: filteredEdges,
-    };
-  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode]);
+    // Add non-collapsed nodes
+    visibleNodes.forEach(node => {
+      const groupKey = getGroupKey(node, groupingMode);
+      if (collapsedGroups.has(groupKey)) {
+        collapsedNodeIds.add(node.id);
+      } else {
+        resultNodes.push(node);
+      }
+    });
+
+    // Create virtual group nodes for collapsed groups
+    collapsedGroups.forEach(groupKey => {
+      const nodesInGroup = visibleNodes.filter(n => getGroupKey(n, groupingMode) === groupKey);
+      if (nodesInGroup.length === 0) return;
+
+      // Get stored position or compute centroid
+      const storedPos = groupPositionsRef.current.get(groupKey);
+
+      // Create a virtual group node
+      const groupNode: TopologyNode & { isGroupNode: boolean; groupKey: string; groupNodeCount: number } = {
+        id: `group-${groupKey}`,
+        name: groupKey,
+        label: `${groupKey} (${nodesInGroup.length})`,
+        type: 'group',
+        ip_address: '',
+        is_internal: nodesInGroup.some(n => n.is_internal),
+        is_critical: nodesInGroup.some(n => n.is_critical),
+        environment: nodesInGroup[0]?.environment,
+        datacenter: nodesInGroup[0]?.datacenter,
+        location: nodesInGroup[0]?.location,
+        connections_in: nodesInGroup.reduce((sum, n) => sum + n.connections_in, 0),
+        connections_out: nodesInGroup.reduce((sum, n) => sum + n.connections_out, 0),
+        bytes_in_24h: nodesInGroup.reduce((sum, n) => sum + (n.bytes_in_24h || 0), 0),
+        bytes_out_24h: nodesInGroup.reduce((sum, n) => sum + (n.bytes_out_24h || 0), 0),
+        isGroupNode: true,
+        groupKey: groupKey,
+        groupNodeCount: nodesInGroup.length,
+      };
+
+      // Apply stored position if available
+      if (storedPos) {
+        (groupNode as SimNode).x = storedPos.x;
+        (groupNode as SimNode).y = storedPos.y;
+      }
+
+      resultNodes.push(groupNode);
+    });
+
+    // Build edges with aggregation for collapsed groups
+    const resultEdges: (TopologyEdge & { isAggregated?: boolean; aggregatedCount?: number; originalEdgeIds?: string[] })[] = [];
+    const edgeAggregationMap = new Map<string, TopologyEdge & { isAggregated: boolean; aggregatedCount: number; originalEdgeIds: string[] }>();
+
+    topology.edges.forEach(edge => {
+      const sourceGroupKey = nodeToGroupMap.get(edge.source);
+      const targetGroupKey = nodeToGroupMap.get(edge.target);
+
+      // Skip edges where both endpoints are hidden
+      const sourceVisible = visibleNodes.some(n => n.id === edge.source);
+      const targetVisible = visibleNodes.some(n => n.id === edge.target);
+      if (!sourceVisible || !targetVisible) return;
+
+      // Determine actual source and target (may be group node)
+      const sourceIsCollapsed = sourceGroupKey && collapsedGroups.has(sourceGroupKey);
+      const targetIsCollapsed = targetGroupKey && collapsedGroups.has(targetGroupKey);
+
+      const actualSource = sourceIsCollapsed ? `group-${sourceGroupKey}` : edge.source;
+      const actualTarget = targetIsCollapsed ? `group-${targetGroupKey}` : edge.target;
+
+      // Skip self-loops (when both source and target are in the same collapsed group)
+      if (actualSource === actualTarget) return;
+
+      // Create aggregation key
+      const aggKey = `${actualSource}->${actualTarget}`;
+
+      if (edgeAggregationMap.has(aggKey)) {
+        // Aggregate into existing edge
+        const existing = edgeAggregationMap.get(aggKey)!;
+        existing.aggregatedCount++;
+        existing.bytes_total += edge.bytes_total;
+        existing.bytes_last_24h += edge.bytes_last_24h;
+        existing.is_critical = existing.is_critical || edge.is_critical;
+        existing.originalEdgeIds.push(edge.id);
+      } else {
+        // Create new aggregated edge
+        edgeAggregationMap.set(aggKey, {
+          ...edge,
+          id: aggKey,
+          source: actualSource,
+          target: actualTarget,
+          isAggregated: !!(sourceIsCollapsed || targetIsCollapsed),
+          aggregatedCount: 1,
+          originalEdgeIds: [edge.id],
+        });
+      }
+    });
+
+    edgeAggregationMap.forEach(edge => resultEdges.push(edge));
+
+    return { nodes: resultNodes, edges: resultEdges };
+  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode, collapsedGroups, nodeToGroupMap]);
 
   // Handle node selection and path highlighting
   const handleNodeClick = useCallback((node: TopologyNode) => {
@@ -559,14 +686,13 @@ export default function Topology() {
 
     // Add grouping force if grouping is enabled
     if (groupingMode !== 'none') {
-      // Compute group centers - spread groups further apart
+      // Compute group centers
       const groupCenters = new Map<string, { x: number; y: number }>();
       const groupCount = groups.size;
       let idx = 0;
       groups.forEach((_, key) => {
         const angle = (2 * Math.PI * idx) / groupCount;
-        // Increased radius from 0.25 to 0.4 for more separation
-        const radius = Math.min(width, height) * 0.4;
+        const radius = Math.min(width, height) * 0.25;
         groupCenters.set(key, {
           x: width / 2 + radius * Math.cos(angle),
           y: height / 2 + radius * Math.sin(angle),
@@ -574,61 +700,16 @@ export default function Topology() {
         idx++;
       });
 
-      // Create a map of node ID to group key for inter-group repulsion
-      const nodeGroupMap = new Map<string, string>();
-      nodes.forEach(n => {
-        nodeGroupMap.set(n.id, getGroupKey(n, groupingMode));
-      });
-
-      // Add force to pull nodes toward their group center (increased strength)
+      // Add force to pull nodes toward their group center
       simulation.force('group', d3.forceX<SimNode>((d) => {
         const key = getGroupKey(d, groupingMode);
         return groupCenters.get(key)?.x || width / 2;
-      }).strength(0.4));
+      }).strength(0.1));
 
       simulation.force('groupY', d3.forceY<SimNode>((d) => {
         const key = getGroupKey(d, groupingMode);
         return groupCenters.get(key)?.y || height / 2;
-      }).strength(0.4));
-
-      // Add inter-group repulsion - nodes from different groups push each other away
-      simulation.force('interGroupRepulsion', d3.forceManyBody<SimNode>()
-        .strength(() => {
-          // Stronger repulsion for nodes that have cross-group connections
-          return -200;
-        })
-      );
-
-      // Custom force to push nodes from different groups apart
-      simulation.force('groupSeparation', () => {
-        const alpha = simulation.alpha();
-        nodes.forEach(nodeA => {
-          const groupA = nodeGroupMap.get(nodeA.id);
-          nodes.forEach(nodeB => {
-            if (nodeA.id >= nodeB.id) return; // Avoid duplicate pairs
-            const groupB = nodeGroupMap.get(nodeB.id);
-            if (groupA === groupB) return; // Same group, skip
-
-            // Calculate distance between nodes
-            const dx = (nodeB.x || 0) - (nodeA.x || 0);
-            const dy = (nodeB.y || 0) - (nodeA.y || 0);
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-            // Apply repulsion if nodes from different groups are too close
-            const minDist = 150; // Minimum distance between nodes of different groups
-            if (dist < minDist) {
-              const force = (minDist - dist) / dist * alpha * 0.5;
-              const fx = dx * force;
-              const fy = dy * force;
-
-              nodeA.vx = (nodeA.vx || 0) - fx;
-              nodeA.vy = (nodeA.vy || 0) - fy;
-              nodeB.vx = (nodeB.vx || 0) + fx;
-              nodeB.vy = (nodeB.vy || 0) + fy;
-            }
-          });
-        });
-      });
+      }).strength(0.1));
     }
 
     // Create arrow markers for different states
@@ -673,7 +754,7 @@ export default function Topology() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#eab308');
 
-    // Create links
+    // Create links - with support for aggregated edges
     const link = container
       .append('g')
       .attr('class', 'links')
@@ -682,11 +763,12 @@ export default function Topology() {
       .join('line')
       .attr('class', 'edge')
       .attr('stroke', '#475569')
-      .attr('stroke-width', 2)
+      .attr('stroke-width', (d) => d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1
+        ? Math.min(2 + d.aggregatedCount, 8) : 2)
       .attr('stroke-opacity', 0.6)
       .attr('marker-end', 'url(#arrowhead)');
 
-    // Create drag behavior
+    // Create drag behavior for individual nodes
     const dragBehavior = d3
       .drag<SVGGElement, SimNode>()
       .on('start', (event, d) => {
@@ -697,11 +779,59 @@ export default function Topology() {
       .on('drag', (event, d) => {
         d.fx = event.x;
         d.fy = event.y;
+        // Store position for group nodes
+        if (d.isGroupNode && d.groupKey) {
+          groupPositionsRef.current.set(d.groupKey, { x: event.x, y: event.y });
+        }
       })
       .on('end', (event, d) => {
         if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+        // Keep group nodes pinned where they were dragged
+        if (d.isGroupNode && d.groupKey) {
+          groupPositionsRef.current.set(d.groupKey, { x: d.x!, y: d.y! });
+        } else {
+          d.fx = null;
+          d.fy = null;
+        }
+      });
+
+    // Create group drag behavior - drags all nodes in the group together
+    const groupDragBehavior = d3
+      .drag<SVGPathElement, string>()
+      .on('start', function (event, groupKey) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        // Fix all nodes in this group at their current positions
+        nodes.forEach(n => {
+          if (getGroupKey(n, groupingMode) === groupKey) {
+            n.fx = n.x;
+            n.fy = n.y;
+          }
+        });
+      })
+      .on('drag', function (event, groupKey) {
+        const dx = event.dx;
+        const dy = event.dy;
+        // Move all nodes in this group by the drag delta
+        nodes.forEach(n => {
+          if (getGroupKey(n, groupingMode) === groupKey) {
+            const newX = (n.fx ?? n.x ?? 0) + dx;
+            const newY = (n.fy ?? n.y ?? 0) + dy;
+            n.fx = newX;
+            n.fy = newY;
+            n.x = newX;
+            n.y = newY;
+          }
+        });
+      })
+      .on('end', function (event, groupKey) {
+        if (!event.active) simulation.alphaTarget(0);
+        // Release all nodes in this group
+        nodes.forEach(n => {
+          if (getGroupKey(n, groupingMode) === groupKey) {
+            n.fx = null;
+            n.fy = null;
+          }
+        });
       });
 
     // Create node groups
@@ -711,53 +841,90 @@ export default function Topology() {
       .selectAll<SVGGElement, SimNode>('g')
       .data(nodes)
       .join('g')
-      .attr('class', 'node')
+      .attr('class', (d) => d.isGroupNode ? 'node group-node' : 'node')
       .style('cursor', 'pointer')
       .call(dragBehavior);
 
-    // Add circles to nodes - color based on internal/external
+    // Add circles to nodes - different styling for group nodes
     node
       .append('circle')
-      .attr('r', 20)
-      .attr('fill', (d) => d.is_internal ? '#10b981' : '#f97316')
-      .attr('stroke', '#1e293b')
-      .attr('stroke-width', 2);
+      .attr('r', (d) => d.isGroupNode ? 35 : 20)
+      .attr('fill', (d) => {
+        if (d.isGroupNode && d.groupKey) {
+          return groupColors.get(d.groupKey) || '#6b7280';
+        }
+        return d.is_internal ? '#10b981' : '#f97316';
+      })
+      .attr('stroke', (d) => d.isGroupNode ? '#ffffff' : '#1e293b')
+      .attr('stroke-width', (d) => d.isGroupNode ? 3 : 2)
+      .attr('stroke-dasharray', (d) => d.isGroupNode ? '5,3' : 'none');
 
     // Add labels to nodes
     node
       .append('text')
-      .text((d) => d.name.substring(0, 12))
-      .attr('dy', 35)
+      .text((d) => d.isGroupNode ? d.name : d.name.substring(0, 12))
+      .attr('dy', (d) => d.isGroupNode ? 55 : 35)
       .attr('text-anchor', 'middle')
       .attr('fill', '#e2e8f0')
-      .attr('font-size', 11);
+      .attr('font-size', (d) => d.isGroupNode ? 12 : 11)
+      .attr('font-weight', (d) => d.isGroupNode ? 'bold' : 'normal');
 
-    // Add icon/initial to nodes - I for internal, E for external
+    // Add icon/initial to nodes
     node
       .append('text')
-      .text((d) => d.is_internal ? 'I' : 'E')
+      .text((d) => {
+        if (d.isGroupNode) {
+          return d.groupNodeCount?.toString() || '';
+        }
+        return d.is_internal ? 'I' : 'E';
+      })
       .attr('dy', 5)
       .attr('text-anchor', 'middle')
       .attr('fill', 'white')
-      .attr('font-size', 14)
+      .attr('font-size', (d) => d.isGroupNode ? 16 : 14)
       .attr('font-weight', 'bold');
 
-    // Handle click
+    // Handle click - for group nodes, toggle collapse
     node.on('click', (event, d) => {
       event.stopPropagation();
-      handleNodeClick(d);
+      if (d.isGroupNode && d.groupKey) {
+        // Expand the group
+        setCollapsedGroups(prev => {
+          const next = new Set(prev);
+          next.delete(d.groupKey!);
+          return next;
+        });
+      } else {
+        handleNodeClick(d);
+      }
+    });
+
+    // Handle double-click on regular nodes to collapse their group
+    node.on('dblclick', (event, d) => {
+      event.stopPropagation();
+      if (!d.isGroupNode && groupingMode !== 'none') {
+        const groupKey = getGroupKey(d, groupingMode);
+        setCollapsedGroups(prev => {
+          const next = new Set(prev);
+          next.add(groupKey);
+          return next;
+        });
+      }
     });
 
     // Handle hover
     node
-      .on('mouseenter', function () {
-        d3.select(this).select('circle').attr('stroke', '#3b82f6').attr('stroke-width', 3);
+      .on('mouseenter', function (_, d) {
+        const strokeColor = d.isGroupNode ? '#ffffff' : '#3b82f6';
+        d3.select(this).select('circle').attr('stroke', strokeColor).attr('stroke-width', d.isGroupNode ? 4 : 3);
       })
       .on('mouseleave', function (_, d) {
         const isSelected = selectedNode?.id === d.id;
         const isHighlighted = highlightedPaths?.upstream.has(d.id) || highlightedPaths?.downstream.has(d.id);
         if (!isSelected && !isHighlighted) {
-          d3.select(this).select('circle').attr('stroke', '#1e293b').attr('stroke-width', 2);
+          d3.select(this).select('circle')
+            .attr('stroke', d.isGroupNode ? '#ffffff' : '#1e293b')
+            .attr('stroke-width', d.isGroupNode ? 3 : 2);
         }
       });
 
@@ -771,11 +938,14 @@ export default function Topology() {
 
       node.attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-      // Update group hulls
+      // Update group hulls (skip collapsed groups - they show as single nodes)
       if (groupingMode !== 'none') {
         hullGroup.selectAll('*').remove();
 
         groups.forEach((groupNodes, key) => {
+          // Skip collapsed groups - they're represented by group nodes
+          if (collapsedGroups.has(key)) return;
+
           const points: [number, number][] = groupNodes
             .map(gn => {
               const simNode = nodes.find(n => n.id === gn.id);
@@ -790,14 +960,29 @@ export default function Topology() {
             const hull = computeHull(points);
             if (hull) {
               const color = groupColors.get(key) || '#6b7280';
-              hullGroup
+              const hullPath_ = hullGroup
                 .append('path')
-                .attr('d', hullPath(hull, 30))
+                .attr('d', hullPath(hull, 40))
                 .attr('fill', color)
                 .attr('fill-opacity', 0.1)
                 .attr('stroke', color)
                 .attr('stroke-width', 2)
-                .attr('stroke-opacity', 0.5);
+                .attr('stroke-opacity', 0.5)
+                .style('cursor', 'move')
+                .datum(key);
+
+              // Make hull draggable
+              hullPath_.call(groupDragBehavior as any);
+
+              // Double-click on hull to collapse the group
+              hullPath_.on('dblclick', (event) => {
+                event.stopPropagation();
+                setCollapsedGroups(prev => {
+                  const next = new Set(prev);
+                  next.add(key);
+                  return next;
+                });
+              });
 
               // Add group label
               const centroid = d3.polygonCentroid(hull);
@@ -809,6 +994,7 @@ export default function Topology() {
                 .attr('fill', color)
                 .attr('font-size', 14)
                 .attr('font-weight', 'bold')
+                .style('pointer-events', 'none')
                 .text(key);
             }
           } else if (points.length > 0) {
@@ -826,7 +1012,18 @@ export default function Topology() {
               .attr('fill-opacity', 0.1)
               .attr('stroke', color)
               .attr('stroke-width', 2)
-              .attr('stroke-opacity', 0.5);
+              .attr('stroke-opacity', 0.5)
+              .style('cursor', 'move')
+              .datum(key)
+              .call(groupDragBehavior as any)
+              .on('dblclick', (event) => {
+                event.stopPropagation();
+                setCollapsedGroups(prev => {
+                  const next = new Set(prev);
+                  next.add(key);
+                  return next;
+                });
+              });
 
             hullGroup
               .append('text')
@@ -836,6 +1033,7 @@ export default function Topology() {
               .attr('fill', color)
               .attr('font-size', 14)
               .attr('font-weight', 'bold')
+              .style('pointer-events', 'none')
               .text(key);
           }
         });
@@ -846,7 +1044,7 @@ export default function Topology() {
     return () => {
       simulation.stop();
     };
-  }, [filteredTopology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection]);
+  }, [filteredTopology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection, collapsedGroups, setCollapsedGroups]);
 
   // Update highlighting when selection changes
   useEffect(() => {
@@ -1226,10 +1424,13 @@ export default function Topology() {
 
               {groupingMode !== 'none' && groups.size > 0 && (
                 <>
-                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">Groups (click to toggle)</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">
+                    Groups
+                    <span className="text-slate-500 font-normal ml-1">(dbl-click to collapse)</span>
+                  </div>
                   <div className="space-y-2">
                     {Array.from(groupColors.entries()).map(([name, color]) => (
-                      <label key={name} className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2">
+                      <div key={name} className="flex items-center gap-2 hover:bg-slate-700/50 px-2 py-1 rounded -mx-2">
                         <input
                           type="checkbox"
                           checked={!hiddenGroups.has(name)}
@@ -1253,9 +1454,42 @@ export default function Topology() {
                         <span className="text-xs text-slate-500">
                           ({groups.get(name)?.length || 0})
                         </span>
-                      </label>
+                        <button
+                          onClick={() => {
+                            setCollapsedGroups(prev => {
+                              const next = new Set(prev);
+                              if (next.has(name)) {
+                                next.delete(name);
+                              } else {
+                                next.add(name);
+                              }
+                              return next;
+                            });
+                          }}
+                          className="p-1 rounded hover:bg-slate-600 text-slate-400 hover:text-white transition-colors"
+                          title={collapsedGroups.has(name) ? 'Expand group' : 'Collapse group'}
+                        >
+                          {collapsedGroups.has(name) ? (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     ))}
                   </div>
+                  {collapsedGroups.size > 0 && (
+                    <button
+                      onClick={() => setCollapsedGroups(new Set())}
+                      className="mt-2 text-xs text-primary-400 hover:text-primary-300"
+                    >
+                      Expand all groups
+                    </button>
+                  )}
                 </>
               )}
             </div>
