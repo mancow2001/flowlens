@@ -273,6 +273,46 @@ class WebhookSettings(BaseSettings):
             return {}
 
 
+class SlackSettings(BaseSettings):
+    """Slack notification configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="SLACK_")
+
+    enabled: bool = False
+    webhook_url: str | None = None
+    default_channel: str | None = None  # Optional channel override
+    username: str = "FlowLens"
+    icon_emoji: str = ":bell:"
+    timeout: int = Field(default=30, ge=1, le=120)
+    retry_count: int = Field(default=3, ge=0, le=10)
+    retry_delay: float = Field(default=1.0, ge=0.1, le=30.0)
+
+
+class TeamsSettings(BaseSettings):
+    """Microsoft Teams notification configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="TEAMS_")
+
+    enabled: bool = False
+    webhook_url: str | None = None
+    timeout: int = Field(default=30, ge=1, le=120)
+    retry_count: int = Field(default=3, ge=0, le=10)
+    retry_delay: float = Field(default=1.0, ge=0.1, le=30.0)
+
+
+class PagerDutySettings(BaseSettings):
+    """PagerDuty notification configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="PAGERDUTY_")
+
+    enabled: bool = False
+    routing_key: str | None = None  # Integration key from PagerDuty service
+    service_name: str = "FlowLens"
+    timeout: int = Field(default=30, ge=1, le=120)
+    retry_count: int = Field(default=3, ge=0, le=10)
+    retry_delay: float = Field(default=1.0, ge=0.1, le=30.0)
+
+
 class NotificationSettings(BaseSettings):
     """Notification system configuration."""
 
@@ -284,6 +324,9 @@ class NotificationSettings(BaseSettings):
     # Channel-specific settings
     email: EmailSettings = Field(default_factory=EmailSettings)
     webhook: WebhookSettings = Field(default_factory=WebhookSettings)
+    slack: SlackSettings = Field(default_factory=SlackSettings)
+    teams: TeamsSettings = Field(default_factory=TeamsSettings)
+    pagerduty: PagerDutySettings = Field(default_factory=PagerDutySettings)
 
     # Alert routing rules (severity -> channels)
     critical_channels: list[str] = Field(default_factory=lambda: ["email", "webhook"])

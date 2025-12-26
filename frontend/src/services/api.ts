@@ -470,6 +470,18 @@ export const classificationApi = {
 };
 
 // Asset bulk operations
+export interface BulkUpdateResult {
+  updated: number;
+  skipped: number;
+  errors: number;
+  error_details: string[] | null;
+}
+
+export interface BulkDeleteResult {
+  deleted: number;
+  not_found: number;
+}
+
 export const assetBulkApi = {
   exportUrl: (format: 'csv' | 'json' = 'csv', params?: {
     assetType?: string;
@@ -502,6 +514,16 @@ export const assetBulkApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
       params: { skipErrors },
     });
+    return data;
+  },
+
+  bulkUpdate: async (ids: string[], updates: Record<string, string | boolean | null>): Promise<BulkUpdateResult> => {
+    const { data } = await api.patch('/assets/bulk', { ids, updates });
+    return data;
+  },
+
+  bulkDelete: async (ids: string[]): Promise<BulkDeleteResult> => {
+    const { data } = await api.delete('/assets/bulk', { data: ids });
     return data;
   },
 };
@@ -552,6 +574,96 @@ export interface AlertRuleTestResult {
   rendered_title: string | null;
   rendered_description: string | null;
 }
+
+// Maintenance Windows endpoints
+export interface MaintenanceWindow {
+  id: string;
+  name: string;
+  description: string | null;
+  asset_ids: string[] | null;
+  environments: string[] | null;
+  datacenters: string[] | null;
+  start_time: string;
+  end_time: string;
+  is_recurring: boolean;
+  recurrence_rule: string | null;
+  suppress_alerts: boolean;
+  suppress_notifications: boolean;
+  is_active: boolean;
+  created_by: string;
+  suppressed_alerts_count: number;
+  tags: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaintenanceWindowSummary {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  is_active: boolean;
+  is_recurring: boolean;
+  suppress_alerts: boolean;
+  environments: string[] | null;
+  datacenters: string[] | null;
+  asset_count: number;
+  suppressed_alerts_count: number;
+}
+
+export const maintenanceApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    isActive?: boolean;
+    includePast?: boolean;
+    environment?: string;
+    datacenter?: string;
+  }): Promise<{ items: MaintenanceWindowSummary[]; total: number; page: number; page_size: number }> => {
+    const { data } = await api.get('/maintenance', { params });
+    return data;
+  },
+
+  getActive: async (): Promise<MaintenanceWindowSummary[]> => {
+    const { data } = await api.get('/maintenance/active');
+    return data;
+  },
+
+  get: async (id: string): Promise<MaintenanceWindow> => {
+    const { data } = await api.get(`/maintenance/${id}`);
+    return data;
+  },
+
+  create: async (window: Omit<MaintenanceWindow, 'id' | 'created_at' | 'updated_at' | 'is_active' | 'suppressed_alerts_count'>): Promise<MaintenanceWindow> => {
+    const { data } = await api.post('/maintenance', window);
+    return data;
+  },
+
+  update: async (id: string, updates: Partial<MaintenanceWindow>): Promise<MaintenanceWindow> => {
+    const { data } = await api.patch(`/maintenance/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/maintenance/${id}`);
+  },
+
+  cancel: async (id: string): Promise<MaintenanceWindow> => {
+    const { data } = await api.post(`/maintenance/${id}/cancel`);
+    return data;
+  },
+
+  checkAsset: async (assetId: string, environment?: string, datacenter?: string): Promise<{
+    asset_id: string;
+    in_maintenance: boolean;
+    windows: MaintenanceWindowSummary[];
+  }> => {
+    const { data } = await api.get(`/maintenance/check/${assetId}`, {
+      params: { environment, datacenter },
+    });
+    return data;
+  },
+};
 
 export const alertRulesApi = {
   list: async (params?: {

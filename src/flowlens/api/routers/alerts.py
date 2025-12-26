@@ -17,6 +17,9 @@ from flowlens.models.change import Alert, AlertSeverity
 from flowlens.notifications.base import Notification, NotificationManager, NotificationPriority
 from flowlens.notifications.email import EmailChannel, EmailSettings, create_alert_notification
 from flowlens.notifications.webhook import WebhookChannel, WebhookSettings as WebhookChannelSettings
+from flowlens.notifications.slack import SlackChannel, SlackSettings as SlackChannelSettings
+from flowlens.notifications.teams import TeamsChannel, TeamsSettings as TeamsChannelSettings
+from flowlens.notifications.pagerduty import PagerDutyChannel, PagerDutySettings as PagerDutyChannelSettings
 from flowlens.api.websocket.manager import EventType, broadcast_alert_event
 from flowlens.schemas.alert import (
     AlertAcknowledge,
@@ -73,6 +76,40 @@ def get_notification_manager() -> NotificationManager:
                 headers=settings.notifications.webhook.headers,
             )
             _notification_manager.register_channel(WebhookChannel(webhook_settings))
+
+        # Register Slack channel if enabled
+        if settings.notifications.slack.enabled and settings.notifications.slack.webhook_url:
+            slack_settings = SlackChannelSettings(
+                webhook_url=settings.notifications.slack.webhook_url,
+                default_channel=settings.notifications.slack.default_channel,
+                username=settings.notifications.slack.username,
+                icon_emoji=settings.notifications.slack.icon_emoji,
+                timeout=settings.notifications.slack.timeout,
+                retry_count=settings.notifications.slack.retry_count,
+                retry_delay=settings.notifications.slack.retry_delay,
+            )
+            _notification_manager.register_channel(SlackChannel(slack_settings))
+
+        # Register Teams channel if enabled
+        if settings.notifications.teams.enabled and settings.notifications.teams.webhook_url:
+            teams_settings = TeamsChannelSettings(
+                webhook_url=settings.notifications.teams.webhook_url,
+                timeout=settings.notifications.teams.timeout,
+                retry_count=settings.notifications.teams.retry_count,
+                retry_delay=settings.notifications.teams.retry_delay,
+            )
+            _notification_manager.register_channel(TeamsChannel(teams_settings))
+
+        # Register PagerDuty channel if enabled
+        if settings.notifications.pagerduty.enabled and settings.notifications.pagerduty.routing_key:
+            pagerduty_settings = PagerDutyChannelSettings(
+                routing_key=settings.notifications.pagerduty.routing_key,
+                service_name=settings.notifications.pagerduty.service_name,
+                timeout=settings.notifications.pagerduty.timeout,
+                retry_count=settings.notifications.pagerduty.retry_count,
+                retry_delay=settings.notifications.pagerduty.retry_delay,
+            )
+            _notification_manager.register_channel(PagerDutyChannel(pagerduty_settings))
 
     return _notification_manager
 
@@ -609,6 +646,42 @@ async def list_notification_channels() -> dict:
             "retry_count": settings.notifications.webhook.retry_count,
             "has_secret": settings.notifications.webhook.secret is not None,
         } if settings.notifications.webhook.enabled else None,
+    })
+
+    # Slack channel
+    channels.append({
+        "name": "slack",
+        "enabled": settings.notifications.slack.enabled,
+        "registered": "slack" in manager.channels,
+        "config": {
+            "username": settings.notifications.slack.username,
+            "default_channel": settings.notifications.slack.default_channel,
+            "timeout": settings.notifications.slack.timeout,
+            "retry_count": settings.notifications.slack.retry_count,
+        } if settings.notifications.slack.enabled else None,
+    })
+
+    # Teams channel
+    channels.append({
+        "name": "teams",
+        "enabled": settings.notifications.teams.enabled,
+        "registered": "teams" in manager.channels,
+        "config": {
+            "timeout": settings.notifications.teams.timeout,
+            "retry_count": settings.notifications.teams.retry_count,
+        } if settings.notifications.teams.enabled else None,
+    })
+
+    # PagerDuty channel
+    channels.append({
+        "name": "pagerduty",
+        "enabled": settings.notifications.pagerduty.enabled,
+        "registered": "pagerduty" in manager.channels,
+        "config": {
+            "service_name": settings.notifications.pagerduty.service_name,
+            "timeout": settings.notifications.pagerduty.timeout,
+            "retry_count": settings.notifications.pagerduty.retry_count,
+        } if settings.notifications.pagerduty.enabled else None,
     })
 
     return {

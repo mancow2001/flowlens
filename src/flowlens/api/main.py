@@ -196,7 +196,7 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, alert_rules, alerts, analysis, assets, changes, classification, dependencies, saved_views, topology, ws
+    from flowlens.api.routers import admin, alert_rules, alerts, analysis, assets, changes, classification, dependencies, maintenance, saved_views, topology, ws
 
     app.include_router(admin.router)
     app.include_router(assets.router, prefix="/api/v1")
@@ -206,6 +206,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis.router, prefix="/api/v1")
     app.include_router(alerts.router, prefix="/api/v1")
     app.include_router(alert_rules.router, prefix="/api/v1")
+    app.include_router(maintenance.router, prefix="/api/v1")
     app.include_router(changes.router, prefix="/api/v1")
     app.include_router(saved_views.router, prefix="/api/v1")
     app.include_router(ws.router, prefix="/api/v1")

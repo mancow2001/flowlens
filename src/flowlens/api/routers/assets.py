@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -578,6 +579,101 @@ async def import_assets(
         errors=errors,
         error_details=error_details if error_details else None,
     )
+
+
+# =============================================================================
+# Bulk Update Endpoint (must be before /{asset_id} routes)
+# =============================================================================
+
+
+class BulkAssetUpdate(BaseModel):
+    """Request body for bulk asset updates."""
+    ids: list[UUID]
+    updates: dict[str, str | bool | None]
+
+
+class BulkUpdateResult(BaseModel):
+    """Result of bulk update operation."""
+    updated: int
+    skipped: int
+    errors: int
+    error_details: list[str] | None = None
+
+
+@router.patch("/bulk", response_model=BulkUpdateResult)
+async def bulk_update_assets(
+    data: BulkAssetUpdate,
+    db: DbSession,
+    user: AuthenticatedUser,
+) -> BulkUpdateResult:
+    """Update multiple assets at once.
+
+    Supports updating: environment, datacenter, is_critical, owner, team.
+    """
+    allowed_fields = {"environment", "datacenter", "is_critical", "owner", "team"}
+    update_fields = {k: v for k, v in data.updates.items() if k in allowed_fields}
+
+    if not update_fields:
+        return BulkUpdateResult(updated=0, skipped=len(data.ids), errors=0)
+
+    # Get assets to update
+    result = await db.execute(
+        select(Asset).where(
+            Asset.id.in_(data.ids),
+            Asset.deleted_at.is_(None),
+        )
+    )
+    assets = result.scalars().all()
+
+    found_ids = {a.id for a in assets}
+    missing_ids = set(data.ids) - found_ids
+
+    updated = 0
+    errors = 0
+    error_details = []
+
+    for asset in assets:
+        try:
+            for field, value in update_fields.items():
+                setattr(asset, field, value)
+            updated += 1
+        except Exception as e:
+            errors += 1
+            error_details.append(f"Asset {asset.id}: {str(e)}")
+
+    await db.flush()
+
+    return BulkUpdateResult(
+        updated=updated,
+        skipped=len(missing_ids),
+        errors=errors,
+        error_details=error_details if error_details else None,
+    )
+
+
+@router.delete("/bulk", response_model=dict)
+async def bulk_delete_assets(
+    ids: list[UUID],
+    db: DbSession,
+    user: AuthenticatedUser,
+) -> dict:
+    """Soft delete multiple assets at once."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.id.in_(ids),
+            Asset.deleted_at.is_(None),
+        )
+    )
+    assets = result.scalars().all()
+
+    deleted = 0
+    for asset in assets:
+        asset.soft_delete()
+        deleted += 1
+
+    await db.flush()
+
+    return {"deleted": deleted, "not_found": len(ids) - deleted}
 
 
 # =============================================================================

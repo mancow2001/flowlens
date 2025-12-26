@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -12,6 +12,7 @@ import Table from '../components/common/Table';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
+import BulkActionToolbar from '../components/assets/BulkActionToolbar';
 import { assetApi, assetBulkApi, AssetImportPreview } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import type { Asset, AssetType } from '../types';
@@ -45,6 +46,7 @@ export default function Assets() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<AssetImportPreview | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ['assets', page, search, assetType, isInternal],
@@ -108,13 +110,82 @@ export default function Assets() {
     window.open(url, '_blank');
   };
 
+  // Selection handlers
+  const handleSelectAll = useCallback(() => {
+    if (!data?.items) return;
+    const allIds = data.items.map((a) => a.id);
+    const allSelected = allIds.every((id) => selectedAssets.has(id));
+
+    if (allSelected) {
+      // Deselect all on current page
+      setSelectedAssets((prev) => {
+        const next = new Set(prev);
+        allIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      // Select all on current page
+      setSelectedAssets((prev) => {
+        const next = new Set(prev);
+        allIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  }, [data?.items, selectedAssets]);
+
+  const handleSelectOne = useCallback((id: string) => {
+    setSelectedAssets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedAssets(new Set());
+  }, []);
+
   // Get a display character for the asset avatar
   // I = Internal, E = External
   const getAvatarChar = (asset: Asset): string => {
     return asset.is_internal ? 'I' : 'E';
   };
 
+  // Check if all items on current page are selected
+  const allPageSelected =
+    data?.items && data.items.length > 0
+      ? data.items.every((a) => selectedAssets.has(a.id))
+      : false;
+
   const columns = [
+    {
+      key: 'checkbox',
+      header: (
+        <input
+          type="checkbox"
+          checked={allPageSelected}
+          onChange={handleSelectAll}
+          className="w-4 h-4 rounded border-slate-500 bg-slate-700 text-primary-600 focus:ring-primary-500 focus:ring-offset-0 cursor-pointer"
+        />
+      ),
+      render: (asset: Asset) => (
+        <input
+          type="checkbox"
+          checked={selectedAssets.has(asset.id)}
+          onChange={(e) => {
+            e.stopPropagation();
+            handleSelectOne(asset.id);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-4 h-4 rounded border-slate-500 bg-slate-700 text-primary-600 focus:ring-primary-500 focus:ring-offset-0 cursor-pointer"
+        />
+      ),
+      width: '40px',
+    },
     {
       key: 'name',
       header: 'Name',
@@ -222,6 +293,12 @@ export default function Assets() {
           </Button>
         </div>
       </div>
+
+      {/* Bulk Action Toolbar */}
+      <BulkActionToolbar
+        selectedIds={Array.from(selectedAssets)}
+        onClear={clearSelection}
+      />
 
       {/* Filters */}
       <Card>

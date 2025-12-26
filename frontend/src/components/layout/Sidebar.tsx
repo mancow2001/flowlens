@@ -11,6 +11,7 @@ import {
   TagIcon,
   BeakerIcon,
   AdjustmentsHorizontalIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
 import clsx from 'clsx';
@@ -28,6 +29,7 @@ const navigation = [
 const settingsNavigation = [
   { name: 'Classification Rules', href: '/settings/classification', icon: TagIcon },
   { name: 'Alert Rules', href: '/settings/alert-rules', icon: AdjustmentsHorizontalIcon },
+  { name: 'Maintenance', href: '/settings/maintenance', icon: WrenchScrewdriverIcon },
 ];
 
 export default function Sidebar() {
