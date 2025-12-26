@@ -150,6 +150,14 @@ async def get_topology_graph(
     # Get the filtered asset IDs
     asset_ids = {n.id for n in nodes}
 
+    # Handle empty asset_ids case (IN () is invalid SQL)
+    if not asset_ids:
+        return TopologyGraph(
+            nodes=[],
+            edges=[],
+            generated_at=datetime.utcnow(),
+        )
+
     # Build dependency query
     dep_query = select(Dependency).where(
         Dependency.source_asset_id.in_(asset_ids),

@@ -56,6 +56,8 @@ class TopologyGraph(BaseModel):
 class TopologyFilter(BaseModel):
     """Filters for topology queries."""
 
+    model_config = ConfigDict(extra='ignore')
+
     asset_ids: list[UUID] | None = None
     application_id: UUID | None = None
     asset_types: list[str] | None = None
