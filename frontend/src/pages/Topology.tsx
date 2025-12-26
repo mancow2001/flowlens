@@ -559,13 +559,14 @@ export default function Topology() {
 
     // Add grouping force if grouping is enabled
     if (groupingMode !== 'none') {
-      // Compute group centers
+      // Compute group centers - spread groups further apart
       const groupCenters = new Map<string, { x: number; y: number }>();
       const groupCount = groups.size;
       let idx = 0;
       groups.forEach((_, key) => {
         const angle = (2 * Math.PI * idx) / groupCount;
-        const radius = Math.min(width, height) * 0.25;
+        // Increased radius from 0.25 to 0.4 for more separation
+        const radius = Math.min(width, height) * 0.4;
         groupCenters.set(key, {
           x: width / 2 + radius * Math.cos(angle),
           y: height / 2 + radius * Math.sin(angle),
@@ -573,16 +574,61 @@ export default function Topology() {
         idx++;
       });
 
-      // Add force to pull nodes toward their group center
+      // Create a map of node ID to group key for inter-group repulsion
+      const nodeGroupMap = new Map<string, string>();
+      nodes.forEach(n => {
+        nodeGroupMap.set(n.id, getGroupKey(n, groupingMode));
+      });
+
+      // Add force to pull nodes toward their group center (increased strength)
       simulation.force('group', d3.forceX<SimNode>((d) => {
         const key = getGroupKey(d, groupingMode);
         return groupCenters.get(key)?.x || width / 2;
-      }).strength(0.1));
+      }).strength(0.4));
 
       simulation.force('groupY', d3.forceY<SimNode>((d) => {
         const key = getGroupKey(d, groupingMode);
         return groupCenters.get(key)?.y || height / 2;
-      }).strength(0.1));
+      }).strength(0.4));
+
+      // Add inter-group repulsion - nodes from different groups push each other away
+      simulation.force('interGroupRepulsion', d3.forceManyBody<SimNode>()
+        .strength(() => {
+          // Stronger repulsion for nodes that have cross-group connections
+          return -200;
+        })
+      );
+
+      // Custom force to push nodes from different groups apart
+      simulation.force('groupSeparation', () => {
+        const alpha = simulation.alpha();
+        nodes.forEach(nodeA => {
+          const groupA = nodeGroupMap.get(nodeA.id);
+          nodes.forEach(nodeB => {
+            if (nodeA.id >= nodeB.id) return; // Avoid duplicate pairs
+            const groupB = nodeGroupMap.get(nodeB.id);
+            if (groupA === groupB) return; // Same group, skip
+
+            // Calculate distance between nodes
+            const dx = (nodeB.x || 0) - (nodeA.x || 0);
+            const dy = (nodeB.y || 0) - (nodeA.y || 0);
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+            // Apply repulsion if nodes from different groups are too close
+            const minDist = 150; // Minimum distance between nodes of different groups
+            if (dist < minDist) {
+              const force = (minDist - dist) / dist * alpha * 0.5;
+              const fx = dx * force;
+              const fy = dy * force;
+
+              nodeA.vx = (nodeA.vx || 0) - fx;
+              nodeA.vy = (nodeA.vy || 0) - fy;
+              nodeB.vx = (nodeB.vx || 0) + fx;
+              nodeB.vy = (nodeB.vy || 0) + fy;
+            }
+          });
+        });
+      });
     }
 
     // Create arrow markers for different states
@@ -746,7 +792,7 @@ export default function Topology() {
               const color = groupColors.get(key) || '#6b7280';
               hullGroup
                 .append('path')
-                .attr('d', hullPath(hull, 40))
+                .attr('d', hullPath(hull, 30))
                 .attr('fill', color)
                 .attr('fill-opacity', 0.1)
                 .attr('stroke', color)
