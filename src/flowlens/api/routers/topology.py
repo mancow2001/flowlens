@@ -27,13 +27,13 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
     """Get CIDR classifications for a batch of IP addresses.
 
     Returns a dict mapping IP address to classification attributes.
-    Returns empty dict if classification_rules table doesn't exist yet.
+    Returns empty dict if classification_rules table doesn't exist yet or any error occurs.
     """
     if not ip_addresses:
         return {}
 
-    # First check if the classification_rules table exists
     try:
+        # First check if the classification_rules table exists and has rows
         table_check = await db.execute(
             text("""
                 SELECT EXISTS (
@@ -45,10 +45,15 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
         table_exists = table_check.scalar()
         if not table_exists:
             return {}
-    except Exception:
-        return {}
 
-    try:
+        # Check if there are any active rules
+        count_check = await db.execute(
+            text("SELECT COUNT(*) FROM classification_rules WHERE is_active = true")
+        )
+        rule_count = count_check.scalar()
+        if not rule_count:
+            return {}
+
         # Build a query that gets classifications for all IPs in one go
         # Using a lateral join with the classification function
         result = await db.execute(
@@ -91,8 +96,11 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
 
         return classifications
     except Exception:
-        # If query fails for any reason, just return empty and let the topology work
-        await db.rollback()
+        # If any query fails, rollback and return empty to let topology work without classification
+        try:
+            await db.rollback()
+        except Exception:
+            pass
         return {}
 
 
