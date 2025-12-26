@@ -78,7 +78,7 @@ def upgrade() -> None:
 
     # Insert default rules that match the current hardcoded behavior
     op.execute("""
-        INSERT INTO alert_rules (id, name, description, is_active, change_types, severity, title_template, description_template, notify_channels, cooldown_minutes, priority)
+        INSERT INTO alert_rules (id, name, description, is_active, change_types, severity, title_template, description_template, notify_channels, cooldown_minutes, priority, trigger_count)
         VALUES
         (
             gen_random_uuid(),
@@ -91,7 +91,8 @@ def upgrade() -> None:
             '{summary}',
             ARRAY['email', 'webhook'],
             30,
-            10
+            10,
+            0
         ),
         (
             gen_random_uuid(),
@@ -104,7 +105,8 @@ def upgrade() -> None:
             '{summary}',
             ARRAY['email'],
             60,
-            50
+            50,
+            0
         ),
         (
             gen_random_uuid(),
@@ -117,7 +119,8 @@ def upgrade() -> None:
             '{summary}',
             NULL,
             120,
-            100
+            100,
+            0
         ),
         (
             gen_random_uuid(),
@@ -130,7 +133,8 @@ def upgrade() -> None:
             '{summary}',
             ARRAY['webhook'],
             60,
-            75
+            75,
+            0
         ),
         (
             gen_random_uuid(),
@@ -143,7 +147,8 @@ def upgrade() -> None:
             '{summary}',
             NULL,
             0,
-            150
+            150,
+            0
         );
     """)
 
