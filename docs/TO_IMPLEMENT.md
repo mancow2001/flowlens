@@ -157,7 +157,8 @@ The following prioritization is based on:
 | 1.5a | **Asset metadata editing** | Low | Allow manual editing of owner, team, description, criticality on Asset Detail page |
 | 1.5b | **CIDR-based classification rules** | Medium | Define IP ranges with attributes (environment, datacenter, location) |
 | 1.5c | **Dynamic grouping from CIDR rules** | Medium | Topology grouping evaluates CIDR rules in real-time, not static asset fields |
-| 1.5d | **Bulk asset import/update** | Low | CSV/JSON import for attributes not derivable from CIDR (owner, team, criticality) |
+| 1.5d | **Bulk asset export** | Low | Export all assets to CSV/JSON with current attributes for offline editing |
+| 1.5e | **Bulk asset import/update** | Low | Import CSV/JSON to update attributes not derivable from CIDR (owner, team, criticality) |
 
 **Outcome**: Topology grouping becomes meaningful; assets have organizational context
 
@@ -172,7 +173,12 @@ The following prioritization is based on:
   - Topology "Group by Datacenter" evaluates each asset's IP against CIDR rules at query time
   - No need to store derived attributes on asset records (avoids stale data)
   - Rules can be cached/materialized for performance if needed
-- **Bulk import**: For attributes that vary per-asset (owner, team) not per-subnet
+- **Bulk export/import workflow**:
+  1. Export assets to CSV (columns: ip_address, name, owner, team, description, is_critical, asset_type)
+  2. User updates in Excel/Google Sheets
+  3. Import CSV - matches by ip_address, updates specified fields
+  4. Validation report shows what will be changed before committing
+  - Export includes all assets; import only updates fields with values (blank = no change)
 
 ---
 
