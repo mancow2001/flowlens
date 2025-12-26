@@ -6,7 +6,7 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import { analysisApi, assetApi } from '../services/api';
-import type { BlastRadius, AffectedAsset } from '../types';
+import type { SPOFCandidate } from '../types';
 import Card from '../components/common/Card';
 import Loading from '../components/common/Loading';
 import Badge from '../components/common/Badge';
@@ -71,7 +71,7 @@ export default function Analysis() {
 }
 
 function SPOFAnalysis() {
-  const { data: spofAssets, isLoading, error, refetch } = useQuery({
+  const { data: spofResult, isLoading, error, refetch } = useQuery({
     queryKey: ['spof-analysis'],
     queryFn: () => analysisApi.getSPOF(),
   });
@@ -92,6 +92,15 @@ function SPOFAnalysis() {
     );
   }
 
+  const getRiskBadgeVariant = (level: string): 'error' | 'warning' | 'info' | 'success' => {
+    switch (level) {
+      case 'critical': return 'error';
+      case 'high': return 'error';
+      case 'medium': return 'warning';
+      default: return 'info';
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -110,30 +119,44 @@ function SPOFAnalysis() {
         </div>
       </Card>
 
-      {spofAssets && spofAssets.length > 0 ? (
+      {spofResult && spofResult.candidates.length > 0 ? (
         <Card>
-          <div className="p-4 border-b border-slate-700">
-            <h3 className="font-semibold text-white">
-              Detected SPOFs ({spofAssets.length})
-            </h3>
+          <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+            <div>
+              <h3 className="font-semibold text-white">
+                SPOF Candidates ({spofResult.candidates.length})
+              </h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Analyzed {spofResult.total_analyzed} assets, {spofResult.high_risk_count} high risk
+              </p>
+            </div>
           </div>
           <div className="divide-y divide-slate-700">
-            {spofAssets.map((asset) => (
-              <div key={asset.id} className="p-4 flex items-center justify-between">
+            {spofResult.candidates.map((candidate: SPOFCandidate) => (
+              <div key={candidate.asset_id} className="p-4 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-white">{asset.name}</span>
-                    {asset.is_critical && (
-                      <Badge variant="error" size="sm">Critical</Badge>
+                    <span className="font-medium text-white">{candidate.asset_name}</span>
+                    {candidate.is_critical && (
+                      <Badge variant="error" size="sm">Critical Asset</Badge>
                     )}
+                    <Badge variant={getRiskBadgeVariant(candidate.risk_level)} size="sm">
+                      {candidate.risk_level} risk
+                    </Badge>
                   </div>
                   <p className="text-sm text-slate-400 mt-1">
-                    {asset.ip_address} - {asset.asset_type}
+                    {candidate.ip_address}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-slate-400">
-                    {asset.connections_in + asset.connections_out} connections
+                  <p className="text-sm text-white font-medium">
+                    {candidate.dependents_count} dependents
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {candidate.critical_dependents} critical
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Risk score: {candidate.risk_score}
                   </p>
                 </div>
               </div>
@@ -219,7 +242,7 @@ function BlastRadiusAnalysis() {
               Failed to load blast radius analysis
             </div>
           ) : blastRadius ? (
-            <BlastRadiusResult blastRadius={blastRadius} />
+            <BlastRadiusResultDisplay blastRadius={blastRadius} />
           ) : null}
         </Card>
       )}
@@ -227,38 +250,58 @@ function BlastRadiusAnalysis() {
   );
 }
 
-function BlastRadiusResult({ blastRadius }: { blastRadius: BlastRadius }) {
+interface BlastRadiusData {
+  asset_id: string;
+  asset_name: string;
+  total_affected: number;
+  critical_affected: number;
+  affected_assets: Array<{ id: string; name: string; depth: number; is_critical: boolean }>;
+  max_depth: number;
+  calculated_at: string;
+}
+
+function BlastRadiusResultDisplay({ blastRadius }: { blastRadius: BlastRadiusData }) {
+  // Group affected assets by depth
+  const byDepth: Record<number, number> = {};
+  blastRadius.affected_assets.forEach((asset) => {
+    byDepth[asset.depth] = (byDepth[asset.depth] || 0) + 1;
+  });
+
   return (
     <div>
       <div className="p-4 border-b border-slate-700">
         <h3 className="font-semibold text-white">
-          Blast Radius: {blastRadius.center_asset_name}
+          Blast Radius: {blastRadius.asset_name}
         </h3>
         <p className="text-sm text-slate-400 mt-1">
-          {blastRadius.total_affected} assets would be affected if this asset fails
+          {blastRadius.total_affected} assets would be affected ({blastRadius.critical_affected} critical)
         </p>
       </div>
 
       {/* Depth breakdown */}
-      <div className="p-4 border-b border-slate-700">
-        <h4 className="text-sm font-medium text-slate-300 mb-3">Impact by Distance</h4>
-        <div className="grid grid-cols-5 gap-2">
-          {Object.entries(blastRadius.by_depth).map(([depth, count]) => (
-            <div key={depth} className="text-center p-2 bg-slate-700 rounded-lg">
-              <p className="text-lg font-semibold text-white">{count}</p>
-              <p className="text-xs text-slate-400">Hop {depth}</p>
-            </div>
-          ))}
+      {Object.keys(byDepth).length > 0 && (
+        <div className="p-4 border-b border-slate-700">
+          <h4 className="text-sm font-medium text-slate-300 mb-3">Impact by Distance</h4>
+          <div className="grid grid-cols-5 gap-2">
+            {Object.entries(byDepth).map(([depth, count]) => (
+              <div key={depth} className="text-center p-2 bg-slate-700 rounded-lg">
+                <p className="text-lg font-semibold text-white">{count}</p>
+                <p className="text-xs text-slate-400">Hop {depth}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Affected assets list */}
       <div className="divide-y divide-slate-700">
-        {blastRadius.affected_assets.map((asset: AffectedAsset) => (
+        {blastRadius.affected_assets.map((asset) => (
           <div key={asset.id} className="p-4 flex items-center justify-between">
-            <div>
+            <div className="flex items-center gap-2">
               <span className="text-white">{asset.name}</span>
-              <p className="text-sm text-slate-400">{asset.type}</p>
+              {asset.is_critical && (
+                <Badge variant="error" size="sm">Critical</Badge>
+              )}
             </div>
             <Badge variant={asset.depth === 1 ? 'error' : asset.depth === 2 ? 'warning' : 'info'} size="sm">
               {asset.depth} hop{asset.depth !== 1 ? 's' : ''} away

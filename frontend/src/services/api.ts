@@ -15,6 +15,7 @@ import type {
   SavedView,
   SavedViewSummary,
   ViewConfig,
+  SPOFAnalysisResult,
 } from '../types';
 
 const api = axios.create({
@@ -189,9 +190,17 @@ export const analysisApi = {
   getBlastRadius: async (
     assetId: string,
     maxDepth?: number
-  ): Promise<BlastRadius> => {
+  ): Promise<{
+    asset_id: string;
+    asset_name: string;
+    total_affected: number;
+    critical_affected: number;
+    affected_assets: Array<{ id: string; name: string; depth: number; is_critical: boolean }>;
+    max_depth: number;
+    calculated_at: string;
+  }> => {
     const { data } = await api.get(`/analysis/blast-radius/${assetId}`, {
-      params: { max_depth: maxDepth },
+      params: { maxDepth },
     });
     return data;
   },
@@ -206,8 +215,12 @@ export const analysisApi = {
     return data;
   },
 
-  getSPOF: async (): Promise<Asset[]> => {
-    const { data } = await api.get('/analysis/spof');
+  getSPOF: async (params?: {
+    environment?: string;
+    minDependents?: number;
+    limit?: number;
+  }): Promise<SPOFAnalysisResult> => {
+    const { data } = await api.get('/analysis/spof', { params });
     return data;
   },
 };

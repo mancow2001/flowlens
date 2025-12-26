@@ -273,6 +273,28 @@ export interface BlastRadius {
   affected_assets: AffectedAsset[];
 }
 
+// SPOF Analysis types
+export interface SPOFCandidate {
+  asset_id: string;
+  asset_name: string;
+  ip_address: string;
+  is_critical: boolean;
+  dependents_count: number;
+  critical_dependents: number;
+  unique_path_count: number;
+  centrality_score: number;
+  risk_score: number;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+}
+
+export interface SPOFAnalysisResult {
+  scope: string;
+  candidates: SPOFCandidate[];
+  total_analyzed: number;
+  high_risk_count: number;
+  calculated_at: string;
+}
+
 // Dashboard stats
 export interface DashboardStats {
   total_assets: number;
