@@ -550,6 +550,71 @@ def generate_docker_compose_yaml() -> str:
             "TEAMS_WEBHOOK_URL": notif.teams.webhook_url,
         })
 
+    # Apply any pending overrides from Docker mode
+    # These are settings changed via the UI that couldn't be written to .env
+    if _settings_overrides:
+        logger.info(
+            "Applying settings overrides to docker-compose",
+            override_keys=list(_settings_overrides.keys()),
+        )
+        # Apply overrides to all environment dictionaries
+        for env_dict in [db_env, api_env, ingestion_env, enrichment_env, resolution_env]:
+            for key, value in _settings_overrides.items():
+                # Only apply if this env dict contains this key or a related key
+                if key in env_dict:
+                    env_dict[key] = value
+                # Also check if we should add it based on key prefix matching
+                elif any(key.startswith(prefix) for prefix in ["POSTGRES_", "REDIS_", "KAFKA_"]):
+                    # Database/Redis/Kafka settings go in db_env which is spread to others
+                    if env_dict is db_env:
+                        env_dict[key] = value
+                elif key.startswith("API_") or key.startswith("AUTH_"):
+                    if env_dict is api_env:
+                        env_dict[key] = value
+                elif key.startswith("INGESTION_"):
+                    if env_dict is ingestion_env:
+                        env_dict[key] = value
+                elif key.startswith("ENRICHMENT_"):
+                    if env_dict is enrichment_env:
+                        env_dict[key] = value
+                elif key.startswith("RESOLUTION_"):
+                    if env_dict is resolution_env:
+                        env_dict[key] = value
+                elif key.startswith("LOG_"):
+                    # Logging settings apply to all services
+                    env_dict[key] = value
+                elif key in ["ENVIRONMENT", "DEBUG"]:
+                    # Root settings apply to all services
+                    env_dict[key] = value
+                elif key.startswith(("EMAIL_", "SLACK_", "WEBHOOK_", "TEAMS_", "PAGERDUTY_")):
+                    # Notification settings go in api_env
+                    if env_dict is api_env:
+                        env_dict[key] = value
+
+    # Get values for ports and other compose-level settings
+    # These need to use overrides if available
+    postgres_user = _settings_overrides.get("POSTGRES_USER", settings.database.user)
+    postgres_password = _settings_overrides.get(
+        "POSTGRES_PASSWORD",
+        settings.database.password.get_secret_value()
+    )
+    postgres_db = _settings_overrides.get("POSTGRES_DATABASE", settings.database.database)
+    postgres_port = _settings_overrides.get("POSTGRES_PORT", str(settings.database.port))
+    api_port = _settings_overrides.get("API_PORT", str(settings.api.port))
+    netflow_port = _settings_overrides.get(
+        "INGESTION_NETFLOW_PORT",
+        str(settings.ingestion.netflow_port)
+    )
+    sflow_port = _settings_overrides.get(
+        "INGESTION_SFLOW_PORT",
+        str(settings.ingestion.sflow_port)
+    )
+    redis_port = _settings_overrides.get("REDIS_PORT", str(settings.redis.port))
+    redis_enabled = _settings_overrides.get(
+        "REDIS_ENABLED",
+        str(settings.redis.enabled).lower()
+    ) == "true"
+
     # Build the compose structure
     compose = {
         "version": "3.8",
@@ -558,14 +623,14 @@ def generate_docker_compose_yaml() -> str:
                 "image": "postgres:15-alpine",
                 "container_name": "flowlens-postgres",
                 "environment": {
-                    "POSTGRES_USER": settings.database.user,
-                    "POSTGRES_PASSWORD": settings.database.password.get_secret_value(),
-                    "POSTGRES_DB": settings.database.database,
+                    "POSTGRES_USER": postgres_user,
+                    "POSTGRES_PASSWORD": postgres_password,
+                    "POSTGRES_DB": postgres_db,
                 },
                 "volumes": ["postgres_data:/var/lib/postgresql/data"],
-                "ports": [f"{settings.database.port}:5432"],
+                "ports": [f"{postgres_port}:5432"],
                 "healthcheck": {
-                    "test": ["CMD-SHELL", f"pg_isready -U {settings.database.user}"],
+                    "test": ["CMD-SHELL", f"pg_isready -U {postgres_user}"],
                     "interval": "10s",
                     "timeout": "5s",
                     "retries": 5,
@@ -584,7 +649,7 @@ def generate_docker_compose_yaml() -> str:
                 "container_name": "flowlens-api",
                 "command": ["python", "-m", "flowlens.api.main"],
                 "environment": api_env,
-                "ports": [f"{settings.api.port}:8000"],
+                "ports": [f"{api_port}:8000"],
                 "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
                 "healthcheck": {
                     "test": ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/admin/health/live')"],
@@ -600,8 +665,8 @@ def generate_docker_compose_yaml() -> str:
                 "command": ["python", "-m", "flowlens.ingestion.main"],
                 "environment": ingestion_env,
                 "ports": [
-                    f"{settings.ingestion.netflow_port}:{settings.ingestion.netflow_port}/udp",
-                    f"{settings.ingestion.sflow_port}:{settings.ingestion.sflow_port}/udp",
+                    f"{netflow_port}:{netflow_port}/udp",
+                    f"{sflow_port}:{sflow_port}/udp",
                 ],
                 "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
                 "healthcheck": {
@@ -659,11 +724,11 @@ def generate_docker_compose_yaml() -> str:
     }
 
     # Add Redis if enabled
-    if settings.redis.enabled:
+    if redis_enabled:
         compose["services"]["redis"] = {
             "image": "redis:7-alpine",
             "container_name": "flowlens-redis",
-            "ports": [f"{settings.redis.port}:6379"],
+            "ports": [f"{redis_port}:6379"],
             "healthcheck": {
                 "test": ["CMD", "redis-cli", "ping"],
                 "interval": "10s",
@@ -677,7 +742,10 @@ def generate_docker_compose_yaml() -> str:
             "REDIS_HOST": "redis",
             "REDIS_PORT": "6379",
         }
-        if settings.redis.password:
+        redis_password = _settings_overrides.get("REDIS_PASSWORD")
+        if redis_password:
+            redis_env["REDIS_PASSWORD"] = redis_password
+        elif settings.redis.password:
             redis_env["REDIS_PASSWORD"] = settings.redis.password.get_secret_value()
         # Add to all services
         for svc in ["api", "ingestion", "enrichment", "resolution"]:
