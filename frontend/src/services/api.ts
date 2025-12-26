@@ -211,9 +211,10 @@ export const analysisApi = {
   getPath: async (
     sourceId: string,
     targetId: string
-  ): Promise<{ path: Asset[]; total_hops: number }> => {
-    const { data } = await api.get('/analysis/path', {
-      params: { source_id: sourceId, target_id: targetId },
+  ): Promise<{ path: Asset[]; total_hops: number; path_exists: boolean }> => {
+    // Path endpoint is under /topology, not /analysis
+    const { data } = await api.get('/topology/path', {
+      params: { sourceId, targetId },
     });
     return data;
   },

@@ -287,6 +287,14 @@ function BlastRadiusAnalysis() {
   );
 }
 
+interface PathResultData {
+  source_id: string;
+  target_id: string;
+  path_exists: boolean;
+  path?: string[];
+  path_length?: number;
+}
+
 function PathFinder() {
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string | null>(null);
@@ -308,11 +316,28 @@ function PathFinder() {
     enabled: targetSearch.length >= 2 && activeField === 'target',
   });
 
-  // Find path
-  const { data: pathResult, isLoading, error, refetch, isRefetching } = useQuery({
+  // Find path - returns UUIDs, not full assets
+  const { data: pathResult, isLoading, error, refetch, isRefetching } = useQuery<PathResultData>({
     queryKey: ['path-finder', sourceId, targetId],
-    queryFn: () => analysisApi.getPath(sourceId!, targetId!),
+    queryFn: async () => {
+      const result = await analysisApi.getPath(sourceId!, targetId!);
+      return result as unknown as PathResultData;
+    },
     enabled: false,
+  });
+
+  // Fetch asset details for the path
+  const { data: pathAssets } = useQuery({
+    queryKey: ['path-assets', pathResult?.path],
+    queryFn: async () => {
+      if (!pathResult?.path) return [];
+      // Fetch each asset in the path
+      const assets = await Promise.all(
+        pathResult.path.map(id => assetApi.get(id))
+      );
+      return assets;
+    },
+    enabled: !!pathResult?.path && pathResult.path.length > 0,
   });
 
   const handleFindPath = () => {
@@ -416,33 +441,47 @@ function PathFinder() {
         </div>
       </Card>
 
+      {/* Show error for API failures */}
       {error && (
         <Card>
           <div className="p-6 text-center">
-            <p className="text-red-400">No path found between these assets</p>
+            <p className="text-red-400">Failed to search for path</p>
             <p className="text-slate-500 text-sm mt-2">
-              The assets may not be connected, or the path may exceed the maximum depth.
+              An error occurred while searching. Please try again.
             </p>
           </div>
         </Card>
       )}
 
-      {pathResult && pathResult.path && (
+      {/* Show "no path" message when path_exists is false */}
+      {pathResult && !pathResult.path_exists && (
+        <Card>
+          <div className="p-6 text-center">
+            <p className="text-yellow-400">No path found between these assets</p>
+            <p className="text-slate-500 text-sm mt-2">
+              The assets may not be connected, or the path may exceed the maximum depth (5 hops).
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {/* Show path when found */}
+      {pathResult && pathResult.path_exists && pathAssets && pathAssets.length > 0 && (
         <Card>
           <div className="p-4 border-b border-slate-700">
             <h3 className="font-semibold text-white">
-              Path Found ({pathResult.total_hops} hops)
+              Path Found ({pathResult.path_length} hop{pathResult.path_length !== 1 ? 's' : ''})
             </h3>
           </div>
           <div className="p-4">
             <div className="flex items-center gap-2 flex-wrap">
-              {pathResult.path.map((asset, index) => (
+              {pathAssets.map((asset, index) => (
                 <div key={asset.id} className="flex items-center gap-2">
                   <div className="px-3 py-2 bg-slate-700 rounded-lg">
                     <p className="font-medium text-white">{asset.name}</p>
                     <p className="text-xs text-slate-400">{asset.ip_address}</p>
                   </div>
-                  {index < pathResult.path.length - 1 && (
+                  {index < pathAssets.length - 1 && (
                     <span className="text-slate-500">→</span>
                   )}
                 </div>
