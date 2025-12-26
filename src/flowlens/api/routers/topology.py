@@ -184,16 +184,7 @@ async def get_topology_graph(
         )
 
     # Build dependency query
-    dep_query = select(Dependency).where(
-        Dependency.source_asset_id.in_(asset_ids),
-        Dependency.target_asset_id.in_(asset_ids),
-        Dependency.valid_to.is_(None),
-    )
-
-    if filters.min_bytes_24h > 0:
-        dep_query = dep_query.where(Dependency.bytes_last_24h >= filters.min_bytes_24h)
-
-    # Handle point-in-time query
+    # Handle point-in-time query vs current state
     if filters.as_of:
         dep_query = select(Dependency).where(
             Dependency.source_asset_id.in_(asset_ids),
@@ -201,6 +192,16 @@ async def get_topology_graph(
             Dependency.valid_from <= filters.as_of,
             (Dependency.valid_to.is_(None)) | (Dependency.valid_to > filters.as_of),
         )
+    else:
+        dep_query = select(Dependency).where(
+            Dependency.source_asset_id.in_(asset_ids),
+            Dependency.target_asset_id.in_(asset_ids),
+            Dependency.valid_to.is_(None),
+        )
+
+    # Apply min bytes filter (works for both current and historical queries)
+    if filters.min_bytes_24h > 0:
+        dep_query = dep_query.where(Dependency.bytes_last_24h >= filters.min_bytes_24h)
 
     # Get dependencies
     dep_result = await db.execute(dep_query)
