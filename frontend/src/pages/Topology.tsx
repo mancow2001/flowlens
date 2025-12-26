@@ -153,18 +153,46 @@ function formatDate(date: Date): string {
   });
 }
 
-// Export SVG to file
+// Export SVG to file - captures full content by calculating bounding box
 function exportSvgToFile(svgElement: SVGSVGElement, filename: string, format: 'svg' | 'png') {
-  const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
+  // Get the container group that has all the content
+  const container = svgElement.querySelector('g');
+  if (!container) return;
 
-  // Add white background for PNG export
-  if (format === 'png') {
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bg.setAttribute('width', '100%');
-    bg.setAttribute('height', '100%');
-    bg.setAttribute('fill', '#1e293b');
-    svgClone.insertBefore(bg, svgClone.firstChild);
+  // Get the bounding box of all content
+  const bbox = (container as SVGGElement).getBBox();
+
+  // Add padding around the content
+  const padding = 50;
+  const exportWidth = bbox.width + padding * 2;
+  const exportHeight = bbox.height + padding * 2;
+
+  // Create a new SVG element with the right size
+  const svgClone = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svgClone.setAttribute('width', String(exportWidth));
+  svgClone.setAttribute('height', String(exportHeight));
+  svgClone.setAttribute('viewBox', `${bbox.x - padding} ${bbox.y - padding} ${exportWidth} ${exportHeight}`);
+
+  // Add background
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('x', String(bbox.x - padding));
+  bg.setAttribute('y', String(bbox.y - padding));
+  bg.setAttribute('width', String(exportWidth));
+  bg.setAttribute('height', String(exportHeight));
+  bg.setAttribute('fill', '#1e293b');
+  svgClone.appendChild(bg);
+
+  // Copy defs (markers, etc.)
+  const defs = svgElement.querySelector('defs');
+  if (defs) {
+    svgClone.appendChild(defs.cloneNode(true));
   }
+
+  // Copy the content container (without transform for clean export)
+  const contentClone = container.cloneNode(true) as SVGGElement;
+  contentClone.removeAttribute('transform'); // Remove zoom/pan transform
+  svgClone.appendChild(contentClone);
 
   const svgData = new XMLSerializer().serializeToString(svgClone);
   const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
@@ -179,16 +207,18 @@ function exportSvgToFile(svgElement: SVGSVGElement, filename: string, format: 's
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   } else {
-    // Convert to PNG
+    // Convert to PNG with higher resolution
+    const scale = 2; // 2x for retina quality
     const canvas = document.createElement('canvas');
+    canvas.width = exportWidth * scale;
+    canvas.height = exportHeight * scale;
     const ctx = canvas.getContext('2d')!;
+    ctx.scale(scale, scale);
+
     const img = new Image();
 
     img.onload = () => {
-      canvas.width = img.width * 2; // 2x for retina
-      canvas.height = img.height * 2;
-      ctx.scale(2, 2);
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
 
       canvas.toBlob((blob) => {
         if (blob) {
@@ -202,6 +232,10 @@ function exportSvgToFile(svgElement: SVGSVGElement, filename: string, format: 's
           URL.revokeObjectURL(url);
         }
       }, 'image/png');
+    };
+
+    img.onerror = () => {
+      console.error('Failed to load SVG for PNG conversion');
     };
 
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
@@ -237,6 +271,11 @@ export default function Topology() {
 
   // Export dropdown
   const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // Legend visibility filters
+  const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set());
+  const [showInternal, setShowInternal] = useState(true);
+  const [showExternal, setShowExternal] = useState(true);
 
   // Fetch topology data
   const { data: topology, isLoading } = useQuery({
@@ -299,6 +338,36 @@ export default function Topology() {
     });
     return colorMap;
   }, [groups]);
+
+  // Filter nodes based on legend visibility settings
+  const filteredTopology = useMemo((): { nodes: TopologyNode[]; edges: TopologyEdge[] } | null => {
+    if (!topology) return null;
+
+    const filteredNodes = topology.nodes.filter(node => {
+      // Filter by internal/external visibility
+      if (!showInternal && node.is_internal) return false;
+      if (!showExternal && !node.is_internal) return false;
+
+      // Filter by group visibility (only when grouping is active)
+      if (groupingMode !== 'none') {
+        const groupKey = getGroupKey(node, groupingMode);
+        if (hiddenGroups.has(groupKey)) return false;
+      }
+
+      return true;
+    });
+
+    const visibleNodeIds = new Set(filteredNodes.map(n => n.id));
+
+    const filteredEdges = topology.edges.filter(edge =>
+      visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
+    );
+
+    return {
+      nodes: filteredNodes,
+      edges: filteredEdges,
+    };
+  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode]);
 
   // Handle node selection and path highlighting
   const handleNodeClick = useCallback((node: TopologyNode) => {
@@ -431,7 +500,7 @@ export default function Topology() {
 
   // D3 Force simulation
   useEffect(() => {
-    if (!svgRef.current || !topology || topology.nodes.length === 0) return;
+    if (!svgRef.current || !filteredTopology || filteredTopology.nodes.length === 0) return;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
@@ -439,10 +508,10 @@ export default function Topology() {
     const { width, height } = dimensions;
 
     // Create simulation nodes and links
-    const nodes: SimNode[] = topology.nodes.map((n) => ({ ...n }));
+    const nodes: SimNode[] = filteredTopology.nodes.map((n) => ({ ...n }));
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-    const links: SimLink[] = topology.edges
+    const links: SimLink[] = filteredTopology.edges
       .filter((e: TopologyEdge) => nodeMap.has(e.source) && nodeMap.has(e.target))
       .map((e: TopologyEdge) => ({
         ...e,
@@ -731,7 +800,7 @@ export default function Topology() {
     return () => {
       simulation.stop();
     };
-  }, [topology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection]);
+  }, [filteredTopology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection]);
 
   // Update highlighting when selection changes
   useEffect(() => {
@@ -1037,9 +1106,11 @@ export default function Topology() {
           ref={containerRef}
           className="flex-1 bg-slate-800 border border-slate-700 rounded-lg overflow-hidden"
         >
-          {topology && topology.nodes.length === 0 ? (
+          {!filteredTopology || filteredTopology.nodes.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400">
-              No topology data available
+              {topology && topology.nodes.length > 0
+                ? 'All nodes are hidden. Adjust legend filters to show nodes.'
+                : 'No topology data available'}
             </div>
           ) : (
             <svg
@@ -1057,16 +1128,34 @@ export default function Topology() {
           {/* Legend */}
           <Card title="Legend">
             <div className="space-y-3">
-              <div className="text-xs text-slate-400 uppercase tracking-wider mb-2">Node Colors</div>
+              <div className="text-xs text-slate-400 uppercase tracking-wider mb-2">Node Types (click to toggle)</div>
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2">
+                  <input
+                    type="checkbox"
+                    checked={showInternal}
+                    onChange={(e) => setShowInternal(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-700 text-green-500 focus:ring-green-500"
+                  />
                   <div className="w-4 h-4 rounded-full bg-green-500" />
-                  <span className="text-sm text-slate-300">Internal (I)</span>
-                </div>
-                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-300 flex-1">Internal (I)</span>
+                  <span className="text-xs text-slate-500">
+                    ({topology?.nodes.filter(n => n.is_internal).length || 0})
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2">
+                  <input
+                    type="checkbox"
+                    checked={showExternal}
+                    onChange={(e) => setShowExternal(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-700 text-orange-500 focus:ring-orange-500"
+                  />
                   <div className="w-4 h-4 rounded-full bg-orange-500" />
-                  <span className="text-sm text-slate-300">External (E)</span>
-                </div>
+                  <span className="text-sm text-slate-300 flex-1">External (E)</span>
+                  <span className="text-xs text-slate-500">
+                    ({topology?.nodes.filter(n => !n.is_internal).length || 0})
+                  </span>
+                </label>
               </div>
 
               {selectedNode && (
@@ -1091,19 +1180,34 @@ export default function Topology() {
 
               {groupingMode !== 'none' && groups.size > 0 && (
                 <>
-                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">Groups</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">Groups (click to toggle)</div>
                   <div className="space-y-2">
                     {Array.from(groupColors.entries()).map(([name, color]) => (
-                      <div key={name} className="flex items-center gap-2">
+                      <label key={name} className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2">
+                        <input
+                          type="checkbox"
+                          checked={!hiddenGroups.has(name)}
+                          onChange={(e) => {
+                            const newHidden = new Set(hiddenGroups);
+                            if (e.target.checked) {
+                              newHidden.delete(name);
+                            } else {
+                              newHidden.add(name);
+                            }
+                            setHiddenGroups(newHidden);
+                          }}
+                          className="rounded border-slate-600 bg-slate-700 focus:ring-primary-500"
+                          style={{ accentColor: color }}
+                        />
                         <div
                           className="w-4 h-4 rounded"
                           style={{ backgroundColor: color, opacity: 0.5 }}
                         />
-                        <span className="text-sm text-slate-300">{name}</span>
+                        <span className="text-sm text-slate-300 flex-1">{name}</span>
                         <span className="text-xs text-slate-500">
                           ({groups.get(name)?.length || 0})
                         </span>
-                      </div>
+                      </label>
                     ))}
                   </div>
                 </>
@@ -1196,17 +1300,32 @@ export default function Topology() {
           <Card title="Statistics">
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-slate-400">Nodes</span>
-                <span className="text-white">{topology?.nodes.length ?? 0}</span>
+                <span className="text-slate-400">Visible Nodes</span>
+                <span className="text-white">
+                  {filteredTopology?.nodes.length ?? 0}
+                  {filteredTopology && topology && filteredTopology.nodes.length !== topology.nodes.length && (
+                    <span className="text-slate-500"> / {topology.nodes.length}</span>
+                  )}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Edges</span>
-                <span className="text-white">{topology?.edges.length ?? 0}</span>
+                <span className="text-slate-400">Visible Edges</span>
+                <span className="text-white">
+                  {filteredTopology?.edges.length ?? 0}
+                  {filteredTopology && topology && filteredTopology.edges.length !== topology.edges.length && (
+                    <span className="text-slate-500"> / {topology.edges.length}</span>
+                  )}
+                </span>
               </div>
               {groupingMode !== 'none' && (
                 <div className="flex justify-between">
                   <span className="text-slate-400">Groups</span>
-                  <span className="text-white">{groups.size}</span>
+                  <span className="text-white">
+                    {groups.size - hiddenGroups.size}
+                    {hiddenGroups.size > 0 && (
+                      <span className="text-slate-500"> / {groups.size}</span>
+                    )}
+                  </span>
                 </div>
               )}
             </div>
