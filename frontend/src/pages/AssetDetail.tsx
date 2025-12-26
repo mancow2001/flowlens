@@ -15,7 +15,7 @@ import Button from '../components/common/Button';
 import Table from '../components/common/Table';
 import { LoadingPage } from '../components/common/Loading';
 import { assetApi, analysisApi, classificationApi } from '../services/api';
-import { formatDateTime, formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
+import { formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
 import type { Dependency, Asset } from '../types';
 
 const ASSET_TYPES = [
