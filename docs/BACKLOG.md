@@ -120,6 +120,13 @@
 - [x] **BigInteger migrations** - All byte/packet/flow counters use BIGINT
 - [x] **Timezone-aware datetimes** - All timestamp columns properly typed
 
+### Testing Infrastructure
+- [x] **Comprehensive pytest test suite** - 171 unit tests + 74 integration tests
+  - Unit tests for: scoring engine, heuristics, classification constants, gateway inference, change detector, flow aggregator, backpressure queue, NetFlow v5 parser
+  - Integration tests for: assets, dependencies, topology, alerts, changes, classification, gateways, maintenance windows APIs
+  - Test fixtures in conftest.py for classification, gateway, and change detection scenarios
+  - Markers for unit/integration/slow test categorization
+
 ---
 
 ## In Progress
@@ -222,7 +229,7 @@ These features are explicitly excluded from FlowLens scope:
 
 ## Technical Debt
 
-- [ ] Add comprehensive test suite (pytest)
+- [x] Add comprehensive test suite (pytest) - **Completed 2025-12-27**
 - [ ] Add API rate limiting
 - [ ] Add request validation error handling improvements
 - [ ] Optimize topology queries for large graphs (>10k nodes)
