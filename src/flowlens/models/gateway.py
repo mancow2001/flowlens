@@ -207,11 +207,13 @@ class AssetGateway(Base, UUIDMixin, TimestampMixin, TemporalMixin):
 
     # Discovery
     first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
     )
 
     last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
         index=True,
@@ -224,6 +226,7 @@ class AssetGateway(Base, UUIDMixin, TimestampMixin, TemporalMixin):
     )
 
     last_inferred_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
