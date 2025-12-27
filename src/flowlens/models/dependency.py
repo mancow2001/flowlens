@@ -7,7 +7,7 @@ with temporal validity and aggregation metrics.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -56,27 +56,32 @@ class Dependency(Base, UUIDMixin, TimestampMixin, TemporalMixin):
 
     # Aggregation metrics (lifetime)
     bytes_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     packets_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     flows_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     # Rolling window metrics (updated by aggregation job)
     bytes_last_24h: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     bytes_last_7d: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )

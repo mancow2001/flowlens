@@ -402,7 +402,7 @@ class GatewayInferenceService:
             gateways = gateways_result.scalars().all()
 
             for gw in gateways:
-                share = gw.bytes_total / total_bytes
+                share = float(gw.bytes_total) / float(total_bytes)
                 gw.traffic_share = round(share, 4)
                 updated += 1
 
