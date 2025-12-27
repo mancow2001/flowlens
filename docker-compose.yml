@@ -19,11 +19,38 @@ x-classification-env: &classification-env
   CLASSIFICATION_WORKER_COUNT: "1"
   CLASSIFICATION_POLL_INTERVAL_MS: "30000"
   CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.70"
+  CLASSIFICATION_MIN_OBSERVATION_HOURS: "12"
+  CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
+  CLASSIFICATION_BATCH_SIZE: "100"
+  CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD: "0.85"
+  CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS: "24"
+
+# Combined environments for services that need multiple anchors
+x-db-logging-env: &db-logging-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: flowlens
+  POSTGRES_PASSWORD: flowlens
+  POSTGRES_DATABASE: flowlens
+  LOG_LEVEL: DEBUG
+  LOG_FORMAT: json
+
+x-classification-full-env: &classification-full-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: flowlens
+  POSTGRES_PASSWORD: flowlens
+  POSTGRES_DATABASE: flowlens
+  CLASSIFICATION_WORKER_COUNT: "1"
+  CLASSIFICATION_POLL_INTERVAL_MS: "30000"
+  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.70"
   CLASSIFICATION_MIN_OBSERVATION_HOURS: "1"
   CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
   CLASSIFICATION_BATCH_SIZE: "100"
   CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD: "0.85"
   CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS: "24"
+  LOG_LEVEL: DEBUG
+  LOG_FORMAT: json
 
 services:
   # PostgreSQL Database
@@ -73,7 +100,8 @@ services:
       API_PORT: "8000"
       API_WORKERS: "2"
       AUTH_ENABLED: "false"
-      <<: *classification-env
+      CLASSIFICATION_MIN_OBSERVATION_HOURS: "1"
+      CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
       LOG_LEVEL: INFO
       LOG_FORMAT: json
     ports:
@@ -102,7 +130,8 @@ services:
       INGESTION_NETFLOW_PORT: "2055"
       INGESTION_SFLOW_PORT: "6343"
       INGESTION_BATCH_SIZE: "1000"
-      <<: *logging-env
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: json
     ports:
       - "2055:2055/udp"
       - "6343:6343/udp"
@@ -125,10 +154,9 @@ services:
     command: ["python", "-m", "flowlens.enrichment.main"]
     environment:
       ENVIRONMENT: development
-      <<: *db-env
+      <<: *db-logging-env
       ENRICHMENT_WORKER_COUNT: "2"
       ENRICHMENT_BATCH_SIZE: "500"
-      <<: *logging-env
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -150,10 +178,9 @@ services:
       - .env
     environment:
       ENVIRONMENT: development
-      <<: *db-env
+      <<: *db-logging-env
       RESOLUTION_WORKER_COUNT: "1"
       RESOLUTION_WINDOW_SIZE_MINUTES: "5"
-      <<: *logging-env
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -173,9 +200,7 @@ services:
     command: ["python", "-m", "flowlens.classification.main"]
     environment:
       ENVIRONMENT: development
-      <<: *db-env
-      <<: *classification-env
-      <<: *logging-env
+      <<: *classification-full-env
     depends_on:
       migrations:
         condition: service_completed_successfully

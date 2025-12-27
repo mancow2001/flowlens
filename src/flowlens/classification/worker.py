@@ -5,7 +5,7 @@ Runs as a background service to classify assets based on behavioral features.
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
@@ -139,7 +139,7 @@ class ClassificationWorker:
         - Never classified OR classification is stale
         - Has been observed long enough
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stale_cutoff = now - self._reclassify_interval
         observation_cutoff = now - timedelta(hours=self._min_observation_hours)
 
@@ -190,7 +190,7 @@ class ClassificationWorker:
                 required=self._settings.min_flows_required,
             )
             # Update last_classified_at to avoid re-processing too soon
-            asset.last_classified_at = datetime.utcnow()
+            asset.last_classified_at = datetime.now(timezone.utc)
             return
 
         # Compute classification scores
@@ -229,7 +229,7 @@ class ClassificationWorker:
             result: Classification result.
             features: Extracted features.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Update asset classification fields
         asset.classification_confidence = result.confidence
@@ -286,7 +286,7 @@ class ClassificationWorker:
             asset: Asset to update.
             result: Classification result.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         previous_type = None
         if asset.asset_type:
             previous_type = asset.asset_type.value if hasattr(asset.asset_type, 'value') else str(asset.asset_type)
