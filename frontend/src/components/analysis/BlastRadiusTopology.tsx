@@ -116,18 +116,55 @@ export default function BlastRadiusTopology({
     }
   };
 
-  // D3 visualization
+  // D3 hierarchical visualization
   useEffect(() => {
     if (!svgRef.current || !subgraph || nodesWithHops.length === 0) return;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
 
-    const { width, height } = dimensions;
+    const { width } = dimensions;
 
-    // Create nodes and links
-    const nodes: SimNode[] = nodesWithHops.map(n => ({ ...n }));
-    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    // Group nodes by hop distance
+    const nodesByHop = new Map<number, SimNode[]>();
+    nodesWithHops.forEach(n => {
+      const hop = n.hopDistance ?? 0;
+      if (!nodesByHop.has(hop)) nodesByHop.set(hop, []);
+      nodesByHop.get(hop)!.push({ ...n });
+    });
+
+    // Calculate hierarchical positions
+    const rowHeight = 120; // Vertical spacing between hop levels
+    const nodeSpacing = 80; // Minimum horizontal spacing between nodes
+    const topPadding = 60; // Padding from top for center node
+
+    // Create nodes with target positions
+    const nodes: SimNode[] = [];
+    const nodeMap = new Map<string, SimNode>();
+
+    // Sort hops and position each level
+    const sortedHops = Array.from(nodesByHop.keys()).sort((a, b) => a - b);
+
+    sortedHops.forEach(hop => {
+      const hopNodes = nodesByHop.get(hop)!;
+      const rowY = topPadding + hop * rowHeight;
+
+      // Calculate row width needed
+      const rowWidth = (hopNodes.length - 1) * nodeSpacing;
+      const startX = (width - rowWidth) / 2;
+
+      hopNodes.forEach((n, idx) => {
+        const node: SimNode = {
+          ...n,
+          targetX: startX + idx * nodeSpacing,
+          targetY: rowY,
+          x: startX + idx * nodeSpacing,
+          y: rowY,
+        };
+        nodes.push(node);
+        nodeMap.set(node.id, node);
+      });
+    });
 
     const links: SimLink[] = subgraph.edges
       .filter((e: TopologyEdge) => nodeMap.has(e.source) && nodeMap.has(e.target))
@@ -151,24 +188,13 @@ export default function BlastRadiusTopology({
     // Container for zoom/pan
     const container = svg.append('g');
 
-    // Create radial force simulation - center node in middle, others radiate out
+    // Light simulation for small adjustments (collision avoidance)
     const simulation = d3
       .forceSimulation<SimNode>(nodes)
-      .force(
-        'link',
-        d3
-          .forceLink<SimNode, SimLink>(links)
-          .id(d => d.id)
-          .distance(80)
-      )
-      .force('charge', d3.forceManyBody().strength(-300))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(35))
-      .force('radial', d3.forceRadial<SimNode>(
-        d => (d.hopDistance ?? 1) * 100,
-        width / 2,
-        height / 2
-      ).strength(0.5));
+      .force('collision', d3.forceCollide().radius(40).strength(0.8))
+      .force('x', d3.forceX<SimNode>(d => d.targetX!).strength(0.8))
+      .force('y', d3.forceY<SimNode>(d => d.targetY!).strength(0.8))
+      .alphaDecay(0.05);
 
     // Arrow marker
     const defs = svg.append('defs');
@@ -184,17 +210,38 @@ export default function BlastRadiusTopology({
       .attr('d', 'M 0,-5 L 10,0 L 0,5')
       .attr('fill', '#475569');
 
-    // Create links
-    const link = container
-      .append('g')
-      .attr('class', 'links')
-      .selectAll('line')
+    // Create curved links (paths instead of lines for better hierarchy visualization)
+    const linkGroup = container.append('g').attr('class', 'links');
+
+    const link = linkGroup
+      .selectAll('path')
       .data(links)
-      .join('line')
+      .join('path')
       .attr('stroke', '#475569')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
+      .attr('fill', 'none')
       .attr('marker-end', 'url(#blast-arrowhead)');
+
+    // Function to create curved path between nodes
+    const createCurvedPath = (d: SimLink) => {
+      const source = d.source as SimNode;
+      const target = d.target as SimNode;
+      const sourceX = source.x!;
+      const sourceY = source.y!;
+      const targetX = target.x!;
+      const targetY = target.y!;
+
+      // If nodes are on the same level, create an arc
+      if (Math.abs(sourceY - targetY) < 10) {
+        const midY = sourceY - 40; // Arc above
+        return `M ${sourceX} ${sourceY} Q ${(sourceX + targetX) / 2} ${midY} ${targetX} ${targetY}`;
+      }
+
+      // For hierarchical connections, use a gentle curve
+      const midY = (sourceY + targetY) / 2;
+      return `M ${sourceX} ${sourceY} C ${sourceX} ${midY} ${targetX} ${midY} ${targetX} ${targetY}`;
+    };
 
     // Create drag behavior
     const drag = d3
@@ -213,6 +260,31 @@ export default function BlastRadiusTopology({
         d.fx = null;
         d.fy = null;
       });
+
+    // Create hop level labels
+    const levelLabels = container.append('g').attr('class', 'level-labels');
+    sortedHops.forEach(hop => {
+      const rowY = topPadding + hop * rowHeight;
+      levelLabels.append('text')
+        .attr('x', 20)
+        .attr('y', rowY + 4)
+        .attr('fill', HOP_COLORS[Math.min(hop, HOP_COLORS.length - 1)])
+        .attr('font-size', 11)
+        .attr('font-weight', 'bold')
+        .attr('opacity', 0.7)
+        .text(hop === 0 ? 'CENTER' : `${hop} HOP${hop > 1 ? 'S' : ''}`);
+
+      // Add subtle horizontal line for each level
+      levelLabels.append('line')
+        .attr('x1', 80)
+        .attr('x2', width - 20)
+        .attr('y1', rowY)
+        .attr('y2', rowY)
+        .attr('stroke', HOP_COLORS[Math.min(hop, HOP_COLORS.length - 1)])
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '4,4')
+        .attr('opacity', 0.2);
+    });
 
     // Create node groups
     const node = container
@@ -236,7 +308,7 @@ export default function BlastRadiusTopology({
     // Add labels
     node
       .append('text')
-      .text(d => d.name.length > 20 ? d.name.substring(0, 17) + '...' : d.name)
+      .text(d => d.name.length > 15 ? d.name.substring(0, 12) + '...' : d.name)
       .attr('dy', d => d.isCenter ? 40 : 28)
       .attr('text-anchor', 'middle')
       .attr('fill', '#e2e8f0')
@@ -270,12 +342,7 @@ export default function BlastRadiusTopology({
 
     // Update positions
     simulation.on('tick', () => {
-      link
-        .attr('x1', d => (d.source as SimNode).x!)
-        .attr('y1', d => (d.source as SimNode).y!)
-        .attr('x2', d => (d.target as SimNode).x!)
-        .attr('y2', d => (d.target as SimNode).y!);
-
+      link.attr('d', createCurvedPath);
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
@@ -356,10 +423,10 @@ export default function BlastRadiusTopology({
         ))}
       </div>
 
-      {/* Graph container */}
+      {/* Graph container - taller to accommodate hierarchical layout */}
       <div
         ref={containerRef}
-        className="h-[500px] bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
+        className="h-[600px] bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
       >
         <svg
           ref={svgRef}
@@ -393,7 +460,7 @@ export default function BlastRadiusTopology({
       </div>
 
       {/* Stats */}
-      <div className="flex items-center gap-6 text-sm text-slate-400">
+      <div className="flex flex-wrap items-center gap-6 text-sm text-slate-400">
         <span>
           <span className="text-white font-medium">{nodesWithHops.length}</span> assets affected
         </span>
@@ -405,6 +472,22 @@ export default function BlastRadiusTopology({
             {nodesWithHops.filter(n => n.is_critical && !n.isCenter).length}
           </span> critical assets in blast radius
         </span>
+        <span className="text-slate-500">|</span>
+        {/* Per-hop breakdown */}
+        {Array.from({ length: maxHops }, (_, i) => i + 1).map(hop => {
+          const count = nodesWithHops.filter(n => n.hopDistance === hop).length;
+          if (count === 0) return null;
+          return (
+            <span key={hop} className="flex items-center gap-1">
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: HOP_COLORS[hop] }}
+              />
+              <span className="text-white font-medium">{count}</span>
+              <span>at {hop} hop{hop > 1 ? 's' : ''}</span>
+            </span>
+          );
+        })}
       </div>
     </div>
   );
