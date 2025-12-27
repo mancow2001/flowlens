@@ -48,9 +48,11 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="flex items-center h-16 px-4 border-b border-slate-700">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">FL</span>
-          </div>
+          <img
+            src="/FlowLens_logo_small.png"
+            alt="FlowLens"
+            className="w-8 h-8"
+          />
           {!sidebarCollapsed && (
             <span className="text-lg font-semibold text-white">FlowLens</span>
           )}
