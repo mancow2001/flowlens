@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, String, Text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -163,6 +163,7 @@ class Asset(SoftDeleteModel):
     )
 
     last_classified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
@@ -211,11 +212,13 @@ class Asset(SoftDeleteModel):
 
     # Discovery info
     first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
     )
 
     last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
         index=True,
@@ -333,11 +336,13 @@ class Service(Base, UUIDMixin, TimestampMixin):
 
     # Discovery
     first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
     )
 
     last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         nullable=False,
         server_default="now()",
     )
