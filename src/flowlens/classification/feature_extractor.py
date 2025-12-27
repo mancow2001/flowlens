@@ -4,7 +4,7 @@ Computes behavioral features from flow_aggregates data for classification.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -138,12 +138,15 @@ class FeatureExtractor:
         if lookback_hours is None:
             lookback_hours = self.settings.min_observation_hours
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=lookback_hours)
 
         # Ensure ip_address is a string for database queries
-        # (may come in as IPv4Address/IPv4Network from SQLAlchemy INET type)
+        # asyncpg returns INET as IPv4Address which str() converts without /32 suffix
+        # but PostgreSQL INET comparison needs the full CIDR notation
         ip_str = str(ip_address)
+        if '/' not in ip_str:
+            ip_str = f"{ip_str}/32"
 
         features = BehavioralFeatures(
             ip_address=ip_str,
