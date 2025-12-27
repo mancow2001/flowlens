@@ -214,6 +214,7 @@ addopts = [
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:passlib.*",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
 ]
 markers = [
     "unit: Unit tests",

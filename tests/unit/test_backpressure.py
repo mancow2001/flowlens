@@ -11,11 +11,11 @@ class TestBackpressureQueue:
 
     @pytest.fixture
     def settings(self) -> IngestionSettings:
-        """Create test settings with small thresholds."""
+        """Create test settings with valid thresholds."""
         return IngestionSettings(
-            queue_max_size=100,
-            sample_threshold=50,
-            drop_threshold=80,
+            queue_max_size=10000,
+            sample_threshold=5000,
+            drop_threshold=8000,
             sample_rate=2,
         )
 
@@ -58,8 +58,8 @@ class TestBackpressureQueue:
     @pytest.mark.asyncio
     async def test_sampling_state(self, queue: BackpressureQueue[int]):
         """Test queue enters sampling state at threshold."""
-        # Fill queue to sampling threshold
-        for i in range(55):
+        # Fill queue to sampling threshold (sample_threshold=5000)
+        for i in range(5100):
             await queue.put(i)
 
         assert queue.state == BackpressureState.SAMPLING
@@ -67,16 +67,16 @@ class TestBackpressureQueue:
     @pytest.mark.asyncio
     async def test_sampling_behavior(self, queue: BackpressureQueue[int]):
         """Test sampling drops every Nth item."""
-        # Fill to sampling threshold
-        for i in range(55):
+        # Fill to sampling threshold (sample_threshold=5000)
+        for i in range(5100):
             await queue.put(i)
 
         initial_size = queue.size
         stats_before = queue.stats
 
         # Add more items - some should be sampled
-        for i in range(10):
-            await queue.put(100 + i)
+        for i in range(100):
+            await queue.put(10000 + i)
 
         stats_after = queue.stats
 
@@ -86,8 +86,10 @@ class TestBackpressureQueue:
     @pytest.mark.asyncio
     async def test_dropping_state(self, queue: BackpressureQueue[int]):
         """Test queue enters dropping state at high utilization."""
-        # Fill queue past drop threshold
-        for i in range(85):
+        # Fill queue past drop threshold (drop_threshold=8000)
+        # After hitting sample_threshold=5000, sampling starts (1 in 2 kept)
+        # So we need to add enough items: 5000 + (3000*2) = 11000 to reach ~8000
+        for i in range(12000):
             await queue.put(i)
 
         assert queue.state == BackpressureState.DROPPING
@@ -95,14 +97,17 @@ class TestBackpressureQueue:
     @pytest.mark.asyncio
     async def test_dropping_behavior(self, queue: BackpressureQueue[int]):
         """Test items are dropped in dropping state."""
-        # Fill past drop threshold
-        for i in range(85):
+        # Fill past drop threshold (drop_threshold=8000)
+        # After hitting sample_threshold=5000, sampling starts (1 in 2 kept)
+        # So we need to add enough items to reach drop threshold
+        for i in range(12000):
             await queue.put(i)
 
+        assert queue.state == BackpressureState.DROPPING
         stats_before = queue.stats
 
         # Try to add more - should be dropped
-        result = await queue.put(999)
+        result = await queue.put(99999)
         assert result is False
 
         stats_after = queue.stats
@@ -111,14 +116,15 @@ class TestBackpressureQueue:
     @pytest.mark.asyncio
     async def test_state_recovery(self, queue: BackpressureQueue[int]):
         """Test queue recovers to normal state."""
-        # Fill to dropping state
-        for i in range(85):
+        # Fill to dropping state (drop_threshold=8000)
+        # After hitting sample_threshold=5000, sampling starts (1 in 2 kept)
+        for i in range(12000):
             await queue.put(i)
         assert queue.state == BackpressureState.DROPPING
 
         # Drain the queue
         while queue.size > 0:
-            await queue.get_batch(max_items=100, timeout=0.1)
+            await queue.get_batch(max_items=1000, timeout=0.1)
 
         assert queue.state == BackpressureState.NORMAL
 
@@ -140,9 +146,9 @@ class TestBackpressureQueue:
 
         stats = queue.stats
         assert stats.queue_size == 5
-        assert stats.queue_max_size == 100
+        assert stats.queue_max_size == 10000
         assert stats.total_received == 5
-        assert stats.queue_utilization == 5.0
+        assert stats.queue_utilization == 0.05  # 5/10000 = 0.05%
 
     @pytest.mark.asyncio
     async def test_get_nowait_empty(self, queue: BackpressureQueue[int]):

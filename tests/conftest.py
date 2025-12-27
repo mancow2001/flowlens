@@ -141,13 +141,13 @@ def sample_dependency_data() -> dict[str, Any]:
 def sample_netflow_v5_packet() -> bytes:
     """Sample NetFlow v5 packet for testing."""
     import struct
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     # Header (24 bytes)
     version = 5
     count = 1
     sys_uptime = 1000000  # ms
-    unix_secs = int(datetime.utcnow().timestamp())
+    unix_secs = int(datetime.now(timezone.utc).timestamp())
     unix_nsecs = 0
     flow_sequence = 1
     engine_type = 0
@@ -214,6 +214,206 @@ def sample_netflow_v5_packet() -> bytes:
     )
 
     return header + record
+
+
+# =============================================================================
+# Classification Test Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def sample_server_features() -> dict:
+    """Features typical of a server asset."""
+    from datetime import datetime, timezone
+    return {
+        "ip_address": "192.168.1.100/32",
+        "window_size": "5min",
+        "computed_at": datetime.now(timezone.utc),
+        "inbound_flows": 1000,
+        "outbound_flows": 100,
+        "inbound_bytes": 50_000_000,
+        "outbound_bytes": 5_000_000,
+        "fan_in_count": 50,
+        "fan_out_count": 5,
+        "fan_in_ratio": 0.9,
+        "unique_dst_ports": 3,
+        "unique_src_ports": 5,
+        "well_known_port_ratio": 0.8,
+        "ephemeral_port_ratio": 0.2,
+        "persistent_listener_ports": [80, 443, 22],
+        "protocol_distribution": {6: 900, 17: 100},  # TCP/UDP
+        "avg_bytes_per_packet": 500,
+        "total_flows": 1100,
+        "active_hours_count": 22,
+        "business_hours_ratio": 0.4,
+        "has_db_ports": False,
+        "has_storage_ports": False,
+        "has_web_ports": True,
+        "has_ssh_ports": True,
+    }
+
+
+@pytest.fixture
+def sample_workstation_features() -> dict:
+    """Features typical of a workstation asset."""
+    from datetime import datetime, timezone
+    return {
+        "ip_address": "192.168.1.50/32",
+        "window_size": "5min",
+        "computed_at": datetime.now(timezone.utc),
+        "inbound_flows": 50,
+        "outbound_flows": 500,
+        "inbound_bytes": 1_000_000,
+        "outbound_bytes": 500_000,
+        "fan_in_count": 2,
+        "fan_out_count": 80,
+        "fan_in_ratio": 0.02,
+        "unique_dst_ports": 50,
+        "unique_src_ports": 2,
+        "well_known_port_ratio": 0.0,
+        "ephemeral_port_ratio": 0.9,
+        "persistent_listener_ports": [],
+        "protocol_distribution": {6: 500, 17: 50},
+        "avg_bytes_per_packet": 200,
+        "total_flows": 550,
+        "active_hours_count": 10,
+        "business_hours_ratio": 0.85,
+        "has_db_ports": False,
+        "has_storage_ports": False,
+        "has_web_ports": False,
+        "has_ssh_ports": False,
+    }
+
+
+@pytest.fixture
+def sample_database_features() -> dict:
+    """Features typical of a database server."""
+    from datetime import datetime, timezone
+    return {
+        "ip_address": "192.168.1.200/32",
+        "window_size": "5min",
+        "computed_at": datetime.now(timezone.utc),
+        "inbound_flows": 500,
+        "outbound_flows": 50,
+        "inbound_bytes": 100_000_000,
+        "outbound_bytes": 200_000_000,
+        "fan_in_count": 10,
+        "fan_out_count": 2,
+        "fan_in_ratio": 0.83,
+        "unique_dst_ports": 2,
+        "unique_src_ports": 1,
+        "well_known_port_ratio": 1.0,
+        "ephemeral_port_ratio": 0.0,
+        "persistent_listener_ports": [5432],
+        "protocol_distribution": {6: 550},
+        "avg_bytes_per_packet": 5000,
+        "total_flows": 550,
+        "active_hours_count": 23,
+        "business_hours_ratio": 0.45,
+        "has_db_ports": True,
+        "has_storage_ports": False,
+        "has_web_ports": False,
+        "has_ssh_ports": False,
+    }
+
+
+@pytest.fixture
+def sample_load_balancer_features() -> dict:
+    """Features typical of a load balancer."""
+    from datetime import datetime, timezone
+    return {
+        "ip_address": "192.168.1.10/32",
+        "window_size": "5min",
+        "computed_at": datetime.now(timezone.utc),
+        "inbound_flows": 10000,
+        "outbound_flows": 10000,
+        "inbound_bytes": 500_000_000,
+        "outbound_bytes": 500_000_000,
+        "fan_in_count": 200,
+        "fan_out_count": 10,
+        "fan_in_ratio": 0.95,
+        "unique_dst_ports": 2,
+        "unique_src_ports": 2,
+        "well_known_port_ratio": 1.0,
+        "ephemeral_port_ratio": 0.0,
+        "persistent_listener_ports": [80, 443],
+        "protocol_distribution": {6: 20000},
+        "avg_bytes_per_packet": 1000,
+        "total_flows": 20000,
+        "active_hours_count": 24,
+        "business_hours_ratio": 0.42,
+        "has_db_ports": False,
+        "has_storage_ports": False,
+        "has_web_ports": True,
+        "has_ssh_ports": False,
+    }
+
+
+# =============================================================================
+# Gateway Test Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def sample_gateway_observation_data() -> dict:
+    """Sample gateway observation data."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return {
+        "source_ip": "192.168.1.100",
+        "gateway_ip": "192.168.1.1",
+        "destination_ip": "10.0.0.1",
+        "observation_source": "next_hop",
+        "exporter_ip": "192.168.1.1",
+        "window_start": now,
+        "window_end": now,
+        "bytes_total": 1000000,
+        "flows_count": 100,
+        "is_processed": False,
+    }
+
+
+@pytest.fixture
+def sample_gateway_candidate() -> dict:
+    """Sample gateway candidate data."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    return {
+        "source_ip": "192.168.1.100",
+        "gateway_ip": "192.168.1.1",
+        "bytes_total": 5_000_000,
+        "flows_total": 500,
+        "first_seen": now - timedelta(days=7),
+        "last_seen": now,
+        "observation_count": 100,
+    }
+
+
+# =============================================================================
+# Change Detection Test Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def sample_change_event_data() -> dict:
+    """Sample change event data."""
+    return {
+        "change_type": "dependency_created",
+        "summary": "New dependency detected",
+        "description": "Asset A connected to Asset B on port 443",
+        "impact_score": 30,
+        "affected_assets_count": 2,
+    }
+
+
+@pytest.fixture
+def sample_alert_data() -> dict:
+    """Sample alert data."""
+    return {
+        "severity": "warning",
+        "title": "New Dependency Discovered",
+        "message": "A new dependency has been detected between assets.",
+    }
 
 
 # =============================================================================

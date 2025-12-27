@@ -96,10 +96,10 @@ class TestNetFlowV5Parser:
     ):
         """Test parsing packet with multiple flow records."""
         import struct
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         # Header with count=2
-        unix_secs = int(datetime.utcnow().timestamp())
+        unix_secs = int(datetime.now(timezone.utc).timestamp())
         header = struct.pack(
             "!HHIIIIBBH",
             5, 2, 1000000, unix_secs, 0, 1, 0, 0, 0,

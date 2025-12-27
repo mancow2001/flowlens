@@ -1,6 +1,6 @@
 # FlowLens Development Backlog
 
-**Last Updated:** 2024-12-26
+**Last Updated:** 2025-12-27
 
 ---
 
@@ -97,6 +97,29 @@
 - [x] **Bulk asset delete API** - `DELETE /assets/bulk` with soft delete
 - [x] **Bulk operations UI** - Multi-select with action toolbar
 
+### Asset Auto-Classification
+- [x] **Classification engine** - Behavioral feature extraction from flow data
+- [x] **Scoring engine** - Rule-based scoring with confidence thresholds
+- [x] **Classification worker** - Background service for auto-classification
+- [x] **Asset feature extraction** - Fan-in/out, port patterns, protocol distribution
+- [x] **Classification history** - Audit trail for type changes
+- [x] **CIDR classification rules** - Environment/datacenter/location by IP range
+
+### Gateway Detection
+- [x] **Gateway observation model** - Intermediate observations from next_hop field
+- [x] **Asset gateway model** - Inferred gateway relationships with confidence
+- [x] **Gateway inference service** - Roll up observations to asset relationships
+- [x] **Gateway API endpoints** - List gateways, for-asset, clients, topology
+- [x] **Gateway UI integration** - Gateways tab on asset detail page
+
+### Topology Enhancements
+- [x] **Group by type** - Group topology nodes by asset type
+- [x] **Hierarchical blast radius** - Nodes arranged by hop distance
+
+### Database Improvements
+- [x] **BigInteger migrations** - All byte/packet/flow counters use BIGINT
+- [x] **Timezone-aware datetimes** - All timestamp columns properly typed
+
 ---
 
 ## In Progress
@@ -176,8 +199,19 @@ These features are explicitly excluded from FlowLens scope:
 
 ---
 
-## Bug Fixes Applied (This Session)
+## Bug Fixes Applied
 
+### Session 2025-12-27
+- [x] Fixed topology "Group by Type" - changed `node.type` to `node.asset_type` to match backend schema
+- [x] Fixed classification worker timezone errors - `datetime.utcnow()` to `datetime.now(timezone.utc)`
+- [x] Fixed feature extractor IP address comparison - append `/32` suffix for INET matching
+- [x] Fixed gateway inference Decimal * float error - explicit float() conversion
+- [x] Fixed enrichment duplicate key race condition - IntegrityError handling with rollback
+- [x] Fixed asset model DateTime columns - added `timezone=True` for first_seen, last_seen, last_classified_at
+- [x] Fixed gateway model DateTime columns - added `timezone=True` for first_seen, last_seen, last_inferred_at
+- [x] Fixed docker-compose.yml duplicate YAML merge keys - combined environment anchors
+
+### Previous Sessions
 - [x] Fixed SPOF query `asyncpg` NULL parameter error - dynamic query building
 - [x] Fixed `ChangeEventResponse.metadata` validation - `validation_alias` for SQLAlchemy attribute mapping
 - [x] Fixed Path Finder API endpoint - changed from `/analysis/path` to `/topology/path`
