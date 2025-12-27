@@ -61,7 +61,7 @@ function getGroupKey(node: TopologyNode, mode: GroupingMode): string {
     case 'datacenter':
       return node.datacenter || 'Unknown';
     case 'type':
-      return node.type?.replace('_', ' ') || 'Unknown';
+      return node.asset_type?.replace('_', ' ') || 'Unknown';
     default:
       return 'all';
   }
