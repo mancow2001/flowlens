@@ -8,6 +8,9 @@ import type { TopologyNode, TopologyEdge } from '../../types';
 interface SimNode extends TopologyNode, d3.SimulationNodeDatum {
   isCenter?: boolean;
   hopDistance?: number;
+  // Fixed positions for hierarchical layout
+  targetX?: number;
+  targetY?: number;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
