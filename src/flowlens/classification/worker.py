@@ -111,9 +111,14 @@ class ClassificationWorker:
             assets = await self._get_assets_to_classify(db)
 
             if not assets:
+                logger.debug(
+                    "No assets to classify",
+                    min_observation_hours=self._min_observation_hours,
+                    reclassify_interval_hours=self._settings.reclassify_interval_hours,
+                )
                 return 0
 
-            logger.debug("Processing classification batch", count=len(assets))
+            logger.info("Processing classification batch", count=len(assets))
 
             for asset in assets:
                 try:
@@ -143,6 +148,14 @@ class ClassificationWorker:
         stale_cutoff = now - self._reclassify_interval
         observation_cutoff = now - timedelta(hours=self._min_observation_hours)
 
+        logger.debug(
+            "Querying assets for classification",
+            now=now.isoformat(),
+            observation_cutoff=observation_cutoff.isoformat(),
+            stale_cutoff=stale_cutoff.isoformat(),
+            min_observation_hours=self._min_observation_hours,
+        )
+
         query = (
             select(Asset)
             .where(
@@ -163,7 +176,13 @@ class ClassificationWorker:
         )
 
         result = await db.execute(query)
-        return list(result.scalars().all())
+        assets = list(result.scalars().all())
+        logger.info(
+            "Asset query completed",
+            assets_found=len(assets),
+            min_observation_hours=self._min_observation_hours,
+        )
+        return assets
 
     async def _classify_asset(self, db: AsyncSession, asset: Asset) -> None:
         """Classify a single asset.
