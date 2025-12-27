@@ -46,11 +46,14 @@ export default function Sidebar() {
       )}
     >
       {/* Logo */}
-      <div className="flex items-center h-16 px-4 border-b border-slate-700">
+      <div className={clsx(
+        "flex items-center h-16 border-b border-slate-700",
+        sidebarCollapsed ? "px-4 justify-center" : "px-1"
+      )}>
         <img
           src={sidebarCollapsed ? "/FlowLens_logo_small.png" : "/FlowLens_logo_full.png"}
           alt="FlowLens"
-          className={sidebarCollapsed ? "h-8" : "h-full py-2"}
+          className={sidebarCollapsed ? "h-8 w-8" : "w-full h-full object-contain"}
         />
       </div>
 
