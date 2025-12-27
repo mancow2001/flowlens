@@ -189,8 +189,17 @@ class APISettings(BaseSettings):
 
     # Security - stored as comma-separated string, converted to list via property
     cors_origins_str: str = Field(default="*", alias="cors_origins")
-    rate_limit_requests: int = Field(default=100, ge=1)
-    rate_limit_window_seconds: int = Field(default=60, ge=1)
+
+    # Rate limiting configuration
+    rate_limit_enabled: bool = Field(default=True, description="Enable API rate limiting")
+    rate_limit_requests: int = Field(
+        default=100, ge=1, le=10000,
+        description="Maximum requests per window per client"
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60, ge=1, le=3600,
+        description="Rate limit window size in seconds"
+    )
 
     @property
     def cors_origins(self) -> list[str]:
@@ -200,6 +209,20 @@ class APISettings(BaseSettings):
     # Pagination
     default_page_size: int = Field(default=50, ge=1, le=1000)
     max_page_size: int = Field(default=1000, ge=1, le=10000)
+
+    # Topology query limits (for large graphs)
+    topology_max_nodes: int = Field(
+        default=5000, ge=100, le=50000,
+        description="Maximum nodes to return in topology queries"
+    )
+    topology_max_edges: int = Field(
+        default=10000, ge=100, le=100000,
+        description="Maximum edges to return in topology queries"
+    )
+    topology_cache_ttl_seconds: int = Field(
+        default=30, ge=0, le=300,
+        description="Cache TTL for topology queries (0 to disable)"
+    )
 
 
 class AuthSettings(BaseSettings):

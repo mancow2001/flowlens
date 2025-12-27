@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from flowlens.api.middleware import RateLimitMiddleware
 from flowlens.api.websocket import get_connection_manager
 from flowlens.common.config import get_settings
 from flowlens.common.database import close_database, init_database
@@ -91,6 +92,16 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Rate limiting middleware (optional, enabled by default)
+    # Note: Middleware is executed in reverse order of addition,
+    # so rate limiting runs after CORS but before request processing
+    if settings.api.rate_limit_enabled:
+        app.add_middleware(
+            RateLimitMiddleware,
+            requests_per_window=settings.api.rate_limit_requests,
+            window_seconds=settings.api.rate_limit_window_seconds,
+        )
 
     # Request logging middleware
     @app.middleware("http")

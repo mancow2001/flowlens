@@ -121,11 +121,23 @@
 - [x] **Timezone-aware datetimes** - All timestamp columns properly typed
 
 ### Testing Infrastructure
-- [x] **Comprehensive pytest test suite** - 171 unit tests + 74 integration tests
-  - Unit tests for: scoring engine, heuristics, classification constants, gateway inference, change detector, flow aggregator, backpressure queue, NetFlow v5 parser
+- [x] **Comprehensive pytest test suite** - 219 unit tests + 74 integration tests
+  - Unit tests for: scoring engine, heuristics, classification constants, gateway inference, change detector, flow aggregator, backpressure queue, NetFlow v5 parser, rate limiting, caching
   - Integration tests for: assets, dependencies, topology, alerts, changes, classification, gateways, maintenance windows APIs
   - Test fixtures in conftest.py for classification, gateway, and change detection scenarios
   - Markers for unit/integration/slow test categorization
+
+### API Performance & Security
+- [x] **Rate limiting middleware** - Sliding window rate limiter with configurable limits per client
+  - Headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+  - Configurable via API_RATE_LIMIT_ENABLED, API_RATE_LIMIT_REQUESTS, API_RATE_LIMIT_WINDOW_SECONDS
+  - EndpointRateLimiter for stricter per-endpoint limits on sensitive operations
+- [x] **Topology query optimization** - Performance improvements for large graphs (>10k nodes)
+  - Composite indexes for topology filters (asset_type, is_internal, deleted_at)
+  - GiST index for CIDR containment queries
+  - Optimized graph traversal functions with result limits
+  - In-memory cache with configurable TTL (API_TOPOLOGY_CACHE_TTL_SECONDS)
+  - Node/edge limits (API_TOPOLOGY_MAX_NODES, API_TOPOLOGY_MAX_EDGES)
 
 ---
 
@@ -230,9 +242,9 @@ These features are explicitly excluded from FlowLens scope:
 ## Technical Debt
 
 - [x] Add comprehensive test suite (pytest) - **Completed 2025-12-27**
-- [ ] Add API rate limiting
+- [x] Add API rate limiting - **Completed 2025-12-27**
+- [x] Optimize topology queries for large graphs (>10k nodes) - **Completed 2025-12-27**
 - [ ] Add request validation error handling improvements
-- [ ] Optimize topology queries for large graphs (>10k nodes)
 - [ ] Add database connection pooling configuration
 - [ ] Add structured logging to all services
 
@@ -260,6 +272,20 @@ TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/xxx
 PAGERDUTY_ENABLED=true
 PAGERDUTY_ROUTING_KEY=your-integration-key
 PAGERDUTY_SERVICE_NAME=FlowLens
+```
+
+### API Rate Limiting
+```bash
+API_RATE_LIMIT_ENABLED=true       # Enable/disable rate limiting (default: true)
+API_RATE_LIMIT_REQUESTS=100       # Max requests per window per client (default: 100)
+API_RATE_LIMIT_WINDOW_SECONDS=60  # Rate limit window in seconds (default: 60)
+```
+
+### Topology Query Performance
+```bash
+API_TOPOLOGY_MAX_NODES=5000          # Max nodes in topology response (default: 5000)
+API_TOPOLOGY_MAX_EDGES=10000         # Max edges in topology response (default: 10000)
+API_TOPOLOGY_CACHE_TTL_SECONDS=30    # Cache TTL for topology queries (default: 30, 0 to disable)
 ```
 
 ---

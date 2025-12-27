@@ -1,12 +1,15 @@
 """Topology API endpoints for graph queries."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select, text
 
+from flowlens.api.cache import get_topology_cache
 from flowlens.api.dependencies import AuthenticatedUser, DbSession
+from flowlens.common.config import get_settings
+from flowlens.common.logging import get_logger
 from flowlens.models.asset import Asset
 from flowlens.models.dependency import Dependency
 from flowlens.schemas.topology import (
@@ -19,6 +22,8 @@ from flowlens.schemas.topology import (
     TraversalNode,
     TraversalResult,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/topology", tags=["topology"])
 
@@ -115,7 +120,26 @@ async def get_topology_graph(
     Returns nodes and edges for visualization.
     When use_cidr_classification is True (default), environment, datacenter,
     and location are dynamically determined from CIDR classification rules.
+
+    Note: Results are limited by API_TOPOLOGY_MAX_NODES and API_TOPOLOGY_MAX_EDGES
+    settings to ensure performance on large graphs.
     """
+    settings = get_settings()
+    cache = get_topology_cache()
+
+    # Try cache first (only for non-temporal queries without specific asset IDs)
+    use_cache = (
+        settings.api.topology_cache_ttl_seconds > 0
+        and filters.as_of is None
+        and not filters.asset_ids  # Don't cache specific asset queries
+    )
+
+    if use_cache:
+        cache_key = cache.make_key("topology:graph", filters.model_dump(mode="json"))
+        if cached := cache.get(cache_key):
+            logger.debug("Topology cache hit", cache_key=cache_key)
+            return cached
+
     # Build asset query
     asset_query = select(Asset).where(Asset.deleted_at.is_(None))
 
@@ -177,11 +201,23 @@ async def get_topology_graph(
 
     # Handle empty asset_ids case (IN () is invalid SQL)
     if not asset_ids:
-        return TopologyGraph(
+        empty_result = TopologyGraph(
             nodes=[],
             edges=[],
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc),
         )
+        return empty_result
+
+    # Apply node limit to prevent memory issues on large graphs
+    max_nodes = settings.api.topology_max_nodes
+    if len(asset_ids) > max_nodes:
+        logger.warning(
+            "Topology query exceeded max nodes, truncating",
+            requested=len(asset_ids),
+            max_nodes=max_nodes,
+        )
+        # Keep the first N nodes (could be improved with prioritization)
+        asset_ids = set(list(asset_ids)[:max_nodes])
 
     # Build dependency query
     # Handle point-in-time query vs current state
@@ -228,6 +264,17 @@ async def get_topology_graph(
         for d in dependencies
     ]
 
+    # Apply edge limit
+    max_edges = settings.api.topology_max_edges
+    if len(edges) > max_edges:
+        logger.warning(
+            "Topology query exceeded max edges, truncating",
+            requested=len(edges),
+            max_edges=max_edges,
+        )
+        # Sort by bytes (most significant edges first) and truncate
+        edges = sorted(edges, key=lambda e: e.bytes_total or 0, reverse=True)[:max_edges]
+
     # Filter nodes to only include those with at least one edge
     connected_asset_ids = set()
     for edge in edges:
@@ -237,11 +284,19 @@ async def get_topology_graph(
     # Only include nodes that have dependencies
     filtered_nodes = [node for node in nodes if node.id in connected_asset_ids]
 
-    return TopologyGraph(
+    # Build result
+    result = TopologyGraph(
         nodes=filtered_nodes,
         edges=edges,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(timezone.utc),
     )
+
+    # Cache the result
+    if use_cache:
+        cache.set(cache_key, result)
+        logger.debug("Topology cache set", cache_key=cache_key, nodes=len(filtered_nodes), edges=len(edges))
+
+    return result
 
 
 @router.get("/downstream/{asset_id}", response_model=TraversalResult)
