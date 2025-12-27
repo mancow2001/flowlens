@@ -194,9 +194,14 @@ class ClassificationWorker:
             return
 
         # Compute classification scores
+        # Handle both enum and string types for asset_type
+        current_type = None
+        if asset.asset_type:
+            current_type = asset.asset_type.value if hasattr(asset.asset_type, 'value') else str(asset.asset_type)
+
         result = self._scoring_engine.compute_scores(
             features=features,
-            current_type=asset.asset_type.value if asset.asset_type else None,
+            current_type=current_type,
         )
 
         # Record confidence metric
@@ -282,8 +287,10 @@ class ClassificationWorker:
             result: Classification result.
         """
         now = datetime.utcnow()
-        previous_type = asset.asset_type.value if asset.asset_type else None
-        new_type = result.recommended_type.value
+        previous_type = None
+        if asset.asset_type:
+            previous_type = asset.asset_type.value if hasattr(asset.asset_type, 'value') else str(asset.asset_type)
+        new_type = result.recommended_type.value if hasattr(result.recommended_type, 'value') else str(result.recommended_type)
 
         # Map ClassifiableAssetType to AssetType
         asset_type_mapping = {
