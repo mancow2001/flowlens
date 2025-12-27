@@ -475,7 +475,7 @@ export default function Topology() {
         id: `group-${groupKey}`,
         name: groupKey,
         label: `${groupKey} (${nodesInGroup.length})`,
-        type: 'group',
+        asset_type: 'unknown',
         ip_address: '',
         is_internal: nodesInGroup.some(n => n.is_internal),
         is_critical: nodesInGroup.some(n => n.is_critical),
@@ -1656,7 +1656,7 @@ export default function Topology() {
                 <div>
                   <span className="text-sm text-slate-400">Type</span>
                   <p className="text-white capitalize">
-                    {selectedNode.type?.replace('_', ' ') ?? 'Unknown'}
+                    {selectedNode.asset_type?.replace('_', ' ') ?? 'Unknown'}
                   </p>
                 </div>
                 {selectedNode.ip_address && (

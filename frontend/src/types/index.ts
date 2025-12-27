@@ -125,7 +125,7 @@ export interface TopologyNode {
   id: string;
   name: string;
   label?: string;
-  type: AssetType;
+  asset_type: AssetType;
   ip_address: string | null;
   is_internal: boolean;
   is_critical: boolean;
