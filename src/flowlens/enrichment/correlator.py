@@ -9,6 +9,7 @@ from ipaddress import IPv4Address, IPv6Address
 from uuid import UUID
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.common.logging import get_logger
@@ -78,11 +79,26 @@ class AssetCorrelator:
             self._ip_cache[ip_str] = asset_id
             return asset_id
 
-        # Create new asset
-        asset = await self._create_asset(db, ip_str, hostname)
-        self._ip_cache[ip_str] = asset.id
-
-        return asset.id
+        # Create new asset (handle race condition with other workers)
+        try:
+            asset = await self._create_asset(db, ip_str, hostname)
+            self._ip_cache[ip_str] = asset.id
+            return asset.id
+        except IntegrityError:
+            # Another worker created the asset - rollback and re-query
+            await db.rollback()
+            result = await db.execute(
+                select(Asset.id).where(
+                    Asset.ip_address == ip_str,
+                    Asset.deleted_at.is_(None),
+                )
+            )
+            asset_id = result.scalar_one_or_none()
+            if asset_id:
+                self._ip_cache[ip_str] = asset_id
+                return asset_id
+            # If still not found, re-raise
+            raise
 
     async def _create_asset(
         self,

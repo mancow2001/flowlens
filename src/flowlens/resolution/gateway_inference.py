@@ -199,11 +199,14 @@ class GatewayInferenceService:
         scores = {}
 
         # Flow count factor (0-0.30)
-        flow_score = min(candidate.flows_total / 100, 1.0) * 0.30
+        # Convert to float to handle PostgreSQL Decimal returns
+        flows_total = float(candidate.flows_total) if candidate.flows_total else 0
+        flow_score = min(flows_total / 100, 1.0) * 0.30
         scores["flow_count"] = round(flow_score, 3)
 
         # Observation count factor (0-0.30)
-        obs_score = min(candidate.observation_count / 10, 1.0) * 0.30
+        obs_count = float(candidate.observation_count) if candidate.observation_count else 0
+        obs_score = min(obs_count / 10, 1.0) * 0.30
         scores["observation_count"] = round(obs_score, 3)
 
         # Time consistency factor (0-0.20) - based on observation spread
@@ -212,7 +215,8 @@ class GatewayInferenceService:
         scores["time_consistency"] = round(consistency_score, 3)
 
         # Bytes volume factor (0-0.20)
-        bytes_score = min(candidate.bytes_total / 1_000_000, 1.0) * 0.20  # 1MB = full score
+        bytes_total = float(candidate.bytes_total) if candidate.bytes_total else 0
+        bytes_score = min(bytes_total / 1_000_000, 1.0) * 0.20  # 1MB = full score
         scores["bytes_volume"] = round(bytes_score, 3)
 
         total = sum(scores.values())
