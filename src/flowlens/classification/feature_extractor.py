@@ -122,7 +122,7 @@ class FeatureExtractor:
     async def extract_features(
         self,
         ip_address: str,
-        window_size: str = "24hour",
+        window_size: str = "5min",
         lookback_hours: int | None = None,
     ) -> BehavioralFeatures:
         """Extract behavioral features for an IP address.
@@ -387,7 +387,7 @@ class FeatureExtractor:
 async def extract_features_for_asset(
     session: AsyncSession,
     ip_address: str,
-    window_size: str = "24hour",
+    window_size: str = "5min",
     lookback_hours: int | None = None,
 ) -> BehavioralFeatures:
     """Convenience function to extract features for an asset.

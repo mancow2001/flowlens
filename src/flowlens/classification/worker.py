@@ -176,7 +176,7 @@ class ClassificationWorker:
         extractor = FeatureExtractor(db)
         features = await extractor.extract_features(
             ip_address=asset.ip_address,
-            window_size="24hour",
+            window_size="5min",
             lookback_hours=self._min_observation_hours,
         )
 
@@ -360,7 +360,7 @@ class ClassificationWorker:
             extractor = FeatureExtractor(db)
             features = await extractor.extract_features(
                 ip_address=asset.ip_address,
-                window_size="24hour",
+                window_size="5min",
             )
 
             # Compute scores
