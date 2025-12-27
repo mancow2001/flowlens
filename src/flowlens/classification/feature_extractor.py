@@ -141,18 +141,22 @@ class FeatureExtractor:
         now = datetime.utcnow()
         cutoff = now - timedelta(hours=lookback_hours)
 
+        # Ensure ip_address is a string for database queries
+        # (may come in as IPv4Address/IPv4Network from SQLAlchemy INET type)
+        ip_str = str(ip_address)
+
         features = BehavioralFeatures(
-            ip_address=ip_address,
+            ip_address=ip_str,
             window_size=window_size,
             computed_at=now,
         )
 
         # Run queries in parallel for efficiency
-        await self._extract_inbound_metrics(features, ip_address, window_size, cutoff)
-        await self._extract_outbound_metrics(features, ip_address, window_size, cutoff)
-        await self._extract_port_behavior(features, ip_address, window_size, cutoff)
-        await self._extract_temporal_patterns(features, ip_address, window_size, cutoff)
-        await self._extract_protocol_distribution(features, ip_address, window_size, cutoff)
+        await self._extract_inbound_metrics(features, ip_str, window_size, cutoff)
+        await self._extract_outbound_metrics(features, ip_str, window_size, cutoff)
+        await self._extract_port_behavior(features, ip_str, window_size, cutoff)
+        await self._extract_temporal_patterns(features, ip_str, window_size, cutoff)
+        await self._extract_protocol_distribution(features, ip_str, window_size, cutoff)
 
         # Compute derived metrics
         self._compute_derived_metrics(features)
