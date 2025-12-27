@@ -50,7 +50,7 @@ export default function Sidebar() {
         <img
           src={sidebarCollapsed ? "/FlowLens_logo_small.png" : "/FlowLens_logo_full.png"}
           alt="FlowLens"
-          className={sidebarCollapsed ? "h-8" : "h-8"}
+          className={sidebarCollapsed ? "h-8" : "h-full py-2"}
         />
       </div>
 
