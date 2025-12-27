@@ -96,6 +96,11 @@ def upgrade() -> None:
     # Optimized graph traversal functions
     # ==========================================================================
 
+    # Drop old function signatures first to avoid ambiguity
+    op.execute("DROP FUNCTION IF EXISTS get_downstream_dependencies(UUID, INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS get_upstream_dependencies(UUID, INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS calculate_blast_radius(UUID, INTEGER)")
+
     # Replace get_downstream_dependencies with optimized version
     # that uses materialized path and limits results
     op.execute("""
@@ -241,6 +246,43 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql STABLE;
     """)
 
+    # Recreate calculate_blast_radius function (uses get_upstream_dependencies)
+    op.execute("""
+        CREATE OR REPLACE FUNCTION calculate_blast_radius(
+            p_asset_id UUID,
+            p_max_depth INTEGER DEFAULT 5
+        )
+        RETURNS TABLE (
+            total_affected INTEGER,
+            critical_affected INTEGER,
+            affected_assets JSONB
+        ) AS $$
+        DECLARE
+            v_result JSONB;
+            v_total INTEGER;
+            v_critical INTEGER;
+        BEGIN
+            WITH upstream AS (
+                SELECT * FROM get_upstream_dependencies(p_asset_id, p_max_depth)
+            )
+            SELECT
+                COUNT(*)::INTEGER,
+                COUNT(*) FILTER (WHERE a.is_critical)::INTEGER,
+                jsonb_agg(jsonb_build_object(
+                    'id', u.asset_id,
+                    'name', u.asset_name,
+                    'depth', u.depth,
+                    'is_critical', a.is_critical
+                ))
+            INTO v_total, v_critical, v_result
+            FROM upstream u
+            JOIN assets a ON a.id = u.asset_id;
+
+            RETURN QUERY SELECT v_total, v_critical, COALESCE(v_result, '[]'::jsonb);
+        END;
+        $$ LANGUAGE plpgsql STABLE;
+    """)
+
     # ==========================================================================
     # Statistics for query planner
     # ==========================================================================
@@ -262,6 +304,11 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_classification_rules_active_priority")
     op.execute("DROP INDEX IF EXISTS ix_asset_gateways_source_current")
     op.execute("DROP INDEX IF EXISTS ix_asset_gateways_gateway_current")
+
+    # Drop the new 3-parameter functions and calculate_blast_radius
+    op.execute("DROP FUNCTION IF EXISTS get_downstream_dependencies(UUID, INTEGER, INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS get_upstream_dependencies(UUID, INTEGER, INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS calculate_blast_radius(UUID, INTEGER)")
 
     # Restore original functions (without max_results parameter)
     op.execute("""
@@ -394,6 +441,43 @@ def downgrade() -> None:
                 upstream.last_seen
             FROM upstream
             ORDER BY upstream.asset_id, upstream.depth;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    # Restore calculate_blast_radius function
+    op.execute("""
+        CREATE OR REPLACE FUNCTION calculate_blast_radius(
+            p_asset_id UUID,
+            p_max_depth INTEGER DEFAULT 5
+        )
+        RETURNS TABLE (
+            total_affected INTEGER,
+            critical_affected INTEGER,
+            affected_assets JSONB
+        ) AS $$
+        DECLARE
+            v_result JSONB;
+            v_total INTEGER;
+            v_critical INTEGER;
+        BEGIN
+            WITH upstream AS (
+                SELECT * FROM get_upstream_dependencies(p_asset_id, p_max_depth)
+            )
+            SELECT
+                COUNT(*)::INTEGER,
+                COUNT(*) FILTER (WHERE a.is_critical)::INTEGER,
+                jsonb_agg(jsonb_build_object(
+                    'id', u.asset_id,
+                    'name', u.asset_name,
+                    'depth', u.depth,
+                    'is_critical', a.is_critical
+                ))
+            INTO v_total, v_critical, v_result
+            FROM upstream u
+            JOIN assets a ON a.id = u.asset_id;
+
+            RETURN QUERY SELECT v_total, v_critical, COALESCE(v_result, '[]'::jsonb);
         END;
         $$ LANGUAGE plpgsql;
     """)
