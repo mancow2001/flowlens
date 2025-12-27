@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -223,21 +223,25 @@ class Asset(SoftDeleteModel):
 
     # Traffic stats (updated by aggregation)
     bytes_in_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     bytes_out_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     connections_in: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     connections_out: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
@@ -340,11 +344,13 @@ class Service(Base, UUIDMixin, TimestampMixin):
 
     # Traffic stats
     bytes_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     connections_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )

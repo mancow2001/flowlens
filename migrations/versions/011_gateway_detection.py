@@ -55,7 +55,7 @@ def upgrade() -> None:
         sa.Column("window_start", sa.DateTime(timezone=True), nullable=False),
         sa.Column("window_end", sa.DateTime(timezone=True), nullable=False),
         sa.Column("bytes_total", sa.BigInteger(), nullable=False, server_default="0"),
-        sa.Column("flows_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("flows_count", sa.BigInteger(), nullable=False, server_default="0"),
         sa.Column("is_processed", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column(
             "created_at",

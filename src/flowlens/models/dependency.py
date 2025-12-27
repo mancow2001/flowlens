@@ -279,11 +279,13 @@ class DependencyHistory(Base, UUIDMixin):
 
     # Metrics at time of change
     bytes_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     flows_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )

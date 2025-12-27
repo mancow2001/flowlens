@@ -88,7 +88,7 @@ class GatewayObservation(Base, UUIDMixin):
     )
 
     flows_count: Mapped[int] = mapped_column(
-        Integer,
+        BigInteger,
         default=0,
         nullable=False,
     )

@@ -275,6 +275,7 @@ class FlowAggregate(Base):
     )
 
     flows_count: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
@@ -436,6 +437,7 @@ class DependencyStats(Base):
     )
 
     flows_total: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
