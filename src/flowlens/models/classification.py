@@ -8,7 +8,7 @@ More specific CIDRs (longer prefix) take priority over broader ones.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -156,21 +156,25 @@ class AssetFeatures(BaseModel):
 
     # Traffic directionality
     inbound_flows: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     outbound_flows: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     inbound_bytes: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
 
     outbound_bytes: Mapped[int] = mapped_column(
+        BigInteger,
         default=0,
         nullable=False,
     )
