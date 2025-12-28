@@ -24,6 +24,7 @@ FlowLens is an open-source platform that ingests network flow data (NetFlow, sFl
 - **Change Tracking** - Audit trail of all asset and dependency changes
 - **Alerting** - Configurable alert rules with real-time WebSocket notifications
 - **Topology Visualization** - Interactive D3-based network graph
+- **System Settings UI** - Web-based configuration with docker-compose.yml export
 
 ### Technical Highlights
 
@@ -90,18 +91,18 @@ FlowLens is an open-source platform that ingests network flow data (NetFlow, sFl
 2. **Start the services**
 
    ```bash
-   docker compose up -d
+   docker compose up -d --build
    ```
 
-3. **Run database migrations**
+   Database migrations run automatically on startup.
 
-   ```bash
-   docker compose exec api alembic upgrade head
-   ```
-
-4. **Access the UI**
+3. **Access the UI**
 
    Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+4. **Configure settings (optional)**
+
+   Navigate to **System Settings** in the UI to configure services. You can export a customized `docker-compose.yml` with your settings.
 
 ### Configure Flow Sources
 
@@ -194,7 +195,35 @@ FlowLens is configured via environment variables. Key settings:
 | `INGESTION_NETFLOW_PORT` | 2055 | NetFlow/IPFIX port |
 | `INGESTION_SFLOW_PORT` | 6343 | sFlow port |
 | `INGESTION_BATCH_SIZE` | 1000 | Batch size for DB writes |
+| `INGESTION_BATCH_TIMEOUT_MS` | 1000 | Max wait time for batch |
 | `INGESTION_QUEUE_MAX_SIZE` | 100000 | Max queue size before backpressure |
+| `INGESTION_SAMPLE_THRESHOLD` | 50000 | Queue size to start sampling |
+| `INGESTION_DROP_THRESHOLD` | 80000 | Queue size to start dropping |
+| `INGESTION_SAMPLE_RATE` | 10 | Keep 1 in N flows when sampling |
+
+### Enrichment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENRICHMENT_WORKER_COUNT` | 4 | Number of enrichment workers |
+| `ENRICHMENT_BATCH_SIZE` | 500 | Flows per enrichment batch |
+| `ENRICHMENT_POLL_INTERVAL_MS` | 100 | Time between queue polls |
+| `ENRICHMENT_DNS_TIMEOUT` | 2.0 | DNS lookup timeout (seconds) |
+| `ENRICHMENT_DNS_CACHE_TTL` | 3600 | DNS cache entry lifetime |
+| `ENRICHMENT_DNS_CACHE_SIZE` | 10000 | Maximum DNS cache entries |
+
+### Resolution
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RESOLUTION_WORKER_COUNT` | 1 | Number of resolution workers |
+| `RESOLUTION_WINDOW_SIZE_MINUTES` | 5 | Flow aggregation window |
+| `RESOLUTION_BATCH_SIZE` | 1000 | Aggregates per batch |
+| `RESOLUTION_POLL_INTERVAL_MS` | 500 | Time between aggregate polls |
+| `RESOLUTION_STALE_THRESHOLD_HOURS` | 24 | Hours before marking dependency stale |
+| `RESOLUTION_EXCLUDE_EXTERNAL_IPS` | false | Exclude non-private IPs from dependencies |
+| `RESOLUTION_EXCLUDE_EXTERNAL_SOURCES` | false | Exclude dependencies with external sources |
+| `RESOLUTION_EXCLUDE_EXTERNAL_TARGETS` | false | Exclude dependencies with external targets |
 
 ### API
 
@@ -299,6 +328,16 @@ The REST API is available at `http://localhost:8000/api/v1`.
 | GET | `/tasks` | List background tasks |
 | GET | `/tasks/{id}` | Get task status |
 | POST | `/tasks/{id}/cancel` | Cancel running task |
+
+#### Settings
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/settings` | List all settings sections |
+| GET | `/settings/{section}` | Get section settings |
+| PATCH | `/settings/{section}` | Update section settings |
+| GET | `/settings/export/docker-compose` | Export docker-compose.yml |
+| POST | `/settings/{section}/test` | Test connection (database, redis, etc.) |
 
 #### Admin
 
@@ -428,11 +467,27 @@ Classification confidence is tracked; assets are only auto-updated when confiden
 
 ```bash
 # Minimal deployment (PostgreSQL + all services)
-docker compose up -d
+docker compose up -d --build
 
 # Full deployment (includes Kafka, Redis, monitoring)
-docker compose -f docker-compose.full.yml up -d
+docker compose -f docker-compose.full.yml up -d --build
 ```
+
+### System Settings UI
+
+FlowLens includes a web-based configuration interface at **System Settings**:
+
+- Configure all services from the browser
+- Test database and service connections
+- Export a customized `docker-compose.yml` with your settings
+- All settings properly escaped for special characters in passwords
+
+To use custom settings:
+
+1. Configure settings in the UI
+2. Click **Export docker-compose.yml**
+3. Replace your `docker-compose.yml` with the exported file
+4. Restart services: `docker compose down && docker compose up -d --build`
 
 ### Environment Variables
 
