@@ -385,13 +385,23 @@ export default function Applications() {
                       <div className="flex items-center gap-3">
                         {/* Entry Point Star */}
                         <button
-                          onClick={() =>
-                            toggleEntryPointMutation.mutate({
-                              appId: selectedApp.id,
-                              assetId: member.asset_id,
-                              isEntryPoint: !member.is_entry_point,
-                            })
-                          }
+                          onClick={() => {
+                            if (member.is_entry_point) {
+                              // Remove entry point
+                              toggleEntryPointMutation.mutate({
+                                appId: selectedApp.id,
+                                assetId: member.asset_id,
+                                isEntryPoint: false,
+                              });
+                            } else {
+                              // Open modal to define entry point with port/protocol
+                              setEditingEntryPoint(member);
+                              setEntryPointForm({
+                                port: '',
+                                protocol: '6',
+                              });
+                            }
+                          }}
                           className="text-slate-400 hover:text-yellow-400"
                           title={member.is_entry_point ? 'Remove entry point' : 'Set as entry point'}
                         >
@@ -702,13 +712,13 @@ export default function Applications() {
         </div>
       )}
 
-      {/* Edit Entry Point Modal */}
+      {/* Set/Edit Entry Point Modal */}
       {editingEntryPoint && selectedApp && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md shadow-xl">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-white">
-                Edit Entry Point: {editingEntryPoint.asset.name}
+                {editingEntryPoint.is_entry_point ? 'Edit' : 'Set'} Entry Point: {editingEntryPoint.asset.name}
               </h2>
               <button
                 onClick={() => setEditingEntryPoint(null)}
@@ -718,9 +728,13 @@ export default function Applications() {
               </button>
             </div>
 
+            <p className="text-sm text-slate-400 mb-4">
+              Define the port and protocol that external clients use to access this application entry point.
+            </p>
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Port</label>
+                <label className="block text-sm text-slate-400 mb-1">Port <span className="text-slate-500">(required)</span></label>
                 <input
                   type="number"
                   min="1"
@@ -771,9 +785,9 @@ export default function Applications() {
                       : null,
                   });
                 }}
-                disabled={updateEntryPointMutation.isPending}
+                disabled={updateEntryPointMutation.isPending || !entryPointForm.port}
               >
-                {updateEntryPointMutation.isPending ? 'Saving...' : 'Save'}
+                {updateEntryPointMutation.isPending ? 'Saving...' : (editingEntryPoint.is_entry_point ? 'Save' : 'Set Entry Point')}
               </Button>
             </div>
           </div>
