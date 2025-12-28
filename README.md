@@ -46,17 +46,17 @@ FlowLens is an open-source platform that ingests network flow data (NetFlow, sFl
                                            │ UDP 2055/6343
                                            ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         FlowLens Backend                              │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐             │
-│  │  Ingestion   │──▶│  Enrichment  │──▶│  Resolution  │             │
-│  │   Service    │   │   Service    │   │   Service    │             │
-│  │              │   │  (DNS/GeoIP) │   │ (Aggregation)│             │
-│  └──────────────┘   └──────────────┘   └──────┬───────┘             │
-│                                                │                      │
-│  ┌──────────────┐                    ┌────────▼───────┐             │
-│  │Classification│◀───────────────────│    REST API    │             │
-│  │   Service    │                    │   (FastAPI)    │             │
-│  └──────────────┘                    └────────┬───────┘             │
+│                         FlowLens Backend                             │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐              │
+│  │  Ingestion   │──▶│  Enrichment  │──▶│  Resolution  │              │
+│  │   Service    │   │   Service    │   │   Service    │              │
+│  │              │   │  (DNS/GeoIP) │   │ (Aggregation)│              │
+│  └──────────────┘   └──────────────┘   └──────┬───────┘              │
+│                                               │                      │
+│  ┌──────────────┐                    ┌────────▼───────┐              │
+│  │Classification│◀───────────────────│    REST API    │              │
+│  │   Service    │                    │   (FastAPI)    │              │
+│  └──────────────┘                    └────────┬───────┘              │
 │                                               │                      │
 └───────────────────────────────────────────────┼──────────────────────┘
                                                 │
