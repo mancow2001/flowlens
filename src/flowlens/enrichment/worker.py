@@ -131,54 +131,62 @@ class EnrichmentWorker:
         db: AsyncSession,
         flow: FlowRecord,
         hostnames: dict[str, str | None],
-    ) -> None:
+    ) -> bool:
         """Enrich a single flow record.
+
+        Uses a savepoint so individual flow failures don't abort the batch.
 
         Args:
             db: Database session.
             flow: Flow record to enrich.
             hostnames: Pre-resolved hostnames.
+
+        Returns:
+            True if enrichment succeeded, False otherwise.
         """
         try:
-            src_ip = str(flow.src_ip)
-            dst_ip = str(flow.dst_ip)
+            # Use savepoint to isolate this flow's operations
+            async with db.begin_nested():
+                src_ip = str(flow.src_ip)
+                dst_ip = str(flow.dst_ip)
 
-            # Get hostnames from batch results
-            src_hostname = hostnames.get(src_ip)
-            dst_hostname = hostnames.get(dst_ip)
+                # Get hostnames from batch results
+                src_hostname = hostnames.get(src_ip)
+                dst_hostname = hostnames.get(dst_ip)
 
-            # Correlate to assets
-            src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
-            dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
+                # Correlate to assets
+                src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
+                dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
 
-            # Get service info
-            service_info = self._protocol_resolver.resolve(flow.dst_port, flow.protocol)
+                # Get service info
+                service_info = self._protocol_resolver.resolve(flow.dst_port, flow.protocol)
 
-            # Build extended fields with enrichment data
-            extended = flow.extended_fields or {}
-            extended["enrichment"] = {
-                "src_hostname": src_hostname,
-                "dst_hostname": dst_hostname,
-                "src_asset_id": str(src_asset_id),
-                "dst_asset_id": str(dst_asset_id),
-                "service_name": service_info.name if service_info else None,
-                "service_category": service_info.category if service_info else None,
-                "is_encrypted": service_info.encrypted if service_info else None,
-                "enriched_at": datetime.utcnow().isoformat(),
-            }
+                # Build extended fields with enrichment data
+                extended = flow.extended_fields or {}
+                extended["enrichment"] = {
+                    "src_hostname": src_hostname,
+                    "dst_hostname": dst_hostname,
+                    "src_asset_id": str(src_asset_id),
+                    "dst_asset_id": str(dst_asset_id),
+                    "service_name": service_info.name if service_info else None,
+                    "service_category": service_info.category if service_info else None,
+                    "is_encrypted": service_info.encrypted if service_info else None,
+                    "enriched_at": datetime.utcnow().isoformat(),
+                }
 
-            # Update flow record
-            await db.execute(
-                update(FlowRecord)
-                .where(
-                    FlowRecord.id == flow.id,
-                    FlowRecord.timestamp == flow.timestamp,
+                # Update flow record
+                await db.execute(
+                    update(FlowRecord)
+                    .where(
+                        FlowRecord.id == flow.id,
+                        FlowRecord.timestamp == flow.timestamp,
+                    )
+                    .values(
+                        is_enriched=True,
+                        extended_fields=extended,
+                    )
                 )
-                .values(
-                    is_enriched=True,
-                    extended_fields=extended,
-                )
-            )
+                return True
 
         except Exception as e:
             logger.warning(
@@ -187,6 +195,7 @@ class EnrichmentWorker:
                 error=str(e),
             )
             ENRICHMENT_ERRORS.labels(error_type="flow_enrichment").inc()
+            return False
 
     @property
     def stats(self) -> dict[str, Any]:

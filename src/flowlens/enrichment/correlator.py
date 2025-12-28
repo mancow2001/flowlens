@@ -80,13 +80,16 @@ class AssetCorrelator:
             return asset_id
 
         # Create new asset (handle race condition with other workers)
+        # Use a nested savepoint so we can handle IntegrityError without
+        # aborting the parent transaction
         try:
-            asset = await self._create_asset(db, ip_str, hostname)
+            async with db.begin_nested():
+                asset = await self._create_asset(db, ip_str, hostname)
             self._ip_cache[ip_str] = asset.id
             return asset.id
         except IntegrityError:
-            # Another worker created the asset - rollback and re-query
-            await db.rollback()
+            # Another worker created the asset - the nested savepoint is automatically
+            # rolled back on exception, so we just need to re-query
             result = await db.execute(
                 select(Asset.id).where(
                     Asset.ip_address == ip_str,
