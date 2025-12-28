@@ -870,7 +870,7 @@ export const gatewayApi = {
 };
 
 // Background Tasks endpoints
-import type { Task, TaskSummary, TaskListResponse } from '../types';
+import type { Task, TaskListResponse } from '../types';
 
 export const tasksApi = {
   list: async (params?: {
