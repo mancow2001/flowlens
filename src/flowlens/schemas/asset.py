@@ -190,10 +190,56 @@ class ApplicationBase(BaseModel):
     metadata: dict | None = None
 
 
+class ApplicationMemberCreate(BaseModel):
+    """Schema for adding an asset to an application."""
+
+    asset_id: UUID
+    role: str | None = Field(None, max_length=50)
+    is_entry_point: bool = False
+    entry_point_order: int | None = None
+
+
+class ApplicationMemberUpdate(BaseModel):
+    """Schema for updating an application member."""
+
+    role: str | None = Field(None, max_length=50)
+    is_entry_point: bool | None = None
+    entry_point_order: int | None = None
+
+
+class ApplicationMemberResponse(BaseModel):
+    """Schema for application member response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    asset_id: UUID
+    asset: AssetSummary
+    role: str | None
+    is_entry_point: bool
+    entry_point_order: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ApplicationCreate(ApplicationBase):
     """Schema for creating an application."""
 
-    asset_ids: list[UUID] | None = None
+    members: list[ApplicationMemberCreate] | None = None
+
+
+class ApplicationUpdate(BaseModel):
+    """Schema for updating an application (all fields optional)."""
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    display_name: str | None = Field(None, max_length=255)
+    description: str | None = None
+    owner: str | None = Field(None, max_length=255)
+    team: str | None = Field(None, max_length=100)
+    environment: str | None = Field(None, max_length=50)
+    criticality: str | None = Field(None, pattern=r"^(low|medium|high|critical)$")
+    tags: dict[str, str] | None = None
+    metadata: dict | None = None
 
 
 class ApplicationResponse(ApplicationBase):
@@ -206,10 +252,20 @@ class ApplicationResponse(ApplicationBase):
     updated_at: datetime
 
 
-class ApplicationWithAssets(ApplicationResponse):
+class ApplicationWithMembers(ApplicationResponse):
     """Application with its member assets."""
 
-    assets: list[AssetSummary]
+    members: list[ApplicationMemberResponse]
+
+
+class ApplicationList(BaseModel):
+    """Paginated list of applications."""
+
+    items: list[ApplicationResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 # Bulk import/export schemas

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import { topologyApi } from '../../services/api';
 import Loading from '../common/Loading';
+import EdgeTooltip from '../topology/EdgeTooltip';
 import type { TopologyNode, TopologyEdge } from '../../types';
 
 interface SimNode extends TopologyNode, d3.SimulationNodeDatum {
@@ -17,6 +18,10 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   id: string;
   target_port: number;
   protocol: number;
+  protocol_name: string | null;
+  service_type: string | null;
+  bytes_last_24h: number;
+  last_seen: string;
   is_critical: boolean;
 }
 
@@ -45,6 +50,10 @@ export default function BlastRadiusTopology({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
   const [hoveredNode, setHoveredNode] = useState<SimNode | null>(null);
+  const [hoveredEdge, setHoveredEdge] = useState<{
+    edge: SimLink;
+    position: { x: number; y: number };
+  } | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
   // Fetch subgraph data
@@ -214,14 +223,51 @@ export default function BlastRadiusTopology({
     const linkGroup = container.append('g').attr('class', 'links');
 
     const link = linkGroup
-      .selectAll('path')
+      .selectAll('path.edge')
       .data(links)
       .join('path')
+      .attr('class', 'edge')
       .attr('stroke', '#475569')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
       .attr('fill', 'none')
-      .attr('marker-end', 'url(#blast-arrowhead)');
+      .attr('marker-end', 'url(#blast-arrowhead)')
+      .style('cursor', 'pointer')
+      .on('mouseenter', function (event, d) {
+        d3.select(this)
+          .attr('stroke-width', 3)
+          .attr('stroke-opacity', 1)
+          .attr('stroke', '#60a5fa');
+        setHoveredEdge({
+          edge: d,
+          position: { x: event.clientX, y: event.clientY },
+        });
+      })
+      .on('mousemove', function (event) {
+        setHoveredEdge(prev => prev ? {
+          ...prev,
+          position: { x: event.clientX, y: event.clientY },
+        } : null);
+      })
+      .on('mouseleave', function () {
+        d3.select(this)
+          .attr('stroke-width', 1.5)
+          .attr('stroke-opacity', 0.6)
+          .attr('stroke', '#475569');
+        setHoveredEdge(null);
+      });
+
+    // Edge port labels
+    const edgeLabels = linkGroup
+      .selectAll('text.edge-label')
+      .data(links)
+      .join('text')
+      .attr('class', 'edge-label')
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#94a3b8')
+      .attr('font-size', 9)
+      .attr('pointer-events', 'none')
+      .text(d => d.target_port.toString());
 
     // Function to create curved path between nodes
     const createCurvedPath = (d: SimLink) => {
@@ -340,9 +386,39 @@ export default function BlastRadiusTopology({
         setHoveredNode(null);
       });
 
+    // Helper to get midpoint of curved path
+    const getCurvedPathMidpoint = (d: SimLink) => {
+      const source = d.source as SimNode;
+      const target = d.target as SimNode;
+      const sourceX = source.x!;
+      const sourceY = source.y!;
+      const targetX = target.x!;
+      const targetY = target.y!;
+
+      // For same-level nodes (arc above)
+      if (Math.abs(sourceY - targetY) < 10) {
+        return {
+          x: (sourceX + targetX) / 2,
+          y: sourceY - 40 + 10, // Midpoint of arc, slightly below apex
+        };
+      }
+
+      // For hierarchical connections (midpoint of bezier)
+      return {
+        x: (sourceX + targetX) / 2,
+        y: (sourceY + targetY) / 2 - 8,
+      };
+    };
+
     // Update positions
     simulation.on('tick', () => {
       link.attr('d', createCurvedPath);
+
+      // Update edge label positions
+      edgeLabels
+        .attr('x', d => getCurvedPathMidpoint(d).x)
+        .attr('y', d => getCurvedPathMidpoint(d).y);
+
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
@@ -489,6 +565,29 @@ export default function BlastRadiusTopology({
           );
         })}
       </div>
+
+      {/* Edge Tooltip */}
+      {hoveredEdge && (
+        <EdgeTooltip
+          edge={{
+            source: {
+              name: (hoveredEdge.edge.source as SimNode).name,
+              ip_address: (hoveredEdge.edge.source as SimNode).ip_address || '',
+            },
+            target: {
+              name: (hoveredEdge.edge.target as SimNode).name,
+              ip_address: (hoveredEdge.edge.target as SimNode).ip_address || '',
+            },
+            target_port: hoveredEdge.edge.target_port,
+            protocol: hoveredEdge.edge.protocol,
+            bytes_last_24h: hoveredEdge.edge.bytes_last_24h,
+            last_seen: hoveredEdge.edge.last_seen,
+            service_type: hoveredEdge.edge.service_type,
+          }}
+          position={hoveredEdge.position}
+          containerBounds={containerRef.current?.getBoundingClientRect()}
+        />
+      )}
     </div>
   );
 }

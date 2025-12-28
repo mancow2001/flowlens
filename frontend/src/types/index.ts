@@ -487,3 +487,89 @@ export interface Task extends TaskSummary {
 }
 
 export interface TaskListResponse extends PaginatedResponse<TaskSummary> {}
+
+// Application types
+export type Criticality = 'low' | 'medium' | 'high' | 'critical';
+
+export interface ApplicationMember {
+  id: string;
+  asset_id: string;
+  asset: AssetSummary;
+  role: string | null;
+  is_entry_point: boolean;
+  entry_point_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Application {
+  id: string;
+  name: string;
+  display_name: string | null;
+  description: string | null;
+  owner: string | null;
+  team: string | null;
+  environment: string | null;
+  criticality: Criticality | null;
+  tags: Record<string, string> | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApplicationWithMembers extends Application {
+  members: ApplicationMember[];
+}
+
+export interface ApplicationMemberCreate {
+  asset_id: string;
+  role?: string | null;
+  is_entry_point?: boolean;
+  entry_point_order?: number | null;
+}
+
+export interface ApplicationCreate {
+  name: string;
+  display_name?: string | null;
+  description?: string | null;
+  owner?: string | null;
+  team?: string | null;
+  environment?: string | null;
+  criticality?: Criticality | null;
+  tags?: Record<string, string> | null;
+  metadata?: Record<string, unknown> | null;
+  members?: ApplicationMemberCreate[];
+}
+
+export interface ApplicationUpdate {
+  name?: string;
+  display_name?: string | null;
+  description?: string | null;
+  owner?: string | null;
+  team?: string | null;
+  environment?: string | null;
+  criticality?: Criticality | null;
+  tags?: Record<string, string> | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface ApplicationMemberUpdate {
+  role?: string | null;
+  is_entry_point?: boolean;
+  entry_point_order?: number | null;
+}
+
+export interface ApplicationListResponse extends PaginatedResponse<Application> {}
+
+// Asset summary type (referenced by ApplicationMember)
+export interface AssetSummary {
+  id: string;
+  name: string;
+  display_name: string | null;
+  asset_type: AssetType;
+  ip_address: string;
+  hostname: string | null;
+  is_internal: boolean;
+  is_critical: boolean;
+  last_seen: string;
+}

@@ -20,6 +20,14 @@ import type {
   GatewayClientsResponse,
   GatewayTopologyData,
   AssetGatewayResponse,
+  Application,
+  ApplicationWithMembers,
+  ApplicationCreate,
+  ApplicationUpdate,
+  ApplicationMember,
+  ApplicationMemberCreate,
+  ApplicationMemberUpdate,
+  ApplicationListResponse,
 } from '../types';
 
 const api = axios.create({
@@ -943,6 +951,83 @@ export const tasksApi = {
 
   getRunningCount: async (): Promise<{ running: number }> => {
     const { data } = await api.get('/tasks/running/count');
+    return data;
+  },
+};
+
+// Applications endpoints
+export const applicationsApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    search?: string;
+    environment?: string;
+    team?: string;
+    criticality?: string;
+  }): Promise<ApplicationListResponse> => {
+    const { data } = await api.get('/applications', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<ApplicationWithMembers> => {
+    const { data } = await api.get(`/applications/${id}`);
+    return data;
+  },
+
+  create: async (application: ApplicationCreate): Promise<ApplicationWithMembers> => {
+    const { data } = await api.post('/applications', application);
+    return data;
+  },
+
+  update: async (id: string, updates: ApplicationUpdate): Promise<Application> => {
+    const { data } = await api.put(`/applications/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/applications/${id}`);
+  },
+
+  // Member management
+  listMembers: async (id: string, entryPointsOnly?: boolean): Promise<ApplicationMember[]> => {
+    const { data } = await api.get(`/applications/${id}/members`, {
+      params: { entryPointsOnly },
+    });
+    return data;
+  },
+
+  addMember: async (id: string, member: ApplicationMemberCreate): Promise<ApplicationMember> => {
+    const { data } = await api.post(`/applications/${id}/members`, member);
+    return data;
+  },
+
+  updateMember: async (
+    applicationId: string,
+    assetId: string,
+    updates: ApplicationMemberUpdate
+  ): Promise<ApplicationMember> => {
+    const { data } = await api.patch(`/applications/${applicationId}/members/${assetId}`, updates);
+    return data;
+  },
+
+  removeMember: async (applicationId: string, assetId: string): Promise<void> => {
+    await api.delete(`/applications/${applicationId}/members/${assetId}`);
+  },
+
+  // Entry point convenience methods
+  setEntryPoint: async (
+    applicationId: string,
+    assetId: string,
+    order?: number
+  ): Promise<ApplicationMember> => {
+    const { data } = await api.post(`/applications/${applicationId}/entry-points/${assetId}`, null, {
+      params: { order },
+    });
+    return data;
+  },
+
+  unsetEntryPoint: async (applicationId: string, assetId: string): Promise<ApplicationMember> => {
+    const { data } = await api.delete(`/applications/${applicationId}/entry-points/${assetId}`);
     return data;
   },
 };

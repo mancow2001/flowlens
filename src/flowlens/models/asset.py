@@ -485,6 +485,16 @@ class ApplicationMember(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
+    # Entry point designation
+    is_entry_point: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+    )
+
+    entry_point_order: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+
     # Relationships
     application: Mapped["Application"] = relationship(
         "Application",
@@ -498,5 +508,9 @@ class ApplicationMember(Base, UUIDMixin, TimestampMixin):
             "ix_app_members_app_asset",
             "application_id", "asset_id",
             unique=True,
+        ),
+        Index(
+            "ix_app_members_entry_points",
+            "application_id", "is_entry_point",
         ),
     )

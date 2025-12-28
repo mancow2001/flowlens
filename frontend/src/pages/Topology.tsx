@@ -5,6 +5,7 @@ import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import FilterPanel from '../components/topology/FilterPanel';
+import EdgeTooltip from '../components/topology/EdgeTooltip';
 import { useTopologyFilters } from '../hooks/useTopologyFilters';
 import { topologyApi, savedViewsApi, gatewayApi } from '../services/api';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
@@ -302,6 +303,12 @@ export default function Topology() {
 
   // Gateway visualization state
   const [showGateways, setShowGateways] = useState(false);
+
+  // Edge hover state for tooltip
+  const [hoveredEdge, setHoveredEdge] = useState<{
+    edge: SimLink;
+    position: { x: number; y: number };
+  } | null>(null);
 
   // Group positions for dragging (persisted across renders)
   const groupPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -862,9 +869,11 @@ export default function Topology() {
       .attr('fill', '#a855f7');
 
     // Create links - with support for aggregated edges and gateway edges
-    const link = container
+    const linksGroup = container
       .append('g')
-      .attr('class', 'links')
+      .attr('class', 'links');
+
+    const link = linksGroup
       .selectAll('line')
       .data(links)
       .join('line')
@@ -879,7 +888,59 @@ export default function Topology() {
       })
       .attr('stroke-opacity', (d) => d.isGatewayEdge ? 0.8 : 0.6)
       .attr('stroke-dasharray', (d) => d.isGatewayEdge ? '6,3' : 'none')
-      .attr('marker-end', (d) => d.isGatewayEdge ? 'url(#arrowhead-gateway)' : 'url(#arrowhead)');
+      .attr('marker-end', (d) => d.isGatewayEdge ? 'url(#arrowhead-gateway)' : 'url(#arrowhead)')
+      .style('cursor', 'pointer')
+      .on('mouseenter', function (event, d) {
+        // Highlight the edge
+        d3.select(this)
+          .attr('stroke-width', (d as SimLink).isGatewayEdge ? 4 : 4)
+          .attr('stroke-opacity', 1);
+
+        // Show tooltip
+        setHoveredEdge({
+          edge: d,
+          position: { x: event.clientX, y: event.clientY },
+        });
+      })
+      .on('mousemove', function (event) {
+        // Update tooltip position on mouse move
+        setHoveredEdge(prev => prev ? {
+          ...prev,
+          position: { x: event.clientX, y: event.clientY },
+        } : null);
+      })
+      .on('mouseleave', function (_event, d) {
+        // Reset edge style
+        d3.select(this)
+          .attr('stroke-width', () => {
+            if ((d as SimLink).isGatewayEdge) return 2;
+            if ((d as SimLink).isAggregated && (d as SimLink).aggregatedCount && (d as SimLink).aggregatedCount! > 1) {
+              return Math.min(2 + (d as SimLink).aggregatedCount!, 8);
+            }
+            return 2;
+          })
+          .attr('stroke-opacity', (d as SimLink).isGatewayEdge ? 0.8 : 0.6);
+
+        // Hide tooltip
+        setHoveredEdge(null);
+      });
+
+    // Create port labels on edges
+    const edgeLabels = linksGroup
+      .selectAll('text.edge-label')
+      .data(links.filter(l => !l.isGatewayEdge))
+      .join('text')
+      .attr('class', 'edge-label')
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#94a3b8')
+      .attr('font-size', 9)
+      .attr('pointer-events', 'none')
+      .text((d) => {
+        if (d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1) {
+          return `${d.aggregatedCount} conn`;
+        }
+        return d.target_port.toString();
+      });
 
     // Create drag behavior for individual nodes
     const dragBehavior = d3
@@ -1048,6 +1109,20 @@ export default function Topology() {
         .attr('y1', (d) => (d.source as SimNode).y!)
         .attr('x2', (d) => (d.target as SimNode).x!)
         .attr('y2', (d) => (d.target as SimNode).y!);
+
+      // Update edge label positions (midpoint of the edge)
+      edgeLabels
+        .attr('x', (d) => {
+          const source = d.source as SimNode;
+          const target = d.target as SimNode;
+          return (source.x! + target.x!) / 2;
+        })
+        .attr('y', (d) => {
+          const source = d.source as SimNode;
+          const target = d.target as SimNode;
+          // Offset slightly above the line
+          return ((source.y! + target.y!) / 2) - 5;
+        });
 
       node.attr('transform', (d) => `translate(${d.x},${d.y})`);
 
@@ -1762,6 +1837,29 @@ export default function Topology() {
           </Card>
         </div>
       </div>
+
+      {/* Edge Tooltip */}
+      {hoveredEdge && (
+        <EdgeTooltip
+          edge={{
+            source: {
+              name: (hoveredEdge.edge.source as SimNode).name,
+              ip_address: (hoveredEdge.edge.source as SimNode).ip_address || '',
+            },
+            target: {
+              name: (hoveredEdge.edge.target as SimNode).name,
+              ip_address: (hoveredEdge.edge.target as SimNode).ip_address || '',
+            },
+            target_port: hoveredEdge.edge.target_port,
+            protocol: hoveredEdge.edge.protocol,
+            bytes_last_24h: hoveredEdge.edge.bytes_last_24h,
+            last_seen: hoveredEdge.edge.last_seen,
+            service_type: hoveredEdge.edge.service_type,
+          }}
+          position={hoveredEdge.position}
+          containerBounds={containerRef.current?.getBoundingClientRect()}
+        />
+      )}
     </div>
   );
 }
