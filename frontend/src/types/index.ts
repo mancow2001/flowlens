@@ -435,3 +435,44 @@ export interface GatewayClientsResponse {
   clients: GatewayRelationship[];
   total_clients: number;
 }
+
+// Background Task types
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type TaskType =
+  | 'apply_classification_rules'
+  | 'bulk_asset_update'
+  | 'bulk_asset_delete'
+  | 'export_assets'
+  | 'import_assets';
+
+export interface TaskSummary {
+  id: string;
+  task_type: TaskType;
+  name: string;
+  status: TaskStatus;
+  progress_percent: number;
+  total_items: number;
+  processed_items: number;
+  successful_items: number;
+  failed_items: number;
+  skipped_items: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface Task extends TaskSummary {
+  description: string | null;
+  duration_seconds: number | null;
+  parameters: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  error_message: string | null;
+  error_details: Record<string, unknown> | null;
+  triggered_by: string | null;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  updated_at: string;
+}
+
+export interface TaskListResponse extends PaginatedResponse<TaskSummary> {}

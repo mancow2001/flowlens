@@ -814,7 +814,7 @@ async def update_asset(
     db: DbSession,
     user: AuthenticatedUser,
 ) -> AssetResponse:
-    """Update an asset."""
+    """Update an asset (full replacement)."""
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.deleted_at.is_(None))
     )
@@ -827,6 +827,36 @@ async def update_asset(
         )
 
     # Update fields
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(asset, field, value)
+
+    await db.flush()
+    await db.refresh(asset)
+
+    return AssetResponse.model_validate(asset)
+
+
+@router.patch("/{asset_id}", response_model=AssetResponse)
+async def patch_asset(
+    asset_id: UUID,
+    data: AssetUpdate,
+    db: DbSession,
+    user: AuthenticatedUser,
+) -> AssetResponse:
+    """Partially update an asset."""
+    result = await db.execute(
+        select(Asset).where(Asset.id == asset_id, Asset.deleted_at.is_(None))
+    )
+    asset = result.scalar_one_or_none()
+
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset {asset_id} not found",
+        )
+
+    # Update only provided fields
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(asset, field, value)

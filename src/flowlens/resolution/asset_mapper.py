@@ -8,7 +8,7 @@ from datetime import datetime
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.common.logging import get_logger
@@ -83,6 +83,49 @@ class AssetMapper:
 
         return asset.id
 
+    async def _get_cidr_classification(
+        self,
+        db: AsyncSession,
+        ip_str: str,
+    ) -> dict | None:
+        """Get CIDR classification for an IP address.
+
+        Args:
+            db: Database session.
+            ip_str: IP address string.
+
+        Returns:
+            Classification dict or None if no matching rule.
+        """
+        try:
+            result = await db.execute(
+                text("SELECT * FROM get_ip_classification(CAST(:ip_addr AS inet))"),
+                {"ip_addr": ip_str},
+            )
+            row = result.fetchone()
+
+            if row and row.rule_id is not None:
+                return {
+                    "rule_id": row.rule_id,
+                    "rule_name": row.rule_name,
+                    "environment": row.environment,
+                    "datacenter": row.datacenter,
+                    "location": row.location,
+                    "asset_type": row.asset_type,
+                    "is_internal": row.is_internal,
+                    "default_owner": row.default_owner,
+                    "default_team": row.default_team,
+                }
+        except Exception as e:
+            # Log but don't fail asset creation if classification fails
+            logger.warning(
+                "Failed to get CIDR classification",
+                ip=ip_str,
+                error=str(e),
+            )
+
+        return None
+
     async def _create_asset(
         self,
         db: AsyncSession,
@@ -99,8 +142,15 @@ class AssetMapper:
         Returns:
             Created asset.
         """
+        # First check CIDR classification rules
+        cidr_class = await self._get_cidr_classification(db, ip_str)
+
         # Determine if internal or external
-        is_internal = self._classifier.is_private(ip_str)
+        # CIDR rules take priority, then fall back to RFC 1918 check
+        if cidr_class and cidr_class.get("is_internal") is not None:
+            is_internal = cidr_class["is_internal"]
+        else:
+            is_internal = self._classifier.is_private(ip_str)
 
         # Generate name
         if hostname:
@@ -122,6 +172,16 @@ class AssetMapper:
                 country_code = geo_result.country_code
                 city = geo_result.city
 
+        # Apply CIDR classification for location if available
+        if cidr_class and cidr_class.get("location"):
+            city = cidr_class["location"]
+
+        # Get environment and datacenter from CIDR rules
+        environment = cidr_class.get("environment") if cidr_class else None
+        datacenter = cidr_class.get("datacenter") if cidr_class else None
+        owner = cidr_class.get("default_owner") if cidr_class else None
+        team = cidr_class.get("default_team") if cidr_class else None
+
         # Create asset
         asset = Asset(
             name=name,
@@ -133,6 +193,10 @@ class AssetMapper:
             is_critical=False,
             country_code=country_code,
             city=city,
+            environment=environment,
+            datacenter=datacenter,
+            owner=owner,
+            team=team,
         )
 
         db.add(asset)
@@ -144,6 +208,7 @@ class AssetMapper:
             ip=ip_str,
             hostname=hostname,
             is_internal=is_internal,
+            cidr_rule=cidr_class.get("rule_name") if cidr_class else None,
         )
 
         ASSETS_DISCOVERED.labels(

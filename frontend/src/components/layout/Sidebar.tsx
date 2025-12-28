@@ -13,6 +13,7 @@ import {
   AdjustmentsHorizontalIcon,
   WrenchScrewdriverIcon,
   Cog6ToothIcon,
+  QueueListIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
 import clsx from 'clsx';
@@ -25,6 +26,7 @@ const navigation = [
   { name: 'Alerts', href: '/alerts', icon: BellAlertIcon },
   { name: 'Changes', href: '/changes', icon: ClockIcon },
   { name: 'Analysis', href: '/analysis', icon: BeakerIcon },
+  { name: 'Tasks', href: '/tasks', icon: QueueListIcon },
 ];
 
 const settingsNavigation = [

@@ -869,4 +869,49 @@ export const gatewayApi = {
   },
 };
 
+// Background Tasks endpoints
+import type { Task, TaskSummary, TaskListResponse } from '../types';
+
+export const tasksApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    status?: string;
+    taskType?: string;
+  }): Promise<TaskListResponse> => {
+    const { data } = await api.get('/tasks', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<Task> => {
+    const { data } = await api.get(`/tasks/${id}`);
+    return data;
+  },
+
+  cancel: async (id: string): Promise<Task> => {
+    const { data } = await api.post(`/tasks/${id}/cancel`);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/tasks/${id}`);
+  },
+
+  applyClassificationRules: async (params?: {
+    force?: boolean;
+    ruleId?: string;
+  }): Promise<Task> => {
+    const { data } = await api.post('/tasks/apply-classification-rules', {
+      force: params?.force ?? false,
+      rule_id: params?.ruleId,
+    });
+    return data;
+  },
+
+  getRunningCount: async (): Promise<{ running: number }> => {
+    const { data } = await api.get('/tasks/running/count');
+    return data;
+  },
+};
+
 export default api;
