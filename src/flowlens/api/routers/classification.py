@@ -21,8 +21,7 @@ from flowlens.schemas.classification import (
     IPClassificationMatch,
     IPClassificationResult,
 )
-from flowlens.tasks.classification_task import ClassificationRuleTask
-from flowlens.tasks.executor import TaskExecutor, run_task_in_background
+from flowlens.tasks.executor import TaskExecutor, run_task_in_background, run_classification_task_with_new_session
 
 logger = get_logger(__name__)
 
@@ -62,11 +61,10 @@ async def _trigger_classification_task(
 
         await db.commit()
 
-        # Run task in background
-        classification_task = ClassificationRuleTask(db, executor)
+        # Run task in background with its own session
         run_task_in_background(
             task.id,
-            classification_task.run(task.id, force=False, rule_id=rule_id),
+            run_classification_task_with_new_session(task.id, force=False, rule_id=rule_id),
         )
 
         logger.info(

@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flowlens.common.database import get_session_factory
 from flowlens.common.logging import get_logger
 from flowlens.models.task import BackgroundTask, TaskStatus
 
@@ -18,6 +19,39 @@ logger = get_logger(__name__)
 
 # Global registry of running tasks
 _running_tasks: dict[UUID, asyncio.Task] = {}
+
+
+async def run_classification_task_with_new_session(
+    task_id: UUID,
+    force: bool,
+    rule_id: UUID | None,
+) -> None:
+    """Run classification task with its own database session.
+
+    This avoids session sharing issues with the request session.
+    """
+    from flowlens.tasks.classification_task import ClassificationRuleTask
+
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        try:
+            executor = TaskExecutor(db)
+            task = ClassificationRuleTask(db, executor)
+            await task.run(task_id, force, rule_id)
+        except Exception as e:
+            logger.exception("Background task failed", task_id=str(task_id))
+            # Try to mark task as failed
+            try:
+                result = await db.execute(
+                    select(BackgroundTask).where(BackgroundTask.id == task_id)
+                )
+                bg_task = result.scalar_one_or_none()
+                if bg_task and not bg_task.is_complete:
+                    bg_task.fail(str(e), {"exception_type": type(e).__name__})
+                    await db.commit()
+            except Exception:
+                pass
+            raise
 
 
 class TaskExecutor:
