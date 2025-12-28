@@ -52,7 +52,7 @@ This guide provides comprehensive instructions for deploying, configuring, and m
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Load Balancer                             │
+│                        Load Balancer                            │
 │                      (nginx/traefik)                            │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
