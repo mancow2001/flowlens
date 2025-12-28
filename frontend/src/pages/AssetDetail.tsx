@@ -16,7 +16,8 @@ import Table from '../components/common/Table';
 import { LoadingPage } from '../components/common/Loading';
 import { assetApi, analysisApi, classificationApi, gatewayApi } from '../services/api';
 import { formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
-import type { Dependency, Asset, GatewayRelationship } from '../types';
+import type { Dependency, Asset, GatewayRelationship, Environment } from '../types';
+import { ENVIRONMENT_OPTIONS } from '../types';
 
 const ASSET_TYPES = [
   'server',
@@ -68,6 +69,7 @@ export default function AssetDetail() {
         name: asset.name,
         hostname: asset.hostname,
         asset_type: asset.asset_type,
+        environment: asset.environment,
         owner: asset.owner,
         team: asset.team,
         description: asset.description,
@@ -309,7 +311,26 @@ export default function AssetDetail() {
             </div>
             <div>
               <dt className="text-sm text-slate-400">Environment</dt>
-              <dd className="text-white">{asset.environment || '-'}</dd>
+              {isEditing ? (
+                <select
+                  value={editForm.environment || ''}
+                  onChange={(e) => setEditForm({ ...editForm, environment: (e.target.value || null) as Environment | null })}
+                  className="w-full mt-1 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Not specified</option>
+                  {ENVIRONMENT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <dd className="text-white">
+                  {asset.environment
+                    ? ENVIRONMENT_OPTIONS.find(o => o.value === asset.environment)?.label || asset.environment
+                    : '-'}
+                </dd>
+              )}
             </div>
             <div>
               <dt className="text-sm text-slate-400">Datacenter</dt>

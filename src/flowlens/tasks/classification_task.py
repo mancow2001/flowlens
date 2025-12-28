@@ -203,7 +203,7 @@ class ClassificationRuleTask:
 
         Args:
             asset: Asset to process.
-            force: If True, overwrite existing values.
+            force: If True, overwrite existing values (including clearing them).
             rule_id: If specified, only apply this rule.
 
         Returns:
@@ -233,30 +233,46 @@ class ClassificationRuleTask:
             if force or asset.is_internal != row.is_internal:
                 changes["is_internal"] = {"old": asset.is_internal, "new": row.is_internal}
 
-        # environment - only update if force or currently empty
-        if row.environment and (force or not asset.environment):
+        # When force=True (rule update), we apply the rule's value even if it's None
+        # (to clear asset fields when rule fields are cleared).
+        # When force=False (new rule), we only set values if the asset field is empty.
+
+        # environment
+        if force:
+            # Force mode: apply whatever the rule says (including None to clear)
             if asset.environment != row.environment:
                 changes["environment"] = {"old": asset.environment, "new": row.environment}
+        elif row.environment and not asset.environment:
+            # Non-force mode: only set if rule has value and asset is empty
+            changes["environment"] = {"old": asset.environment, "new": row.environment}
 
-        # datacenter - only update if force or currently empty
-        if row.datacenter and (force or not asset.datacenter):
+        # datacenter
+        if force:
             if asset.datacenter != row.datacenter:
                 changes["datacenter"] = {"old": asset.datacenter, "new": row.datacenter}
+        elif row.datacenter and not asset.datacenter:
+            changes["datacenter"] = {"old": asset.datacenter, "new": row.datacenter}
 
         # location (maps to city field on asset)
-        if row.location and (force or not asset.city):
+        if force:
             if asset.city != row.location:
                 changes["city"] = {"old": asset.city, "new": row.location}
+        elif row.location and not asset.city:
+            changes["city"] = {"old": asset.city, "new": row.location}
 
-        # owner - only update if force or currently empty
-        if row.default_owner and (force or not asset.owner):
+        # owner
+        if force:
             if asset.owner != row.default_owner:
                 changes["owner"] = {"old": asset.owner, "new": row.default_owner}
+        elif row.default_owner and not asset.owner:
+            changes["owner"] = {"old": asset.owner, "new": row.default_owner}
 
-        # team - only update if force or currently empty
-        if row.default_team and (force or not asset.team):
+        # team
+        if force:
             if asset.team != row.default_team:
                 changes["team"] = {"old": asset.team, "new": row.default_team}
+        elif row.default_team and not asset.team:
+            changes["team"] = {"old": asset.team, "new": row.default_team}
 
         if not changes:
             return True, False, {}

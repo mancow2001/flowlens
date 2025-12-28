@@ -4,6 +4,7 @@ import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import { classificationApi, ClassificationRule, ClassificationRuleSummary } from '../services/api';
+import { ENVIRONMENT_OPTIONS } from '../types';
 
 interface RuleFormData {
   name: string;
@@ -359,13 +360,18 @@ export default function ClassificationRules() {
 
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">Environment</label>
-                  <input
-                    type="text"
+                  <select
                     value={formData.environment}
                     onChange={(e) => setFormData({ ...formData, environment: e.target.value })}
-                    placeholder="e.g., production"
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Not specified</option>
+                    {ENVIRONMENT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

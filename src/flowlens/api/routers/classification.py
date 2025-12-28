@@ -45,6 +45,11 @@ async def _trigger_classification_task(
     Returns:
         Task ID if created, None if skipped.
     """
+    # When a rule is updated, we want to force-apply the new values
+    # to all assets matching that rule, since the user explicitly changed it.
+    # For new rules, we don't force (only fill empty fields).
+    force = action == "updated"
+
     try:
         executor = TaskExecutor(db)
 
@@ -53,7 +58,7 @@ async def _trigger_classification_task(
             task_type=TaskType.APPLY_CLASSIFICATION_RULES.value,
             name=f"Apply Classification Rules ({action}: {rule_name})",
             description=f"Automatically triggered after rule '{rule_name}' was {action}",
-            parameters={"rule_id": str(rule_id), "force": False},
+            parameters={"rule_id": str(rule_id), "force": force},
             triggered_by="rule_change",
             related_entity_type="classification_rule",
             related_entity_id=rule_id,
@@ -64,7 +69,7 @@ async def _trigger_classification_task(
         # Run task in background with its own session
         run_task_in_background(
             task.id,
-            run_classification_task_with_new_session(task.id, force=False, rule_id=rule_id),
+            run_classification_task_with_new_session(task.id, force=force, rule_id=rule_id),
         )
 
         logger.info(

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, field_validator
 
-from flowlens.models.asset import AssetType
+from flowlens.models.asset import AssetType, Environment
 
 
 class AssetBase(BaseModel):
@@ -22,7 +22,7 @@ class AssetBase(BaseModel):
     subnet: str | None = None
     vlan_id: int | None = Field(None, ge=0, le=4095)
     datacenter: str | None = Field(None, max_length=100)
-    environment: str | None = Field(None, max_length=50)
+    environment: Environment | None = None
     is_internal: bool = True
     is_critical: bool = False
     criticality_score: int = Field(0, ge=0, le=100)
@@ -52,7 +52,7 @@ class AssetUpdate(BaseModel):
     subnet: str | None = None
     vlan_id: int | None = Field(None, ge=0, le=4095)
     datacenter: str | None = Field(None, max_length=100)
-    environment: str | None = Field(None, max_length=50)
+    environment: Environment | None = None
     is_internal: bool | None = None
     is_critical: bool | None = None
     criticality_score: int | None = Field(None, ge=0, le=100)

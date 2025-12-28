@@ -42,6 +42,16 @@ class AssetType(str, Enum):
     UNKNOWN = "unknown"
 
 
+class Environment(str, Enum):
+    """Environment types for assets and classification rules."""
+
+    PROD = "prod"
+    UAT = "uat"
+    QA = "qa"
+    TEST = "test"
+    DEV = "dev"
+
+
 class Asset(SoftDeleteModel):
     """Network asset (node in the dependency graph).
 

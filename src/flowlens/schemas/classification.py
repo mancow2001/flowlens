@@ -6,6 +6,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 import ipaddress
 
+from flowlens.models.asset import Environment
+
 
 class ClassificationRuleBase(BaseModel):
     """Base schema for classification rule data."""
@@ -14,7 +16,7 @@ class ClassificationRuleBase(BaseModel):
     description: str | None = None
     cidr: str = Field(..., description="CIDR notation (e.g., 10.0.0.0/8)")
     priority: int = Field(100, ge=0, le=1000, description="Lower priority wins for equal prefix lengths")
-    environment: str | None = Field(None, max_length=50)
+    environment: Environment | None = None
     datacenter: str | None = Field(None, max_length=100)
     location: str | None = Field(None, max_length=100)
     asset_type: str | None = Field(None, max_length=50)
@@ -47,7 +49,7 @@ class ClassificationRuleUpdate(BaseModel):
     description: str | None = None
     cidr: str | None = None
     priority: int | None = Field(None, ge=0, le=1000)
-    environment: str | None = Field(None, max_length=50)
+    environment: Environment | None = None
     datacenter: str | None = Field(None, max_length=100)
     location: str | None = Field(None, max_length=100)
     asset_type: str | None = Field(None, max_length=50)

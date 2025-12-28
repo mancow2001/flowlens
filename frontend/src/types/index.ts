@@ -11,7 +11,7 @@ export interface Asset {
   subnet: string | null;
   vlan_id: number | null;
   datacenter: string | null;
-  environment: string | null;
+  environment: Environment | null;
   country_code: string | null;
   city: string | null;
   is_internal: boolean;
@@ -48,6 +48,17 @@ export type AssetType =
   | 'cloud_service'
   | 'group'
   | 'unknown';
+
+// Environment enum values
+export type Environment = 'prod' | 'uat' | 'qa' | 'test' | 'dev';
+
+export const ENVIRONMENT_OPTIONS: { value: Environment; label: string }[] = [
+  { value: 'prod', label: 'Production' },
+  { value: 'uat', label: 'UAT' },
+  { value: 'qa', label: 'QA' },
+  { value: 'test', label: 'Test' },
+  { value: 'dev', label: 'Development' },
+];
 
 export interface Service {
   id: string;
@@ -129,7 +140,7 @@ export interface TopologyNode {
   ip_address: string | null;
   is_internal: boolean;
   is_critical: boolean;
-  environment: string | null;
+  environment: Environment | null;
   datacenter: string | null;
   location?: string | null;
   connections_in: number;
