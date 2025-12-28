@@ -413,15 +413,25 @@ def generate_docker_compose_yaml() -> str:
     """
     settings = get_settings()
 
-    # Apply any pending overrides
+    # Helper to escape special characters for docker-compose
+    # $ must be escaped as $$ to prevent variable interpolation
+    def esc(value: str | None) -> str:
+        if value is None:
+            return ""
+        return str(value).replace("$", "$$")
+
+    # Apply any pending overrides (with escaping for docker-compose)
     def get_val(env_key: str, default: str) -> str:
-        return _settings_overrides.get(env_key, default)
+        return esc(_settings_overrides.get(env_key, default))
 
     # Get current values (with overrides applied)
+    # All string values are escaped to handle $ and other special chars in passwords
     postgres_host = "postgres"
     postgres_port = get_val("POSTGRES_PORT", str(settings.database.port))
     postgres_user = get_val("POSTGRES_USER", settings.database.user)
-    postgres_password = get_val("POSTGRES_PASSWORD", settings.database.password.get_secret_value())
+    postgres_password = esc(
+        _settings_overrides.get("POSTGRES_PASSWORD", settings.database.password.get_secret_value())
+    )
     postgres_db = get_val("POSTGRES_DATABASE", settings.database.database)
 
     log_level = get_val("LOG_LEVEL", settings.logging.level)
@@ -469,8 +479,6 @@ def generate_docker_compose_yaml() -> str:
         "# FlowLens Docker Compose - Minimal Configuration",
         "# PostgreSQL only, suitable for <10k flows/sec",
         f"# Generated from System Settings on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "",
-        'version: "3.8"',
         "",
         "# Shared environment variable definitions",
         "x-db-env: &db-env",

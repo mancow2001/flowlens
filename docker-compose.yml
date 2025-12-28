@@ -1,8 +1,6 @@
 # FlowLens Docker Compose - Minimal Configuration
 # PostgreSQL only, suitable for <10k flows/sec
 
-version: "3.8"
-
 # Shared environment variable definitions
 x-db-env: &db-env
   POSTGRES_HOST: postgres
