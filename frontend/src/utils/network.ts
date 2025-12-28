@@ -123,3 +123,21 @@ export function isUDP(protocol: number): boolean {
 export function isICMP(protocol: number): boolean {
   return protocol === 1 || protocol === 58; // ICMPv4 or ICMPv6
 }
+
+/**
+ * Format bytes to human-readable string.
+ * @param bytes - Number of bytes
+ * @returns Formatted string (e.g., "1.5 GB", "256 KB")
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const k = 1024;
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  if (i === 0) return `${bytes} ${units[0]}`;
+
+  const value = bytes / Math.pow(k, i);
+  return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[i]}`;
+}

@@ -5,6 +5,7 @@ import * as d3 from 'd3';
 import {
   ArrowLeftIcon,
   InformationCircleIcon,
+  UsersIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -12,8 +13,8 @@ import Badge from '../components/common/Badge';
 import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import { applicationsApi } from '../services/api';
-import { getProtocolName, formatProtocolPort } from '../utils/network';
-import type { AssetType } from '../types';
+import { getProtocolName, formatProtocolPort, formatBytes } from '../utils/network';
+import type { AssetType, InboundSummary } from '../types';
 
 // D3 simulation node extending the API response
 interface SimNode extends d3.SimulationNodeDatum {
@@ -21,7 +22,7 @@ interface SimNode extends d3.SimulationNodeDatum {
   name: string;
   display_name: string | null;
   ip_address: string;
-  asset_type: AssetType;
+  asset_type: AssetType | 'client_summary';
   is_entry_point: boolean;
   entry_point_port: number | null;
   entry_point_protocol: number | null;
@@ -29,6 +30,11 @@ interface SimNode extends d3.SimulationNodeDatum {
   role: string | null;
   is_critical: boolean;
   is_external?: boolean;
+  // For client summary nodes
+  is_client_summary?: boolean;
+  client_count?: number;
+  total_bytes_24h?: number;
+  target_entry_point_id?: string;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -39,6 +45,7 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   bytes_last_24h: number | null;
   last_seen: string | null;
   is_internal: boolean;
+  is_from_client_summary?: boolean;
 }
 
 // Color scheme for nodes
@@ -47,6 +54,14 @@ const NODE_COLORS = {
   internal: '#3b82f6', // blue for internal members
   external: '#6b7280', // gray for external
   critical: '#ef4444', // red for critical
+  client_summary: '#10b981', // green for client summary
+};
+
+// Layout positions
+const LAYOUT = {
+  clientX: 100,     // X position for client summary nodes (left)
+  entryPointX: 300, // X position for entry points (center-left)
+  memberX: 550,     // Starting X for other members (right)
 };
 
 export default function ApplicationDetail() {
@@ -69,21 +84,99 @@ export default function ApplicationDetail() {
     enabled: !!id,
   });
 
-  // Transform data for D3
+  // Transform data for D3 with hierarchical layout
   const { nodes, links } = useMemo(() => {
     if (!topology) return { nodes: [], links: [] };
 
-    const simNodes: SimNode[] = topology.nodes.map((node) => ({
-      ...node,
-      x: undefined,
-      y: undefined,
-    }));
+    const { height } = dimensions;
+    const simNodes: SimNode[] = [];
+    const simLinks: SimLink[] = [];
 
-    const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
+    // Find entry points and non-entry-point members
+    const entryPointNodes = topology.nodes.filter(n => n.is_entry_point);
+    const memberNodes = topology.nodes.filter(n => !n.is_entry_point);
 
-    const simLinks: SimLink[] = topology.edges
-      .filter((edge) => nodeMap.has(edge.source) && nodeMap.has(edge.target))
-      .map((edge, i) => ({
+    // Calculate Y positions for entry points (evenly distributed)
+    const entryPointYSpacing = height / (entryPointNodes.length + 1);
+
+    // Create entry point nodes at center-left position
+    entryPointNodes.forEach((node, i) => {
+      simNodes.push({
+        ...node,
+        x: LAYOUT.entryPointX,
+        y: entryPointYSpacing * (i + 1),
+        fx: LAYOUT.entryPointX, // Fixed X position
+      });
+    });
+
+    // Create client summary nodes from inbound_summary (left side)
+    if (topology.inbound_summary) {
+      topology.inbound_summary.forEach((summary: InboundSummary) => {
+        if (summary.client_count === 0) return; // Skip if no clients
+
+        // Find the Y position of the corresponding entry point
+        const entryPointIndex = entryPointNodes.findIndex(
+          n => n.id === summary.entry_point_asset_id
+        );
+        const yPos = entryPointYSpacing * (entryPointIndex + 1);
+
+        const clientNodeId = `client-summary-${summary.entry_point_asset_id}`;
+
+        simNodes.push({
+          id: clientNodeId,
+          name: `${summary.client_count} clients`,
+          display_name: null,
+          ip_address: '',
+          asset_type: 'client_summary',
+          is_entry_point: false,
+          entry_point_port: summary.port,
+          entry_point_protocol: summary.protocol,
+          entry_point_order: null,
+          role: null,
+          is_critical: false,
+          is_external: true,
+          is_client_summary: true,
+          client_count: summary.client_count,
+          total_bytes_24h: summary.total_bytes_24h,
+          target_entry_point_id: summary.entry_point_asset_id,
+          x: LAYOUT.clientX,
+          y: yPos,
+          fx: LAYOUT.clientX, // Fixed X position
+          fy: yPos, // Fixed Y position to align with entry point
+        });
+
+        // Create edge from client summary to entry point
+        simLinks.push({
+          id: `${clientNodeId}-${summary.entry_point_asset_id}`,
+          source: clientNodeId,
+          target: summary.entry_point_asset_id,
+          target_port: summary.port,
+          protocol: summary.protocol ?? 6,
+          dependency_type: null,
+          bytes_last_24h: summary.total_bytes_24h,
+          last_seen: null,
+          is_internal: false,
+          is_from_client_summary: true,
+        });
+      });
+    }
+
+    // Create member nodes (right side) - these will be positioned by the simulation
+    const memberYSpacing = height / (memberNodes.length + 1);
+    memberNodes.forEach((node, i) => {
+      simNodes.push({
+        ...node,
+        x: LAYOUT.memberX + Math.random() * 100,
+        y: memberYSpacing * (i + 1),
+      });
+    });
+
+    // Create edges from topology.edges
+    const nodeMap = new Map(simNodes.map(n => [n.id, n]));
+    topology.edges.forEach((edge, i) => {
+      if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) return;
+
+      simLinks.push({
         id: `${edge.source}-${edge.target}-${i}`,
         source: edge.source,
         target: edge.target,
@@ -93,10 +186,12 @@ export default function ApplicationDetail() {
         bytes_last_24h: edge.bytes_last_24h,
         last_seen: edge.last_seen,
         is_internal: edge.is_internal,
-      }));
+        is_from_client_summary: false,
+      });
+    });
 
     return { nodes: simNodes, links: simLinks };
-  }, [topology]);
+  }, [topology, dimensions]);
 
   // Handle container resize
   useEffect(() => {
@@ -118,14 +213,14 @@ export default function ApplicationDetail() {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // D3 force simulation
+  // D3 force simulation with hierarchical layout
   useEffect(() => {
     if (!svgRef.current || nodes.length === 0) return;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
 
-    const { width, height } = dimensions;
+    const { height } = dimensions;
 
     // Create zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -155,7 +250,21 @@ export default function ApplicationDetail() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#64748b');
 
-    // Entry point marker (star shape)
+    // Client summary marker (green)
+    defs
+      .append('marker')
+      .attr('id', 'client-arrowhead')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 20)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#10b981');
+
+    // Entry point marker (yellow)
     defs
       .append('marker')
       .attr('id', 'entry-point-marker')
@@ -169,7 +278,7 @@ export default function ApplicationDetail() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#eab308');
 
-    // Create simulation
+    // Create simulation with horizontal force to push members right
     const simulation = d3
       .forceSimulation<SimNode>(nodes)
       .force(
@@ -178,10 +287,22 @@ export default function ApplicationDetail() {
           .forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
           .distance(120)
+          .strength(0.3) // Weaker links to allow position forces to work
       )
-      .force('charge', d3.forceManyBody().strength(-400))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(40));
+      .force('charge', d3.forceManyBody().strength(-300))
+      .force('collision', d3.forceCollide().radius(45))
+      // Push non-fixed nodes towards the right side
+      .force('x', d3.forceX<SimNode>()
+        .x((d) => {
+          if (d.fx !== undefined && d.fx !== null) return d.fx; // Fixed nodes stay
+          return LAYOUT.memberX + 100; // Members pulled right
+        })
+        .strength(0.3)
+      )
+      .force('y', d3.forceY<SimNode>()
+        .y(height / 2)
+        .strength(0.05) // Weak vertical centering
+      );
 
     // Draw links
     const linksGroup = g.append('g').attr('class', 'links');
@@ -190,10 +311,13 @@ export default function ApplicationDetail() {
       .data(links)
       .join('path')
       .attr('fill', 'none')
-      .attr('stroke', (d) => (d.is_internal ? '#64748b' : '#374151'))
-      .attr('stroke-width', 2)
+      .attr('stroke', (d) => d.is_from_client_summary ? '#10b981' : '#64748b')
+      .attr('stroke-width', (d) => d.is_from_client_summary ? 3 : 2)
       .attr('stroke-opacity', 0.6)
-      .attr('marker-end', 'url(#arrowhead)')
+      .attr('stroke-dasharray', (d) => d.is_from_client_summary ? '5,5' : 'none')
+      .attr('marker-end', (d) =>
+        d.is_from_client_summary ? 'url(#client-arrowhead)' : 'url(#arrowhead)'
+      )
       .style('cursor', 'pointer')
       .on('mouseenter', function (event, d) {
         d3.select(this).attr('stroke-width', 4).attr('stroke-opacity', 1);
@@ -207,8 +331,10 @@ export default function ApplicationDetail() {
           prev ? { ...prev, position: { x: event.clientX, y: event.clientY } } : null
         );
       })
-      .on('mouseleave', function () {
-        d3.select(this).attr('stroke-width', 2).attr('stroke-opacity', 0.6);
+      .on('mouseleave', function (_, d) {
+        d3.select(this)
+          .attr('stroke-width', d.is_from_client_summary ? 3 : 2)
+          .attr('stroke-opacity', 0.6);
         setHoveredEdge(null);
       });
 
@@ -220,7 +346,7 @@ export default function ApplicationDetail() {
       .attr('class', 'edge-label')
       .attr('text-anchor', 'middle')
       .attr('fill', '#94a3b8')
-      .attr('font-size', 9)
+      .attr('font-size', 10)
       .attr('pointer-events', 'none')
       .text((d) => d.target_port?.toString() || '');
 
@@ -245,23 +371,52 @@ export default function ApplicationDetail() {
           })
           .on('end', (event, d) => {
             if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
+            // Only release non-fixed nodes
+            if (!d.is_entry_point && !d.is_client_summary) {
+              d.fx = null;
+              d.fy = null;
+            }
           })
       )
       .on('mouseenter', function (_, d) {
         setHoveredNode(d);
-        d3.select(this).select('circle').attr('stroke-width', 3);
+        d3.select(this).select('circle,rect').attr('stroke-width', 3);
       })
       .on('mouseleave', function () {
         setHoveredNode(null);
-        d3.select(this).select('circle').attr('stroke-width', 1.5);
+        d3.select(this).select('circle,rect').attr('stroke-width', 1.5);
       });
 
-    // Node circles
+    // Client summary nodes as rounded rectangles
     nodeElements
+      .filter((d) => d.is_client_summary === true)
+      .append('rect')
+      .attr('x', -30)
+      .attr('y', -20)
+      .attr('width', 60)
+      .attr('height', 40)
+      .attr('rx', 8)
+      .attr('ry', 8)
+      .attr('fill', NODE_COLORS.client_summary)
+      .attr('stroke', '#1e293b')
+      .attr('stroke-width', 1.5);
+
+    // Client summary icon and count
+    nodeElements
+      .filter((d) => d.is_client_summary === true)
+      .append('text')
+      .attr('text-anchor', 'middle')
+      .attr('dominant-baseline', 'central')
+      .attr('fill', '#1e293b')
+      .attr('font-size', 14)
+      .attr('font-weight', 'bold')
+      .text((d) => d.client_count?.toString() || '0');
+
+    // Regular node circles (non-client-summary)
+    nodeElements
+      .filter((d) => !d.is_client_summary)
       .append('circle')
-      .attr('r', (d) => (d.is_entry_point ? 16 : 12))
+      .attr('r', (d) => (d.is_entry_point ? 18 : 14))
       .attr('fill', (d) => {
         if (d.is_entry_point) return NODE_COLORS.entry_point;
         if (d.is_external) return NODE_COLORS.external;
@@ -278,23 +433,45 @@ export default function ApplicationDetail() {
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'central')
       .attr('fill', '#1e293b')
-      .attr('font-size', 12)
+      .attr('font-size', 14)
       .text('★');
 
     // Node labels
     nodeElements
       .append('text')
-      .attr('dy', 28)
+      .attr('dy', (d) => d.is_client_summary ? 35 : 32)
       .attr('text-anchor', 'middle')
       .attr('fill', '#e2e8f0')
       .attr('font-size', 11)
-      .text((d) => d.display_name || d.name);
+      .text((d) => {
+        if (d.is_client_summary) {
+          return `${d.client_count} clients`;
+        }
+        return d.display_name || d.name;
+      });
+
+    // Port labels under client summary nodes
+    nodeElements
+      .filter((d) => d.is_client_summary === true && d.entry_point_port !== null)
+      .append('text')
+      .attr('dy', 48)
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#94a3b8')
+      .attr('font-size', 9)
+      .text((d) => formatProtocolPort(d.entry_point_protocol ?? 6, d.entry_point_port!));
 
     // Update positions on tick
     simulation.on('tick', () => {
       linkElements.attr('d', (d) => {
         const source = d.source as SimNode;
         const target = d.target as SimNode;
+
+        // Straight lines for client summary connections
+        if (d.is_from_client_summary) {
+          return `M${source.x},${source.y}L${target.x},${target.y}`;
+        }
+
+        // Curved lines for other connections
         const dx = (target.x ?? 0) - (source.x ?? 0);
         const dy = (target.y ?? 0) - (source.y ?? 0);
         const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
@@ -310,17 +487,17 @@ export default function ApplicationDetail() {
         .attr('y', (d) => {
           const source = d.source as SimNode;
           const target = d.target as SimNode;
-          return ((source.y ?? 0) + (target.y ?? 0)) / 2 - 5;
+          return ((source.y ?? 0) + (target.y ?? 0)) / 2 - 8;
         });
 
       nodeElements.attr('transform', (d) => `translate(${d.x},${d.y})`);
     });
 
-    // Initial zoom to fit
-    const padding = 50;
+    // Initial zoom to fit content
+    const padding = 30;
     svg.call(
       zoom.transform,
-      d3.zoomIdentity.translate(padding, padding).scale(0.9)
+      d3.zoomIdentity.translate(padding, padding).scale(0.85)
     );
 
     return () => {
@@ -387,35 +564,65 @@ export default function ApplicationDetail() {
           {hoveredNode && (
             <div className="absolute top-4 right-4 bg-slate-800 rounded-lg p-4 shadow-lg max-w-xs">
               <div className="flex items-center gap-2 mb-2">
+                {hoveredNode.is_client_summary ? (
+                  <UsersIcon className="h-5 w-5 text-emerald-400" />
+                ) : null}
                 <span className="font-medium text-white">
-                  {hoveredNode.display_name || hoveredNode.name}
+                  {hoveredNode.is_client_summary
+                    ? `${hoveredNode.client_count} External Clients`
+                    : hoveredNode.display_name || hoveredNode.name}
                 </span>
                 {hoveredNode.is_entry_point && (
                   <StarIconSolid className="h-4 w-4 text-yellow-400" />
                 )}
               </div>
               <div className="space-y-1 text-sm">
-                <div className="text-slate-400">
-                  IP: <span className="text-slate-300">{hoveredNode.ip_address}</span>
-                </div>
-                <div className="text-slate-400">
-                  Type: <span className="text-slate-300">{hoveredNode.asset_type}</span>
-                </div>
-                {hoveredNode.role && (
-                  <div className="text-slate-400">
-                    Role: <span className="text-slate-300">{hoveredNode.role}</span>
-                  </div>
+                {!hoveredNode.is_client_summary && (
+                  <>
+                    <div className="text-slate-400">
+                      IP: <span className="text-slate-300">{hoveredNode.ip_address}</span>
+                    </div>
+                    <div className="text-slate-400">
+                      Type: <span className="text-slate-300">{hoveredNode.asset_type}</span>
+                    </div>
+                    {hoveredNode.role && (
+                      <div className="text-slate-400">
+                        Role: <span className="text-slate-300">{hoveredNode.role}</span>
+                      </div>
+                    )}
+                    {hoveredNode.is_entry_point && hoveredNode.entry_point_port && (
+                      <div className="text-slate-400">
+                        Entry Port:{' '}
+                        <span className="text-yellow-400">
+                          {hoveredNode.entry_point_port}/
+                          {getProtocolName(hoveredNode.entry_point_protocol ?? 6)}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
-                {hoveredNode.is_entry_point && hoveredNode.entry_point_port && (
-                  <div className="text-slate-400">
-                    Entry Port:{' '}
-                    <span className="text-yellow-400">
-                      {hoveredNode.entry_point_port}/
-                      {getProtocolName(hoveredNode.entry_point_protocol ?? 6)}
-                    </span>
-                  </div>
+                {hoveredNode.is_client_summary && (
+                  <>
+                    <div className="text-slate-400">
+                      Connecting to port:{' '}
+                      <span className="text-emerald-400">
+                        {formatProtocolPort(
+                          hoveredNode.entry_point_protocol ?? 6,
+                          hoveredNode.entry_point_port!
+                        )}
+                      </span>
+                    </div>
+                    {hoveredNode.total_bytes_24h !== undefined && (
+                      <div className="text-slate-400">
+                        Traffic (24h):{' '}
+                        <span className="text-slate-300">
+                          {formatBytes(hoveredNode.total_bytes_24h)}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
-                {hoveredNode.is_external && (
+                {hoveredNode.is_external && !hoveredNode.is_client_summary && (
                   <Badge variant="default" size="sm">
                     External
                   </Badge>
@@ -434,7 +641,9 @@ export default function ApplicationDetail() {
             <EdgeTooltip
               edge={{
                 source: {
-                  name: (hoveredEdge.edge.source as SimNode).name,
+                  name: (hoveredEdge.edge.source as SimNode).is_client_summary
+                    ? `${(hoveredEdge.edge.source as SimNode).client_count} clients`
+                    : (hoveredEdge.edge.source as SimNode).name,
                   ip_address: (hoveredEdge.edge.source as SimNode).ip_address || '',
                 },
                 target: {
@@ -453,8 +662,41 @@ export default function ApplicationDetail() {
           )}
         </div>
 
-        {/* Entry Points Panel */}
+        {/* Sidebar Panels */}
         <div className="space-y-4">
+          {/* Inbound Traffic Summary */}
+          {topology.inbound_summary && topology.inbound_summary.length > 0 && (
+            <Card title="Inbound Traffic">
+              <div className="space-y-3">
+                {topology.inbound_summary.map((summary) => (
+                  <div
+                    key={`${summary.entry_point_asset_id}-${summary.port}`}
+                    className="p-2 rounded bg-slate-700/50"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20">
+                        <UsersIcon className="h-4 w-4 text-emerald-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white">
+                          {summary.client_count} clients
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          → {summary.entry_point_name}:{summary.port}
+                        </div>
+                      </div>
+                    </div>
+                    {summary.total_bytes_24h > 0 && (
+                      <div className="mt-1 text-xs text-slate-500 pl-8">
+                        {formatBytes(summary.total_bytes_24h)} / 24h
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           <Card title="Entry Points">
             {topology.entry_points.length === 0 ? (
               <p className="text-slate-500 text-sm">No entry points defined</p>
@@ -487,6 +729,13 @@ export default function ApplicationDetail() {
 
           <Card title="Legend">
             <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: NODE_COLORS.client_summary }}
+                />
+                <span className="text-slate-300">External Clients</span>
+              </div>
               <div className="flex items-center gap-2">
                 <div
                   className="w-4 h-4 rounded-full"

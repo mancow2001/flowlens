@@ -602,6 +602,15 @@ export interface ApplicationEntryPoint {
   order: number | null;
 }
 
+export interface InboundSummary {
+  entry_point_asset_id: string;
+  entry_point_name: string;
+  port: number;
+  protocol: number | null;
+  client_count: number;
+  total_bytes_24h: number;
+}
+
 export interface ApplicationTopology {
   application: {
     id: string;
@@ -611,6 +620,7 @@ export interface ApplicationTopology {
   nodes: ApplicationTopologyNode[];
   edges: ApplicationTopologyEdge[];
   entry_points: ApplicationEntryPoint[];
+  inbound_summary: InboundSummary[];
 }
 
 // Asset summary type (referenced by ApplicationMember)

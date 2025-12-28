@@ -653,13 +653,20 @@ async def get_application_topology(
     application_id: UUID,
     db: DbSession,
     user: AuthenticatedUser,
-    include_external: bool = Query(False, description="Include connections to/from external assets"),
 ) -> dict:
-    """Get topology data for an application showing connections between members.
+    """Get topology data for an application with entry point flow visualization.
 
-    Returns nodes (application members) and edges (connections between them).
-    Entry points are marked with their port/protocol information.
+    Returns a hierarchical view:
+    - Left: Aggregated inbound client counts for each entry point
+    - Center: Entry point nodes
+    - Right: Internal application members and their connections
+
+    The topology shows:
+    1. External clients connecting TO entry points (aggregated by entry point port)
+    2. Connections FROM entry points to other application members
+    3. Connections between non-entry-point members
     """
+    from sqlalchemy import func as sql_func
     from flowlens.models.dependency import Dependency
 
     # Get application with members
@@ -681,6 +688,7 @@ async def get_application_topology(
 
     # Get asset IDs of all members
     member_asset_ids = {m.asset_id for m in application.members}
+    member_map = {m.asset_id: m for m in application.members}
 
     if not member_asset_ids:
         return {
@@ -692,35 +700,76 @@ async def get_application_topology(
             "nodes": [],
             "edges": [],
             "entry_points": [],
+            "inbound_summary": [],
         }
 
-    # Get connections between members (internal connections)
-    connections_query = (
+    # Identify entry points and their ports
+    entry_point_members = [m for m in application.members if m.is_entry_point]
+    entry_point_asset_ids = {m.asset_id for m in entry_point_members}
+
+    # Query 1: Get inbound connections TO entry points from OUTSIDE the application
+    # on the specific entry point port/protocol
+    inbound_summary = []
+    for ep_member in entry_point_members:
+        if ep_member.entry_point_port is None:
+            continue
+
+        # Count unique external sources connecting to this entry point
+        inbound_query = (
+            select(
+                sql_func.count(sql_func.distinct(Dependency.source_asset_id)).label("client_count"),
+                sql_func.sum(Dependency.bytes_last_24h).label("total_bytes"),
+            )
+            .where(
+                Dependency.target_asset_id == ep_member.asset_id,
+                Dependency.target_port == ep_member.entry_point_port,
+                Dependency.source_asset_id.notin_(member_asset_ids),  # External sources only
+            )
+        )
+        if ep_member.entry_point_protocol:
+            inbound_query = inbound_query.where(
+                Dependency.protocol == ep_member.entry_point_protocol
+            )
+
+        inbound_result = await db.execute(inbound_query)
+        row = inbound_result.one()
+
+        inbound_summary.append({
+            "entry_point_asset_id": str(ep_member.asset_id),
+            "entry_point_name": ep_member.asset.name,
+            "port": ep_member.entry_point_port,
+            "protocol": ep_member.entry_point_protocol,
+            "client_count": row.client_count or 0,
+            "total_bytes_24h": row.total_bytes or 0,
+        })
+
+    # Query 2: Get outbound connections FROM entry points to other members
+    outbound_from_entry_points_query = (
         select(Dependency)
         .where(
-            Dependency.source_asset_id.in_(member_asset_ids),
+            Dependency.source_asset_id.in_(entry_point_asset_ids),
             Dependency.target_asset_id.in_(member_asset_ids),
         )
     )
+    result = await db.execute(outbound_from_entry_points_query)
+    outbound_from_ep = result.scalars().all()
 
-    if include_external:
-        # Also get connections to/from external assets
-        external_query = (
+    # Query 3: Get connections between non-entry-point members
+    non_ep_asset_ids = member_asset_ids - entry_point_asset_ids
+    internal_connections = []
+    if non_ep_asset_ids:
+        internal_query = (
             select(Dependency)
             .where(
-                (Dependency.source_asset_id.in_(member_asset_ids))
-                | (Dependency.target_asset_id.in_(member_asset_ids))
+                Dependency.source_asset_id.in_(non_ep_asset_ids),
+                Dependency.target_asset_id.in_(non_ep_asset_ids),
             )
         )
-        connections_query = external_query
+        result = await db.execute(internal_query)
+        internal_connections = result.scalars().all()
 
-    result = await db.execute(connections_query)
-    connections = result.scalars().all()
-
-    # Build node data
+    # Build node data for application members
     nodes = []
-    member_map = {m.asset_id: m for m in application.members}
-
     for member in application.members:
         asset = member.asset
         nodes.append({
@@ -735,40 +784,14 @@ async def get_application_topology(
             "entry_point_order": member.entry_point_order,
             "role": member.role,
             "is_critical": asset.is_critical,
+            "is_external": False,
         })
 
-    # If including external, we need to fetch external assets
-    external_asset_ids = set()
-    if include_external:
-        for conn in connections:
-            if conn.source_asset_id not in member_asset_ids:
-                external_asset_ids.add(conn.source_asset_id)
-            if conn.target_asset_id not in member_asset_ids:
-                external_asset_ids.add(conn.target_asset_id)
-
-        if external_asset_ids:
-            ext_result = await db.execute(
-                select(Asset).where(Asset.id.in_(external_asset_ids))
-            )
-            for asset in ext_result.scalars().all():
-                nodes.append({
-                    "id": str(asset.id),
-                    "name": asset.name,
-                    "display_name": asset.display_name,
-                    "ip_address": str(asset.ip_address),
-                    "asset_type": asset.asset_type,
-                    "is_entry_point": False,
-                    "entry_point_port": None,
-                    "entry_point_protocol": None,
-                    "entry_point_order": None,
-                    "role": None,
-                    "is_critical": asset.is_critical,
-                    "is_external": True,  # Mark as external to application
-                })
-
-    # Build edge data
+    # Build edge data - only outbound from entry points + internal connections
     edges = []
-    for conn in connections:
+
+    # Edges from entry points to other members
+    for conn in outbound_from_ep:
         edges.append({
             "source": str(conn.source_asset_id),
             "target": str(conn.target_asset_id),
@@ -777,10 +800,20 @@ async def get_application_topology(
             "dependency_type": conn.dependency_type,
             "bytes_last_24h": conn.bytes_last_24h,
             "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
-            "is_internal": (
-                conn.source_asset_id in member_asset_ids
-                and conn.target_asset_id in member_asset_ids
-            ),
+            "is_from_entry_point": True,
+        })
+
+    # Internal edges between non-entry-point members
+    for conn in internal_connections:
+        edges.append({
+            "source": str(conn.source_asset_id),
+            "target": str(conn.target_asset_id),
+            "target_port": conn.target_port,
+            "protocol": conn.protocol,
+            "dependency_type": conn.dependency_type,
+            "bytes_last_24h": conn.bytes_last_24h,
+            "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
+            "is_from_entry_point": False,
         })
 
     # Build entry points list with port/protocol info
@@ -793,7 +826,7 @@ async def get_application_topology(
             "order": m.entry_point_order,
         }
         for m in sorted(
-            [m for m in application.members if m.is_entry_point],
+            entry_point_members,
             key=lambda m: m.entry_point_order or 9999,
         )
     ]
@@ -807,4 +840,5 @@ async def get_application_topology(
         "nodes": nodes,
         "edges": edges,
         "entry_points": entry_points,
+        "inbound_summary": inbound_summary,
     }
