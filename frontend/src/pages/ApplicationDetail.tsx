@@ -35,7 +35,7 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   id: string;
   target_port: number;
   protocol: number;
-  service_type: string | null;
+  dependency_type: string | null;
   bytes_last_24h: number | null;
   last_seen: string | null;
   is_internal: boolean;
@@ -89,7 +89,7 @@ export default function ApplicationDetail() {
         target: edge.target,
         target_port: edge.target_port,
         protocol: edge.protocol,
-        service_type: edge.service_type,
+        dependency_type: edge.dependency_type,
         bytes_last_24h: edge.bytes_last_24h,
         last_seen: edge.last_seen,
         is_internal: edge.is_internal,
@@ -445,7 +445,7 @@ export default function ApplicationDetail() {
                 protocol: hoveredEdge.edge.protocol,
                 bytes_last_24h: hoveredEdge.edge.bytes_last_24h ?? undefined,
                 last_seen: hoveredEdge.edge.last_seen ?? undefined,
-                service_type: hoveredEdge.edge.service_type,
+                service_type: hoveredEdge.edge.dependency_type,
               }}
               position={hoveredEdge.position}
               containerBounds={containerRef.current?.getBoundingClientRect()}

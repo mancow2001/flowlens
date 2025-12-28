@@ -588,7 +588,7 @@ export interface ApplicationTopologyEdge {
   target: string;
   target_port: number;
   protocol: number;
-  service_type: string | null;
+  dependency_type: string | null;
   bytes_last_24h: number | null;
   last_seen: string | null;
   is_internal: boolean;

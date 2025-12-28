@@ -774,7 +774,7 @@ async def get_application_topology(
             "target": str(conn.target_asset_id),
             "target_port": conn.target_port,
             "protocol": conn.protocol,
-            "service_type": conn.service_type,
+            "dependency_type": conn.dependency_type,
             "bytes_last_24h": conn.bytes_last_24h,
             "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
             "is_internal": (
