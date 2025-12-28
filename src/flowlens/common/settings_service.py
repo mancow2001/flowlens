@@ -456,19 +456,48 @@ def generate_docker_compose_yaml() -> str:
     api_workers = get_val("API_WORKERS", str(settings.api.workers))
     auth_enabled = get_val("AUTH_ENABLED", str(settings.auth.enabled).lower())
 
+    # API additional settings
+    api_cors_origins = get_val("API_CORS_ORIGINS", settings.api.cors_origins_str)
+
+    # Auth settings
+    auth_secret_key = esc(
+        _settings_overrides.get("AUTH_SECRET_KEY", settings.auth.secret_key.get_secret_value())
+    )
+
     # Ingestion settings
     ingestion_bind = get_val("INGESTION_BIND_ADDRESS", str(settings.ingestion.bind_address))
     ingestion_netflow_port = get_val("INGESTION_NETFLOW_PORT", str(settings.ingestion.netflow_port))
     ingestion_sflow_port = get_val("INGESTION_SFLOW_PORT", str(settings.ingestion.sflow_port))
     ingestion_batch_size = get_val("INGESTION_BATCH_SIZE", str(settings.ingestion.batch_size))
+    ingestion_batch_timeout = get_val("INGESTION_BATCH_TIMEOUT_MS", str(settings.ingestion.batch_timeout_ms))
+    ingestion_queue_max = get_val("INGESTION_QUEUE_MAX_SIZE", str(settings.ingestion.queue_max_size))
+    ingestion_sample_threshold = get_val("INGESTION_SAMPLE_THRESHOLD", str(settings.ingestion.sample_threshold))
+    ingestion_drop_threshold = get_val("INGESTION_DROP_THRESHOLD", str(settings.ingestion.drop_threshold))
+    ingestion_sample_rate = get_val("INGESTION_SAMPLE_RATE", str(settings.ingestion.sample_rate))
 
     # Enrichment settings
     enrichment_worker_count = get_val("ENRICHMENT_WORKER_COUNT", str(settings.enrichment.worker_count))
     enrichment_batch_size = get_val("ENRICHMENT_BATCH_SIZE", str(settings.enrichment.batch_size))
+    enrichment_poll_interval = get_val("ENRICHMENT_POLL_INTERVAL_MS", str(settings.enrichment.poll_interval_ms))
+    enrichment_dns_timeout = get_val("ENRICHMENT_DNS_TIMEOUT", str(settings.enrichment.dns_timeout))
+    enrichment_dns_cache_ttl = get_val("ENRICHMENT_DNS_CACHE_TTL", str(settings.enrichment.dns_cache_ttl))
+    enrichment_dns_cache_size = get_val("ENRICHMENT_DNS_CACHE_SIZE", str(settings.enrichment.dns_cache_size))
 
     # Resolution settings
     resolution_worker_count = get_val("RESOLUTION_WORKER_COUNT", str(settings.resolution.worker_count))
     resolution_window_minutes = get_val("RESOLUTION_WINDOW_SIZE_MINUTES", str(settings.resolution.window_size_minutes))
+    resolution_batch_size = get_val("RESOLUTION_BATCH_SIZE", str(settings.resolution.batch_size))
+    resolution_poll_interval = get_val("RESOLUTION_POLL_INTERVAL_MS", str(settings.resolution.poll_interval_ms))
+    resolution_stale_threshold = get_val("RESOLUTION_STALE_THRESHOLD_HOURS", str(settings.resolution.stale_threshold_hours))
+    resolution_exclude_external_ips = get_val(
+        "RESOLUTION_EXCLUDE_EXTERNAL_IPS", str(settings.resolution.exclude_external_ips).lower()
+    )
+    resolution_exclude_external_sources = get_val(
+        "RESOLUTION_EXCLUDE_EXTERNAL_SOURCES", str(settings.resolution.exclude_external_sources).lower()
+    )
+    resolution_exclude_external_targets = get_val(
+        "RESOLUTION_EXCLUDE_EXTERNAL_TARGETS", str(settings.resolution.exclude_external_targets).lower()
+    )
 
     # Redis settings
     redis_enabled = get_val("REDIS_ENABLED", str(settings.redis.enabled).lower()) == "true"
@@ -576,7 +605,9 @@ def generate_docker_compose_yaml() -> str:
         f'      API_HOST: "{api_host}"',
         f'      API_PORT: "{api_port}"',
         f'      API_WORKERS: "{api_workers}"',
+        f'      API_CORS_ORIGINS: "{api_cors_origins}"',
         f'      AUTH_ENABLED: "{auth_enabled}"',
+        f'      AUTH_SECRET_KEY: "{auth_secret_key}"',
         f'      CLASSIFICATION_MIN_OBSERVATION_HOURS: "{class_min_hours}"',
         f'      CLASSIFICATION_MIN_FLOWS_REQUIRED: "{class_min_flows}"',
         f"      LOG_LEVEL: {log_level}",
@@ -607,6 +638,11 @@ def generate_docker_compose_yaml() -> str:
         f'      INGESTION_NETFLOW_PORT: "{ingestion_netflow_port}"',
         f'      INGESTION_SFLOW_PORT: "{ingestion_sflow_port}"',
         f'      INGESTION_BATCH_SIZE: "{ingestion_batch_size}"',
+        f'      INGESTION_BATCH_TIMEOUT_MS: "{ingestion_batch_timeout}"',
+        f'      INGESTION_QUEUE_MAX_SIZE: "{ingestion_queue_max}"',
+        f'      INGESTION_SAMPLE_THRESHOLD: "{ingestion_sample_threshold}"',
+        f'      INGESTION_DROP_THRESHOLD: "{ingestion_drop_threshold}"',
+        f'      INGESTION_SAMPLE_RATE: "{ingestion_sample_rate}"',
         f"      LOG_LEVEL: {log_level}",
         f"      LOG_FORMAT: {log_format}",
         "    ports:",
@@ -634,6 +670,10 @@ def generate_docker_compose_yaml() -> str:
         "      <<: *db-logging-env",
         f'      ENRICHMENT_WORKER_COUNT: "{enrichment_worker_count}"',
         f'      ENRICHMENT_BATCH_SIZE: "{enrichment_batch_size}"',
+        f'      ENRICHMENT_POLL_INTERVAL_MS: "{enrichment_poll_interval}"',
+        f'      ENRICHMENT_DNS_TIMEOUT: "{enrichment_dns_timeout}"',
+        f'      ENRICHMENT_DNS_CACHE_TTL: "{enrichment_dns_cache_ttl}"',
+        f'      ENRICHMENT_DNS_CACHE_SIZE: "{enrichment_dns_cache_size}"',
         "    depends_on:",
         "      migrations:",
         "        condition: service_completed_successfully",
@@ -658,6 +698,12 @@ def generate_docker_compose_yaml() -> str:
         "      <<: *db-logging-env",
         f'      RESOLUTION_WORKER_COUNT: "{resolution_worker_count}"',
         f'      RESOLUTION_WINDOW_SIZE_MINUTES: "{resolution_window_minutes}"',
+        f'      RESOLUTION_BATCH_SIZE: "{resolution_batch_size}"',
+        f'      RESOLUTION_POLL_INTERVAL_MS: "{resolution_poll_interval}"',
+        f'      RESOLUTION_STALE_THRESHOLD_HOURS: "{resolution_stale_threshold}"',
+        f'      RESOLUTION_EXCLUDE_EXTERNAL_IPS: "{resolution_exclude_external_ips}"',
+        f'      RESOLUTION_EXCLUDE_EXTERNAL_SOURCES: "{resolution_exclude_external_sources}"',
+        f'      RESOLUTION_EXCLUDE_EXTERNAL_TARGETS: "{resolution_exclude_external_targets}"',
         "    depends_on:",
         "      migrations:",
         "        condition: service_completed_successfully",
