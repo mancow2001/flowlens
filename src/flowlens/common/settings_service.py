@@ -405,408 +405,332 @@ def generate_docker_compose_yaml() -> str:
     """Generate a docker-compose.yml with current settings.
 
     Reads the current settings (including any pending overrides) and
-    generates a complete docker-compose.yml file.
+    generates a complete docker-compose.yml file with YAML anchors
+    for shared environment variables.
 
     Returns:
         YAML string of the docker-compose configuration.
     """
-    import yaml
-
     settings = get_settings()
 
-    # Build environment variables for each service
-    # Common database settings
-    db_env = {
-        "POSTGRES_HOST": "postgres",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_USER": settings.database.user,
-        "POSTGRES_PASSWORD": settings.database.password.get_secret_value(),
-        "POSTGRES_DATABASE": settings.database.database,
-    }
+    # Apply any pending overrides
+    def get_val(env_key: str, default: str) -> str:
+        return _settings_overrides.get(env_key, default)
 
-    # API service environment
-    api_env = {
-        **db_env,
-        "ENVIRONMENT": settings.environment,
-        "DEBUG": str(settings.debug).lower(),
-        "API_HOST": settings.api.host,
-        "API_PORT": str(settings.api.port),
-        "API_WORKERS": str(settings.api.workers),
-        "API_CORS_ORIGINS": settings.api.cors_origins_str,
-        "API_RATE_LIMIT_REQUESTS": str(settings.api.rate_limit_requests),
-        "API_RATE_LIMIT_WINDOW_SECONDS": str(settings.api.rate_limit_window_seconds),
-        "API_DEFAULT_PAGE_SIZE": str(settings.api.default_page_size),
-        "API_MAX_PAGE_SIZE": str(settings.api.max_page_size),
-        "AUTH_ENABLED": str(settings.auth.enabled).lower(),
-        "AUTH_SECRET_KEY": settings.auth.secret_key.get_secret_value(),
-        "AUTH_ALGORITHM": settings.auth.algorithm,
-        "AUTH_ACCESS_TOKEN_EXPIRE_MINUTES": str(settings.auth.access_token_expire_minutes),
-        "AUTH_REFRESH_TOKEN_EXPIRE_DAYS": str(settings.auth.refresh_token_expire_days),
-        "LOG_LEVEL": settings.logging.level,
-        "LOG_FORMAT": settings.logging.format,
-    }
+    # Get current values (with overrides applied)
+    postgres_host = "postgres"
+    postgres_port = get_val("POSTGRES_PORT", str(settings.database.port))
+    postgres_user = get_val("POSTGRES_USER", settings.database.user)
+    postgres_password = get_val("POSTGRES_PASSWORD", settings.database.password.get_secret_value())
+    postgres_db = get_val("POSTGRES_DATABASE", settings.database.database)
 
-    # Ingestion service environment
-    ingestion_env = {
-        **db_env,
-        "ENVIRONMENT": settings.environment,
-        "INGESTION_BIND_ADDRESS": str(settings.ingestion.bind_address),
-        "INGESTION_NETFLOW_PORT": str(settings.ingestion.netflow_port),
-        "INGESTION_SFLOW_PORT": str(settings.ingestion.sflow_port),
-        "INGESTION_BATCH_SIZE": str(settings.ingestion.batch_size),
-        "INGESTION_BATCH_TIMEOUT_MS": str(settings.ingestion.batch_timeout_ms),
-        "INGESTION_QUEUE_MAX_SIZE": str(settings.ingestion.queue_max_size),
-        "INGESTION_SAMPLE_THRESHOLD": str(settings.ingestion.sample_threshold),
-        "INGESTION_DROP_THRESHOLD": str(settings.ingestion.drop_threshold),
-        "INGESTION_SAMPLE_RATE": str(settings.ingestion.sample_rate),
-        "LOG_LEVEL": settings.logging.level,
-        "LOG_FORMAT": settings.logging.format,
-    }
+    log_level = get_val("LOG_LEVEL", settings.logging.level)
+    log_format = get_val("LOG_FORMAT", settings.logging.format)
 
-    # Enrichment service environment
-    enrichment_env = {
-        **db_env,
-        "ENVIRONMENT": settings.environment,
-        "ENRICHMENT_BATCH_SIZE": str(settings.enrichment.batch_size),
-        "ENRICHMENT_POLL_INTERVAL_MS": str(settings.enrichment.poll_interval_ms),
-        "ENRICHMENT_WORKER_COUNT": str(settings.enrichment.worker_count),
-        "ENRICHMENT_DNS_TIMEOUT": str(settings.enrichment.dns_timeout),
-        "ENRICHMENT_DNS_CACHE_TTL": str(settings.enrichment.dns_cache_ttl),
-        "ENRICHMENT_DNS_CACHE_SIZE": str(settings.enrichment.dns_cache_size),
-        "LOG_LEVEL": settings.logging.level,
-        "LOG_FORMAT": settings.logging.format,
-    }
-    if settings.enrichment.dns_servers:
-        enrichment_env["ENRICHMENT_DNS_SERVERS"] = ",".join(settings.enrichment.dns_servers)
-    if settings.enrichment.geoip_database_path:
-        enrichment_env["ENRICHMENT_GEOIP_DATABASE_PATH"] = str(settings.enrichment.geoip_database_path)
+    environment = get_val("ENVIRONMENT", settings.environment)
+    debug = get_val("DEBUG", str(settings.debug).lower())
 
-    # Resolution service environment
-    resolution_env = {
-        **db_env,
-        "ENVIRONMENT": settings.environment,
-        "RESOLUTION_WINDOW_SIZE_MINUTES": str(settings.resolution.window_size_minutes),
-        "RESOLUTION_WORKER_COUNT": str(settings.resolution.worker_count),
-        "RESOLUTION_BATCH_SIZE": str(settings.resolution.batch_size),
-        "RESOLUTION_POLL_INTERVAL_MS": str(settings.resolution.poll_interval_ms),
-        "RESOLUTION_DETECTION_INTERVAL_MINUTES": str(settings.resolution.detection_interval_minutes),
-        "RESOLUTION_STALE_THRESHOLD_HOURS": str(settings.resolution.stale_threshold_hours),
-        "RESOLUTION_NEW_DEPENDENCY_LOOKBACK_MINUTES": str(settings.resolution.new_dependency_lookback_minutes),
-        "RESOLUTION_EXCLUDE_EXTERNAL_IPS": str(settings.resolution.exclude_external_ips).lower(),
-        "RESOLUTION_EXCLUDE_EXTERNAL_SOURCES": str(settings.resolution.exclude_external_sources).lower(),
-        "RESOLUTION_EXCLUDE_EXTERNAL_TARGETS": str(settings.resolution.exclude_external_targets).lower(),
-        "LOG_LEVEL": settings.logging.level,
-        "LOG_FORMAT": settings.logging.format,
-    }
+    # Classification settings
+    class_worker_count = get_val("CLASSIFICATION_WORKER_COUNT", str(settings.classification.worker_count))
+    class_poll_interval = get_val("CLASSIFICATION_POLL_INTERVAL_MS", str(settings.classification.poll_interval_ms))
+    class_auto_confidence = get_val("CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD", str(settings.classification.auto_update_confidence_threshold))
+    class_min_hours = get_val("CLASSIFICATION_MIN_OBSERVATION_HOURS", str(settings.classification.min_observation_hours))
+    class_min_flows = get_val("CLASSIFICATION_MIN_FLOWS_REQUIRED", str(settings.classification.min_flows_required))
+    class_batch_size = get_val("CLASSIFICATION_BATCH_SIZE", str(settings.classification.batch_size))
+    class_high_confidence = get_val("CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD", str(settings.classification.high_confidence_threshold))
+    class_reclassify_hours = get_val("CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS", str(settings.classification.reclassify_interval_hours))
 
-    # Classification service environment
-    classification_env = {
-        **db_env,
-        "ENVIRONMENT": settings.environment,
-        "CLASSIFICATION_POLL_INTERVAL_MS": str(settings.classification.poll_interval_ms),
-        "CLASSIFICATION_BATCH_SIZE": str(settings.classification.batch_size),
-        "CLASSIFICATION_WORKER_COUNT": str(settings.classification.worker_count),
-        "CLASSIFICATION_MIN_OBSERVATION_HOURS": str(settings.classification.min_observation_hours),
-        "CLASSIFICATION_MIN_FLOWS_REQUIRED": str(settings.classification.min_flows_required),
-        "CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD": str(settings.classification.auto_update_confidence_threshold),
-        "CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD": str(settings.classification.high_confidence_threshold),
-        "CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS": str(settings.classification.reclassify_interval_hours),
-        "LOG_LEVEL": settings.logging.level,
-        "LOG_FORMAT": settings.logging.format,
-    }
+    # API settings
+    api_host = get_val("API_HOST", settings.api.host)
+    api_port = get_val("API_PORT", str(settings.api.port))
+    api_workers = get_val("API_WORKERS", str(settings.api.workers))
+    auth_enabled = get_val("AUTH_ENABLED", str(settings.auth.enabled).lower())
 
-    # Add notification settings to API env
-    notif = settings.notifications
-    if notif.email.enabled:
-        api_env.update({
-            "EMAIL_ENABLED": "true",
-            "EMAIL_HOST": notif.email.host,
-            "EMAIL_PORT": str(notif.email.port),
-            "EMAIL_USE_TLS": str(notif.email.use_tls).lower(),
-            "EMAIL_START_TLS": str(notif.email.start_tls).lower(),
-            "EMAIL_FROM_ADDRESS": notif.email.from_address,
-            "EMAIL_FROM_NAME": notif.email.from_name,
-        })
-        if notif.email.username:
-            api_env["EMAIL_USERNAME"] = notif.email.username
-        if notif.email.password:
-            api_env["EMAIL_PASSWORD"] = notif.email.password.get_secret_value()
-        if notif.email.alert_recipients:
-            api_env["EMAIL_ALERT_RECIPIENTS"] = ",".join(notif.email.alert_recipients)
+    # Ingestion settings
+    ingestion_bind = get_val("INGESTION_BIND_ADDRESS", str(settings.ingestion.bind_address))
+    ingestion_netflow_port = get_val("INGESTION_NETFLOW_PORT", str(settings.ingestion.netflow_port))
+    ingestion_sflow_port = get_val("INGESTION_SFLOW_PORT", str(settings.ingestion.sflow_port))
+    ingestion_batch_size = get_val("INGESTION_BATCH_SIZE", str(settings.ingestion.batch_size))
 
-    if notif.slack.enabled and notif.slack.webhook_url:
-        api_env.update({
-            "SLACK_ENABLED": "true",
-            "SLACK_WEBHOOK_URL": notif.slack.webhook_url,
-            "SLACK_USERNAME": notif.slack.username,
-            "SLACK_ICON_EMOJI": notif.slack.icon_emoji,
-        })
-        if notif.slack.default_channel:
-            api_env["SLACK_DEFAULT_CHANNEL"] = notif.slack.default_channel
+    # Enrichment settings
+    enrichment_worker_count = get_val("ENRICHMENT_WORKER_COUNT", str(settings.enrichment.worker_count))
+    enrichment_batch_size = get_val("ENRICHMENT_BATCH_SIZE", str(settings.enrichment.batch_size))
 
-    if notif.pagerduty.enabled and notif.pagerduty.routing_key:
-        api_env.update({
-            "PAGERDUTY_ENABLED": "true",
-            "PAGERDUTY_ROUTING_KEY": notif.pagerduty.routing_key,
-            "PAGERDUTY_SERVICE_NAME": notif.pagerduty.service_name,
-        })
+    # Resolution settings
+    resolution_worker_count = get_val("RESOLUTION_WORKER_COUNT", str(settings.resolution.worker_count))
+    resolution_window_minutes = get_val("RESOLUTION_WINDOW_SIZE_MINUTES", str(settings.resolution.window_size_minutes))
 
-    if notif.webhook.enabled and notif.webhook.url:
-        api_env.update({
-            "WEBHOOK_ENABLED": "true",
-            "WEBHOOK_URL": notif.webhook.url,
-            "WEBHOOK_TIMEOUT": str(notif.webhook.timeout),
-            "WEBHOOK_RETRY_COUNT": str(notif.webhook.retry_count),
-        })
-        if notif.webhook.secret:
-            api_env["WEBHOOK_SECRET"] = notif.webhook.secret.get_secret_value()
+    # Redis settings
+    redis_enabled = get_val("REDIS_ENABLED", str(settings.redis.enabled).lower()) == "true"
+    redis_port = get_val("REDIS_PORT", str(settings.redis.port))
 
-    if notif.teams.enabled and notif.teams.webhook_url:
-        api_env.update({
-            "TEAMS_ENABLED": "true",
-            "TEAMS_WEBHOOK_URL": notif.teams.webhook_url,
-        })
-
-    # Apply any pending overrides from Docker mode
-    # These are settings changed via the UI that couldn't be written to .env
-    if _settings_overrides:
-        logger.info(
-            "Applying settings overrides to docker-compose",
-            override_keys=list(_settings_overrides.keys()),
-        )
-        # Apply overrides to all environment dictionaries
-        for env_dict in [db_env, api_env, ingestion_env, enrichment_env, resolution_env, classification_env]:
-            for key, value in _settings_overrides.items():
-                # Only apply if this env dict contains this key or a related key
-                if key in env_dict:
-                    env_dict[key] = value
-                # Also check if we should add it based on key prefix matching
-                elif any(key.startswith(prefix) for prefix in ["POSTGRES_", "REDIS_", "KAFKA_"]):
-                    # Database/Redis/Kafka settings go in db_env which is spread to others
-                    if env_dict is db_env:
-                        env_dict[key] = value
-                elif key.startswith("API_") or key.startswith("AUTH_"):
-                    if env_dict is api_env:
-                        env_dict[key] = value
-                elif key.startswith("INGESTION_"):
-                    if env_dict is ingestion_env:
-                        env_dict[key] = value
-                elif key.startswith("ENRICHMENT_"):
-                    if env_dict is enrichment_env:
-                        env_dict[key] = value
-                elif key.startswith("RESOLUTION_"):
-                    if env_dict is resolution_env:
-                        env_dict[key] = value
-                elif key.startswith("CLASSIFICATION_"):
-                    if env_dict is classification_env:
-                        env_dict[key] = value
-                elif key.startswith("LOG_"):
-                    # Logging settings apply to all services
-                    env_dict[key] = value
-                elif key in ["ENVIRONMENT", "DEBUG"]:
-                    # Root settings apply to all services
-                    env_dict[key] = value
-                elif key.startswith(("EMAIL_", "SLACK_", "WEBHOOK_", "TEAMS_", "PAGERDUTY_")):
-                    # Notification settings go in api_env
-                    if env_dict is api_env:
-                        env_dict[key] = value
-
-    # Get values for ports and other compose-level settings
-    # These need to use overrides if available
-    postgres_user = _settings_overrides.get("POSTGRES_USER", settings.database.user)
-    postgres_password = _settings_overrides.get(
-        "POSTGRES_PASSWORD",
-        settings.database.password.get_secret_value()
-    )
-    postgres_db = _settings_overrides.get("POSTGRES_DATABASE", settings.database.database)
-    postgres_port = _settings_overrides.get("POSTGRES_PORT", str(settings.database.port))
-    api_port = _settings_overrides.get("API_PORT", str(settings.api.port))
-    netflow_port = _settings_overrides.get(
-        "INGESTION_NETFLOW_PORT",
-        str(settings.ingestion.netflow_port)
-    )
-    sflow_port = _settings_overrides.get(
-        "INGESTION_SFLOW_PORT",
-        str(settings.ingestion.sflow_port)
-    )
-    redis_port = _settings_overrides.get("REDIS_PORT", str(settings.redis.port))
-    redis_enabled = _settings_overrides.get(
-        "REDIS_ENABLED",
-        str(settings.redis.enabled).lower()
-    ) == "true"
-
-    # Build the compose structure
-    compose = {
-        "version": "3.8",
-        "services": {
-            "postgres": {
-                "image": "postgres:15-alpine",
-                "container_name": "flowlens-postgres",
-                "environment": {
-                    "POSTGRES_USER": postgres_user,
-                    "POSTGRES_PASSWORD": postgres_password,
-                    "POSTGRES_DB": postgres_db,
-                },
-                "volumes": ["postgres_data:/var/lib/postgresql/data"],
-                "ports": [f"{postgres_port}:5432"],
-                "healthcheck": {
-                    "test": ["CMD-SHELL", f"pg_isready -U {postgres_user}"],
-                    "interval": "10s",
-                    "timeout": "5s",
-                    "retries": 5,
-                },
-                "restart": "unless-stopped",
-            },
-            "migrations": {
-                "build": {"context": ".", "target": "production"},
-                "container_name": "flowlens-migrations",
-                "command": ["alembic", "upgrade", "head"],
-                "environment": db_env,
-                "depends_on": {"postgres": {"condition": "service_healthy"}},
-            },
-            "api": {
-                "build": {"context": ".", "target": "production"},
-                "container_name": "flowlens-api",
-                "command": ["python", "-m", "flowlens.api.main"],
-                "environment": api_env,
-                "ports": [f"{api_port}:8000"],
-                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
-                "healthcheck": {
-                    "test": ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/admin/health/live')"],
-                    "interval": "30s",
-                    "timeout": "10s",
-                    "retries": 3,
-                },
-                "restart": "unless-stopped",
-            },
-            "ingestion": {
-                "build": {"context": ".", "target": "production"},
-                "container_name": "flowlens-ingestion",
-                "command": ["python", "-m", "flowlens.ingestion.main"],
-                "environment": ingestion_env,
-                "ports": [
-                    f"{netflow_port}:{netflow_port}/udp",
-                    f"{sflow_port}:{sflow_port}/udp",
-                ],
-                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
-                "healthcheck": {
-                    "test": ["CMD", "pgrep", "-f", "flowlens.ingestion.main"],
-                    "interval": "30s",
-                    "timeout": "10s",
-                    "retries": 3,
-                },
-                "restart": "unless-stopped",
-            },
-            "enrichment": {
-                "build": {"context": ".", "target": "production"},
-                "container_name": "flowlens-enrichment",
-                "command": ["python", "-m", "flowlens.enrichment.main"],
-                "environment": enrichment_env,
-                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
-                "healthcheck": {
-                    "test": ["CMD", "pgrep", "-f", "flowlens.enrichment.main"],
-                    "interval": "30s",
-                    "timeout": "10s",
-                    "retries": 3,
-                },
-                "restart": "unless-stopped",
-            },
-            "resolution": {
-                "build": {"context": ".", "target": "production"},
-                "container_name": "flowlens-resolution",
-                "command": ["python", "-m", "flowlens.resolution.main"],
-                "environment": resolution_env,
-                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
-                "healthcheck": {
-                    "test": ["CMD", "pgrep", "-f", "flowlens.resolution.main"],
-                    "interval": "30s",
-                    "timeout": "10s",
-                    "retries": 3,
-                },
-                "restart": "unless-stopped",
-            },
-            "classification": {
-                "build": {"context": ".", "target": "production"},
-                "container_name": "flowlens-classification",
-                "command": ["python", "-m", "flowlens.classification.main"],
-                "environment": classification_env,
-                "depends_on": {"migrations": {"condition": "service_completed_successfully"}},
-                "healthcheck": {
-                    "test": ["CMD", "pgrep", "-f", "flowlens.classification.main"],
-                    "interval": "30s",
-                    "timeout": "10s",
-                    "retries": 3,
-                },
-                "restart": "unless-stopped",
-            },
-            "frontend": {
-                "build": {"context": "./frontend", "target": "production"},
-                "container_name": "flowlens-frontend",
-                "ports": ["3000:80"],
-                "depends_on": ["api"],
-                "healthcheck": {
-                    "test": ["CMD", "curl", "-f", "http://localhost/"],
-                    "interval": "30s",
-                    "timeout": "10s",
-                    "retries": 3,
-                },
-                "restart": "unless-stopped",
-            },
-        },
-        "volumes": {"postgres_data": None},
-        "networks": {"default": {"name": "flowlens-network"}},
-    }
+    # Build the YAML manually to use anchors properly
+    lines = [
+        "# FlowLens Docker Compose - Minimal Configuration",
+        "# PostgreSQL only, suitable for <10k flows/sec",
+        f"# Generated from System Settings on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        'version: "3.8"',
+        "",
+        "# Shared environment variable definitions",
+        "x-db-env: &db-env",
+        f"  POSTGRES_HOST: {postgres_host}",
+        f"  POSTGRES_PORT: {postgres_port}",
+        f"  POSTGRES_USER: {postgres_user}",
+        f"  POSTGRES_PASSWORD: {postgres_password}",
+        f"  POSTGRES_DATABASE: {postgres_db}",
+        "",
+        "x-logging-env: &logging-env",
+        f"  LOG_LEVEL: {log_level}",
+        f"  LOG_FORMAT: {log_format}",
+        "",
+        "x-classification-env: &classification-env",
+        f'  CLASSIFICATION_WORKER_COUNT: "{class_worker_count}"',
+        f'  CLASSIFICATION_POLL_INTERVAL_MS: "{class_poll_interval}"',
+        f'  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "{class_auto_confidence}"',
+        f'  CLASSIFICATION_MIN_OBSERVATION_HOURS: "{class_min_hours}"',
+        f'  CLASSIFICATION_MIN_FLOWS_REQUIRED: "{class_min_flows}"',
+        f'  CLASSIFICATION_BATCH_SIZE: "{class_batch_size}"',
+        f'  CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD: "{class_high_confidence}"',
+        f'  CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS: "{class_reclassify_hours}"',
+        "",
+        "# Combined environments for services that need multiple anchors",
+        "x-db-logging-env: &db-logging-env",
+        f"  POSTGRES_HOST: {postgres_host}",
+        f"  POSTGRES_PORT: {postgres_port}",
+        f"  POSTGRES_USER: {postgres_user}",
+        f"  POSTGRES_PASSWORD: {postgres_password}",
+        f"  POSTGRES_DATABASE: {postgres_db}",
+        f"  LOG_LEVEL: {log_level}",
+        f"  LOG_FORMAT: {log_format}",
+        "",
+        "x-classification-full-env: &classification-full-env",
+        f"  POSTGRES_HOST: {postgres_host}",
+        f"  POSTGRES_PORT: {postgres_port}",
+        f"  POSTGRES_USER: {postgres_user}",
+        f"  POSTGRES_PASSWORD: {postgres_password}",
+        f"  POSTGRES_DATABASE: {postgres_db}",
+        f'  CLASSIFICATION_WORKER_COUNT: "{class_worker_count}"',
+        f'  CLASSIFICATION_POLL_INTERVAL_MS: "{class_poll_interval}"',
+        f'  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "{class_auto_confidence}"',
+        f'  CLASSIFICATION_MIN_OBSERVATION_HOURS: "{class_min_hours}"',
+        f'  CLASSIFICATION_MIN_FLOWS_REQUIRED: "{class_min_flows}"',
+        f'  CLASSIFICATION_BATCH_SIZE: "{class_batch_size}"',
+        f'  CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD: "{class_high_confidence}"',
+        f'  CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS: "{class_reclassify_hours}"',
+        f"  LOG_LEVEL: {log_level}",
+        f"  LOG_FORMAT: {log_format}",
+        "",
+        "services:",
+        "  # PostgreSQL Database",
+        "  postgres:",
+        "    image: postgres:15-alpine",
+        "    container_name: flowlens-postgres",
+        "    environment:",
+        f"      POSTGRES_USER: {postgres_user}",
+        f"      POSTGRES_PASSWORD: {postgres_password}",
+        f"      POSTGRES_DB: {postgres_db}",
+        "    volumes:",
+        "      - postgres_data:/var/lib/postgresql/data",
+        "    ports:",
+        f'      - "{postgres_port}:5432"',
+        "    healthcheck:",
+        f'      test: ["CMD-SHELL", "pg_isready -U {postgres_user}"]',
+        "      interval: 10s",
+        "      timeout: 5s",
+        "      retries: 5",
+        "    restart: unless-stopped",
+        "",
+        "  # Database migrations",
+        "  migrations:",
+        "    build:",
+        "      context: .",
+        "      target: production",
+        "    container_name: flowlens-migrations",
+        '    command: ["alembic", "upgrade", "head"]',
+        "    environment:",
+        "      <<: *db-env",
+        "    depends_on:",
+        "      postgres:",
+        "        condition: service_healthy",
+        "",
+        "  # API Service",
+        "  api:",
+        "    build:",
+        "      context: .",
+        "      target: production",
+        "    container_name: flowlens-api",
+        '    command: ["python", "-m", "flowlens.api.main"]',
+        "    environment:",
+        f"      ENVIRONMENT: {environment}",
+        f'      DEBUG: "{debug}"',
+        "      <<: *db-env",
+        f'      API_HOST: "{api_host}"',
+        f'      API_PORT: "{api_port}"',
+        f'      API_WORKERS: "{api_workers}"',
+        f'      AUTH_ENABLED: "{auth_enabled}"',
+        f'      CLASSIFICATION_MIN_OBSERVATION_HOURS: "{class_min_hours}"',
+        f'      CLASSIFICATION_MIN_FLOWS_REQUIRED: "{class_min_flows}"',
+        f"      LOG_LEVEL: {log_level}",
+        f"      LOG_FORMAT: {log_format}",
+        "    ports:",
+        f'      - "{api_port}:8000"',
+        "    depends_on:",
+        "      migrations:",
+        "        condition: service_completed_successfully",
+        "    healthcheck:",
+        '      test: ["CMD", "python", "-c", "import httpx; httpx.get(\'http://localhost:8000/admin/health/live\')"]',
+        "      interval: 30s",
+        "      timeout: 10s",
+        "      retries: 3",
+        "    restart: unless-stopped",
+        "",
+        "  # Flow Ingestion Service",
+        "  ingestion:",
+        "    build:",
+        "      context: .",
+        "      target: production",
+        "    container_name: flowlens-ingestion",
+        '    command: ["python", "-m", "flowlens.ingestion.main"]',
+        "    environment:",
+        f"      ENVIRONMENT: {environment}",
+        "      <<: *db-env",
+        f'      INGESTION_BIND_ADDRESS: "{ingestion_bind}"',
+        f'      INGESTION_NETFLOW_PORT: "{ingestion_netflow_port}"',
+        f'      INGESTION_SFLOW_PORT: "{ingestion_sflow_port}"',
+        f'      INGESTION_BATCH_SIZE: "{ingestion_batch_size}"',
+        f"      LOG_LEVEL: {log_level}",
+        f"      LOG_FORMAT: {log_format}",
+        "    ports:",
+        f'      - "{ingestion_netflow_port}:{ingestion_netflow_port}/udp"',
+        f'      - "{ingestion_sflow_port}:{ingestion_sflow_port}/udp"',
+        "    depends_on:",
+        "      migrations:",
+        "        condition: service_completed_successfully",
+        "    healthcheck:",
+        '      test: ["CMD", "pgrep", "-f", "flowlens.ingestion.main"]',
+        "      interval: 30s",
+        "      timeout: 10s",
+        "      retries: 3",
+        "    restart: unless-stopped",
+        "",
+        "  # Enrichment Service (enriches flow records with DNS, GeoIP, etc.)",
+        "  enrichment:",
+        "    build:",
+        "      context: .",
+        "      target: production",
+        "    container_name: flowlens-enrichment",
+        '    command: ["python", "-m", "flowlens.enrichment.main"]',
+        "    environment:",
+        f"      ENVIRONMENT: {environment}",
+        "      <<: *db-logging-env",
+        f'      ENRICHMENT_WORKER_COUNT: "{enrichment_worker_count}"',
+        f'      ENRICHMENT_BATCH_SIZE: "{enrichment_batch_size}"',
+        "    depends_on:",
+        "      migrations:",
+        "        condition: service_completed_successfully",
+        "    healthcheck:",
+        '      test: ["CMD", "pgrep", "-f", "flowlens.enrichment.main"]',
+        "      interval: 30s",
+        "      timeout: 10s",
+        "      retries: 3",
+        "    restart: unless-stopped",
+        "",
+        "  # Resolution Service (builds assets and dependencies from flows)",
+        "  resolution:",
+        "    build:",
+        "      context: .",
+        "      target: production",
+        "    container_name: flowlens-resolution",
+        '    command: ["python", "-m", "flowlens.resolution.main"]',
+        "    env_file:",
+        "      - .env",
+        "    environment:",
+        f"      ENVIRONMENT: {environment}",
+        "      <<: *db-logging-env",
+        f'      RESOLUTION_WORKER_COUNT: "{resolution_worker_count}"',
+        f'      RESOLUTION_WINDOW_SIZE_MINUTES: "{resolution_window_minutes}"',
+        "    depends_on:",
+        "      migrations:",
+        "        condition: service_completed_successfully",
+        "    healthcheck:",
+        '      test: ["CMD", "pgrep", "-f", "flowlens.resolution.main"]',
+        "      interval: 30s",
+        "      timeout: 10s",
+        "      retries: 3",
+        "    restart: unless-stopped",
+        "",
+        "  # Classification Service (auto-classifies assets based on behavioral features)",
+        "  classification:",
+        "    build:",
+        "      context: .",
+        "      target: production",
+        "    container_name: flowlens-classification",
+        '    command: ["python", "-m", "flowlens.classification.main"]',
+        "    environment:",
+        f"      ENVIRONMENT: {environment}",
+        "      <<: *classification-full-env",
+        "    depends_on:",
+        "      migrations:",
+        "        condition: service_completed_successfully",
+        "    healthcheck:",
+        '      test: ["CMD", "pgrep", "-f", "flowlens.classification.main"]',
+        "      interval: 30s",
+        "      timeout: 10s",
+        "      retries: 3",
+        "    restart: unless-stopped",
+        "",
+        "  # Frontend UI",
+        "  frontend:",
+        "    build:",
+        "      context: ./frontend",
+        "      target: production",
+        "    container_name: flowlens-frontend",
+        "    ports:",
+        '      - "3000:80"',
+        "    depends_on:",
+        "      - api",
+        "    healthcheck:",
+        '      test: ["CMD", "curl", "-f", "http://localhost/"]',
+        "      interval: 30s",
+        "      timeout: 10s",
+        "      retries: 3",
+        "    restart: unless-stopped",
+        "",
+    ]
 
     # Add Redis if enabled
     if redis_enabled:
-        compose["services"]["redis"] = {
-            "image": "redis:7-alpine",
-            "container_name": "flowlens-redis",
-            "ports": [f"{redis_port}:6379"],
-            "healthcheck": {
-                "test": ["CMD", "redis-cli", "ping"],
-                "interval": "10s",
-                "timeout": "5s",
-                "retries": 5,
-            },
-            "restart": "unless-stopped",
-        }
-        redis_env = {
-            "REDIS_ENABLED": "true",
-            "REDIS_HOST": "redis",
-            "REDIS_PORT": "6379",
-        }
-        redis_password = _settings_overrides.get("REDIS_PASSWORD")
-        if redis_password:
-            redis_env["REDIS_PASSWORD"] = redis_password
-        elif settings.redis.password:
-            redis_env["REDIS_PASSWORD"] = settings.redis.password.get_secret_value()
-        # Add to all services
-        for svc in ["api", "ingestion", "enrichment", "resolution"]:
-            compose["services"][svc]["environment"].update(redis_env)
-            if "depends_on" not in compose["services"][svc]:
-                compose["services"][svc]["depends_on"] = {}
-            if isinstance(compose["services"][svc]["depends_on"], list):
-                compose["services"][svc]["depends_on"].append("redis")
-            else:
-                compose["services"][svc]["depends_on"]["redis"] = {"condition": "service_healthy"}
+        redis_lines = [
+            "  # Redis Cache",
+            "  redis:",
+            "    image: redis:7-alpine",
+            "    container_name: flowlens-redis",
+            "    ports:",
+            f'      - "{redis_port}:6379"',
+            "    healthcheck:",
+            '      test: ["CMD", "redis-cli", "ping"]',
+            "      interval: 10s",
+            "      timeout: 5s",
+            "      retries: 5",
+            "    restart: unless-stopped",
+            "",
+        ]
+        # Insert Redis service before frontend
+        frontend_idx = next(i for i, line in enumerate(lines) if "# Frontend UI" in line)
+        lines = lines[:frontend_idx] + redis_lines + lines[frontend_idx:]
 
-    # Generate YAML with nice formatting
-    # Custom representer to handle None values
-    def represent_none(dumper, _):
-        return dumper.represent_scalar('tag:yaml.org,2002:null', '')
+    # Add volumes and networks
+    lines.extend([
+        "volumes:",
+        "  postgres_data:",
+        "",
+        "networks:",
+        "  default:",
+        "    name: flowlens-network",
+    ])
 
-    yaml.add_representer(type(None), represent_none)
-
-    # Add header comment
-    header = """# FlowLens Docker Compose Configuration
-# Generated from System Settings on {date}
-#
-# To use: docker compose up -d
-#
-""".format(date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-    return header + yaml.dump(compose, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    return "\n".join(lines)
 
 
 def is_restart_required() -> bool:
