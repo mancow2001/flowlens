@@ -5,7 +5,7 @@ rule application, bulk updates, and other batch operations.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import DateTime, Integer, String, Text, func
@@ -171,13 +171,19 @@ class BackgroundTask(Base, UUIDMixin, TimestampMixin):
         if not self.started_at:
             return None
 
-        end_time = self.completed_at or datetime.utcnow()
-        return (end_time - self.started_at).total_seconds()
+        end_time = self.completed_at or datetime.now(timezone.utc)
+        # Ensure both are timezone-aware
+        started = self.started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        return (end_time - started).total_seconds()
 
     def start(self, total_items: int = 0) -> None:
         """Mark task as started."""
         self.status = TaskStatus.RUNNING.value
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
         self.total_items = total_items
 
     def update_progress(
@@ -196,17 +202,17 @@ class BackgroundTask(Base, UUIDMixin, TimestampMixin):
     def complete(self, result: dict | None = None) -> None:
         """Mark task as completed successfully."""
         self.status = TaskStatus.COMPLETED.value
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.result = result
 
     def fail(self, error_message: str, error_details: dict | None = None) -> None:
         """Mark task as failed."""
         self.status = TaskStatus.FAILED.value
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.error_message = error_message
         self.error_details = error_details
 
     def cancel(self) -> None:
         """Mark task as cancelled."""
         self.status = TaskStatus.CANCELLED.value
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
