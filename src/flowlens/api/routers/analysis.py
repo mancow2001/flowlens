@@ -1,6 +1,6 @@
 """Analysis API endpoints - blast radius, impact, SPOF detection."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -50,18 +50,27 @@ async def calculate_blast_radius(
     )
     row = result.fetchone()
 
+    # Handle NULL values from database function (can happen with empty results)
     affected_assets = []
-    if row and row.affected_assets:
-        affected_assets = row.affected_assets
+    total_affected = 0
+    critical_affected = 0
+
+    if row:
+        total_affected = row.total_affected if row.total_affected is not None else 0
+        critical_affected = (
+            row.critical_affected if row.critical_affected is not None else 0
+        )
+        if row.affected_assets:
+            affected_assets = row.affected_assets
 
     return BlastRadiusResult(
         asset_id=asset_id,
         asset_name=asset.name,
-        total_affected=row.total_affected if row else 0,
-        critical_affected=row.critical_affected if row else 0,
+        total_affected=total_affected,
+        critical_affected=critical_affected,
         affected_assets=affected_assets,
         max_depth=max_depth,
-        calculated_at=datetime.utcnow(),
+        calculated_at=datetime.now(timezone.utc),
     )
 
 
@@ -142,7 +151,7 @@ async def analyze_impact(
         impacted_assets=impacted_assets,
         impacted_applications=impacted_applications,
         severity_score=severity_score,
-        calculated_at=datetime.utcnow(),
+        calculated_at=datetime.now(timezone.utc),
     )
 
 
@@ -261,7 +270,7 @@ async def detect_spof(
         candidates=candidates,
         total_analyzed=total_analyzed,
         high_risk_count=high_risk_count,
-        calculated_at=datetime.utcnow(),
+        calculated_at=datetime.now(timezone.utc),
     )
 
 
@@ -386,5 +395,5 @@ async def get_critical_paths(
         "asset_name": asset.name,
         "critical_paths": critical_paths,
         "total_critical_paths": len(critical_paths),
-        "calculated_at": datetime.utcnow().isoformat(),
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
     }
