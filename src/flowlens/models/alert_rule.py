@@ -5,7 +5,7 @@ based on change events, with configurable severity and notification settings.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import CheckConstraint, DateTime, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -175,7 +175,13 @@ class AlertRule(Base, UUIDMixin, TimestampMixin):
         if not self.last_triggered_at or self.cooldown_minutes <= 0:
             return False
 
-        elapsed = datetime.utcnow() - self.last_triggered_at
+        now = datetime.now(timezone.utc)
+        # Make last_triggered_at timezone-aware if needed
+        last_triggered = self.last_triggered_at
+        if last_triggered.tzinfo is None:
+            last_triggered = last_triggered.replace(tzinfo=timezone.utc)
+
+        elapsed = now - last_triggered
         return elapsed.total_seconds() < (self.cooldown_minutes * 60)
 
     def trigger(self) -> None:
@@ -183,7 +189,7 @@ class AlertRule(Base, UUIDMixin, TimestampMixin):
 
         Updates last_triggered_at and increments trigger_count.
         """
-        self.last_triggered_at = datetime.utcnow()
+        self.last_triggered_at = datetime.now(timezone.utc)
         self.trigger_count += 1
 
     def render_title(self, context: dict) -> str:

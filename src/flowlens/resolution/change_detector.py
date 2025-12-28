@@ -20,6 +20,10 @@ from flowlens.models.dependency import Dependency
 from flowlens.notifications.base import Notification, NotificationManager, NotificationPriority
 from flowlens.notifications.email import EmailChannel, EmailSettings, create_alert_notification
 from flowlens.notifications.webhook import WebhookChannel, WebhookSettings
+from flowlens.notifications.slack import SlackChannel, SlackSettings
+from flowlens.notifications.teams import TeamsChannel, TeamsSettings
+from flowlens.notifications.pagerduty import PagerDutyChannel, PagerDutySettings
+from flowlens.resolution.alert_rule_evaluator import AlertRuleEvaluator
 from flowlens.api.websocket.manager import (
     EventType,
     broadcast_alert_event,
@@ -57,6 +61,9 @@ class ChangeDetector:
         self._notification_manager: NotificationManager | None = None
         self._notification_settings = app_settings.notifications
 
+        # Initialize alert rule evaluator
+        self._rule_evaluator = AlertRuleEvaluator()
+
     def _get_notification_manager(self) -> NotificationManager:
         """Get or create notification manager singleton."""
         if self._notification_manager is None:
@@ -91,20 +98,56 @@ class ChangeDetector:
                 )
                 self._notification_manager.register_channel(WebhookChannel(webhook_settings))
 
+            # Register Slack channel if enabled
+            if settings.slack.enabled and settings.slack.webhook_url:
+                slack_settings = SlackSettings(
+                    webhook_url=settings.slack.webhook_url,
+                    default_channel=settings.slack.default_channel,
+                    username=settings.slack.username,
+                    icon_emoji=settings.slack.icon_emoji,
+                    timeout=settings.slack.timeout,
+                    retry_count=settings.slack.retry_count,
+                    retry_delay=settings.slack.retry_delay,
+                )
+                self._notification_manager.register_channel(SlackChannel(slack_settings))
+
+            # Register Teams channel if enabled
+            if settings.teams.enabled and settings.teams.webhook_url:
+                teams_settings = TeamsSettings(
+                    webhook_url=settings.teams.webhook_url,
+                    timeout=settings.teams.timeout,
+                    retry_count=settings.teams.retry_count,
+                    retry_delay=settings.teams.retry_delay,
+                )
+                self._notification_manager.register_channel(TeamsChannel(teams_settings))
+
+            # Register PagerDuty channel if enabled
+            if settings.pagerduty.enabled and settings.pagerduty.routing_key:
+                pagerduty_settings = PagerDutySettings(
+                    routing_key=settings.pagerduty.routing_key,
+                    service_name=settings.pagerduty.service_name,
+                    timeout=settings.pagerduty.timeout,
+                    retry_count=settings.pagerduty.retry_count,
+                    retry_delay=settings.pagerduty.retry_delay,
+                )
+                self._notification_manager.register_channel(PagerDutyChannel(pagerduty_settings))
+
         return self._notification_manager
 
     async def _dispatch_notification(
         self,
         alert: Alert,
         event: ChangeEvent,
+        override_channels: list[str] | None = None,
     ) -> list[str]:
         """Dispatch notification for an alert.
 
-        Routes to appropriate channels based on severity.
+        Routes to appropriate channels based on severity or rule override.
 
         Args:
             alert: Alert to notify about.
             event: Source change event.
+            override_channels: Optional list of channels from alert rule.
 
         Returns:
             List of channels that received the notification.
@@ -115,18 +158,21 @@ class ChangeDetector:
         manager = self._get_notification_manager()
         settings = self._notification_settings
 
-        # Determine channels based on severity
+        # Determine channels - use override if provided, otherwise severity-based
         severity_str = alert.severity.value if hasattr(alert.severity, 'value') else str(alert.severity)
-        channels: list[str] = []
 
-        if severity_str == "critical":
-            channels = settings.critical_channels
-        elif severity_str == "error":
-            channels = settings.high_channels
-        elif severity_str == "warning":
-            channels = settings.warning_channels
-        elif severity_str == "info":
-            channels = settings.info_channels
+        if override_channels:
+            channels = override_channels
+        else:
+            channels = []
+            if severity_str == "critical":
+                channels = settings.critical_channels
+            elif severity_str == "error":
+                channels = settings.high_channels
+            elif severity_str == "warning":
+                channels = settings.warning_channels
+            elif severity_str == "info":
+                channels = settings.info_channels
 
         # Filter to only registered channels
         available_channels = [c for c in channels if c in manager.channels]
@@ -151,8 +197,19 @@ class ChangeDetector:
 
         if "webhook" in available_channels:
             # Webhook uses a single URL, not multiple recipients
-            # Use "default" as a placeholder recipient
             recipients["webhook"] = ["default"]
+
+        if "slack" in available_channels:
+            # Slack uses webhook URL configured in settings
+            recipients["slack"] = ["default"]
+
+        if "teams" in available_channels:
+            # Teams uses webhook URL configured in settings
+            recipients["teams"] = ["default"]
+
+        if "pagerduty" in available_channels:
+            # PagerDuty uses routing key configured in settings
+            recipients["pagerduty"] = ["default"]
 
         if not recipients:
             return []
@@ -351,29 +408,56 @@ class ChangeDetector:
         title: str | None = None,
         message: str | None = None,
         send_notification: bool = True,
-    ) -> Alert:
+    ) -> Alert | None:
         """Create an alert from a change event.
+
+        Evaluates alert rules to determine if an alert should be created,
+        and uses rule configuration for severity, title, and notification channels.
 
         Args:
             db: Database session.
             event: Source change event.
-            severity: Alert severity (auto-determined if not provided).
-            title: Alert title (derived from event if not provided).
-            message: Alert message (derived from event if not provided).
+            severity: Alert severity (uses rule or auto-determined if not provided).
+            title: Alert title (uses rule template or derived from event).
+            message: Alert message (uses rule template or derived from event).
             send_notification: Whether to send notification (default: True).
 
         Returns:
-            Created alert.
+            Created alert, or None if suppressed by maintenance window.
         """
-        # Auto-determine severity based on change type and impact
+        # Evaluate alert rules
+        rule_result = await self._rule_evaluator.evaluate(db, event)
+
+        # Check if suppressed by maintenance window
+        if not rule_result.should_create_alert:
+            logger.info(
+                "Alert suppressed",
+                event_id=str(event.id),
+                reason=rule_result.suppression_reason,
+            )
+            return None
+
+        # Use rule-provided values, or fall back to defaults
+        if rule_result.matching_rule:
+            # Rule matched - use rule configuration
+            if severity is None:
+                severity = rule_result.severity
+            if title is None:
+                title = rule_result.rendered_title
+            if message is None:
+                message = rule_result.rendered_description
+            notify_channels = rule_result.notify_channels
+        else:
+            # No rule matched - use default behavior
+            notify_channels = None
+
+        # Fall back to auto-determined values if still None
         if severity is None:
             severity = self._determine_severity(event)
 
-        # Generate title if not provided
         if title is None:
             title = self._generate_alert_title(event)
 
-        # Generate message if not provided
         if message is None:
             message = self._generate_alert_message(event)
 
@@ -394,11 +478,14 @@ class ChangeDetector:
             alert_id=str(alert.id),
             severity=severity.value,
             title=title,
+            rule=rule_result.matching_rule.name if rule_result.matching_rule else None,
         )
 
         # Dispatch notification
         if send_notification:
-            sent_channels = await self._dispatch_notification(alert, event)
+            sent_channels = await self._dispatch_notification(
+                alert, event, override_channels=notify_channels
+            )
             if sent_channels:
                 alert.notification_sent = True
                 alert.notification_channels = sent_channels

@@ -5,7 +5,7 @@ are suppressed for specific assets, environments, or datacenters.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import CheckConstraint, DateTime, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -133,8 +133,16 @@ class MaintenanceWindow(Base, UUIDMixin, TimestampMixin):
         if not self.is_active:
             return False
 
-        now = datetime.utcnow()
-        return self.start_time <= now <= self.end_time
+        now = datetime.now(timezone.utc)
+        # Make times timezone-aware if needed
+        start = self.start_time
+        end = self.end_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
+        return start <= now <= end
 
     def affects_asset(self, asset_id: uuid.UUID, environment: str | None = None, datacenter: str | None = None) -> bool:
         """Check if this maintenance window affects a specific asset.
