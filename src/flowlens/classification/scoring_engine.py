@@ -199,9 +199,10 @@ class ScoringEngine:
         )
 
     def _calculate_confidence(self, best_score: float, second_score: float) -> float:
-        """Calculate confidence based on score margin.
+        """Calculate confidence based on score and margin.
 
-        Confidence is higher when there's a clear winner.
+        Confidence considers both the absolute score and the relative margin.
+        A high score with a clear margin should produce high confidence.
 
         Args:
             best_score: Highest score (0-100).
@@ -216,13 +217,26 @@ class ScoringEngine:
         # Normalize to 0-1 scale
         best_normalized = best_score / 100
 
-        # Margin between best and second best
-        margin = (best_score - second_score) / 100
+        # Absolute margin between best and second best (0-100 scale -> 0-1)
+        abs_margin = (best_score - second_score) / 100
 
-        # Confidence = base score * (0.5 + margin contribution)
-        # This means even with 0 margin, a high score gives 0.5 * score confidence
-        # With max margin (1.0), confidence approaches the score itself
-        confidence = best_normalized * (0.5 + min(margin, 0.5))
+        # Confidence is primarily based on the score itself,
+        # with a smaller penalty if the margin is very small.
+        #
+        # Formula: confidence = score * margin_factor
+        # where margin_factor ranges from 0.7 (no margin) to 1.0 (large margin)
+        #
+        # Examples:
+        # - Score 85, margin 32: 0.85 * (0.7 + 0.3 * min(0.32/0.3, 1)) = 0.85 * 1.0 = 0.85
+        # - Score 85, margin 20: 0.85 * (0.7 + 0.3 * min(0.20/0.3, 1)) = 0.85 * 0.9 = 0.765
+        # - Score 85, margin 10: 0.85 * (0.7 + 0.3 * min(0.10/0.3, 1)) = 0.85 * 0.8 = 0.68
+        # - Score 85, margin 0:  0.85 * 0.7 = 0.595
+        #
+        # A margin of 30+ points is considered "decisive" and gives full credit.
+        decisive_margin = 0.30  # 30 points difference is decisive
+        margin_factor = 0.7 + 0.3 * min(abs_margin / decisive_margin, 1.0)
+
+        confidence = best_normalized * margin_factor
 
         return min(1.0, confidence)
 
