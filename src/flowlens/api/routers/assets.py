@@ -797,14 +797,46 @@ async def create_asset(
         external_id=data.external_id,
         description=data.description,
         tags=data.tags,
-        metadata=data.metadata,
+        extra_data=data.metadata,
     )
 
     db.add(asset)
     await db.flush()
     await db.refresh(asset)
 
-    return AssetResponse.model_validate(asset)
+    return AssetResponse(
+        id=asset.id,
+        name=asset.name,
+        display_name=asset.display_name,
+        asset_type=asset.asset_type,
+        ip_address=str(asset.ip_address),
+        hostname=asset.hostname,
+        fqdn=asset.fqdn,
+        mac_address=asset.mac_address,
+        subnet=str(asset.subnet) if asset.subnet else None,
+        vlan_id=asset.vlan_id,
+        datacenter=asset.datacenter,
+        environment=asset.environment,
+        country_code=asset.country_code,
+        city=asset.city,
+        is_internal=asset.is_internal,
+        is_critical=asset.is_critical,
+        criticality_score=asset.criticality_score,
+        owner=asset.owner,
+        team=asset.team,
+        external_id=asset.external_id,
+        description=asset.description,
+        tags=asset.tags,
+        metadata=asset.extra_data,
+        first_seen=asset.first_seen,
+        last_seen=asset.last_seen,
+        bytes_in_total=asset.bytes_in_total,
+        bytes_out_total=asset.bytes_out_total,
+        connections_in=asset.connections_in,
+        connections_out=asset.connections_out,
+        created_at=asset.created_at,
+        updated_at=asset.updated_at,
+    )
 
 
 @router.put("/{asset_id}", response_model=AssetResponse)
@@ -829,12 +861,48 @@ async def update_asset(
     # Update fields
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(asset, field, value)
+        # Map 'metadata' field to 'extra_data' on the model
+        if field == "metadata":
+            setattr(asset, "extra_data", value)
+        else:
+            setattr(asset, field, value)
 
     await db.flush()
     await db.refresh(asset)
 
-    return AssetResponse.model_validate(asset)
+    return AssetResponse(
+        id=asset.id,
+        name=asset.name,
+        display_name=asset.display_name,
+        asset_type=asset.asset_type,
+        ip_address=str(asset.ip_address),
+        hostname=asset.hostname,
+        fqdn=asset.fqdn,
+        mac_address=asset.mac_address,
+        subnet=str(asset.subnet) if asset.subnet else None,
+        vlan_id=asset.vlan_id,
+        datacenter=asset.datacenter,
+        environment=asset.environment,
+        country_code=asset.country_code,
+        city=asset.city,
+        is_internal=asset.is_internal,
+        is_critical=asset.is_critical,
+        criticality_score=asset.criticality_score,
+        owner=asset.owner,
+        team=asset.team,
+        external_id=asset.external_id,
+        description=asset.description,
+        tags=asset.tags,
+        metadata=asset.extra_data,
+        first_seen=asset.first_seen,
+        last_seen=asset.last_seen,
+        bytes_in_total=asset.bytes_in_total,
+        bytes_out_total=asset.bytes_out_total,
+        connections_in=asset.connections_in,
+        connections_out=asset.connections_out,
+        created_at=asset.created_at,
+        updated_at=asset.updated_at,
+    )
 
 
 @router.patch("/{asset_id}", response_model=AssetResponse)
@@ -859,12 +927,48 @@ async def patch_asset(
     # Update only provided fields
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(asset, field, value)
+        # Map 'metadata' field to 'extra_data' on the model
+        if field == "metadata":
+            setattr(asset, "extra_data", value)
+        else:
+            setattr(asset, field, value)
 
     await db.flush()
     await db.refresh(asset)
 
-    return AssetResponse.model_validate(asset)
+    return AssetResponse(
+        id=asset.id,
+        name=asset.name,
+        display_name=asset.display_name,
+        asset_type=asset.asset_type,
+        ip_address=str(asset.ip_address),
+        hostname=asset.hostname,
+        fqdn=asset.fqdn,
+        mac_address=asset.mac_address,
+        subnet=str(asset.subnet) if asset.subnet else None,
+        vlan_id=asset.vlan_id,
+        datacenter=asset.datacenter,
+        environment=asset.environment,
+        country_code=asset.country_code,
+        city=asset.city,
+        is_internal=asset.is_internal,
+        is_critical=asset.is_critical,
+        criticality_score=asset.criticality_score,
+        owner=asset.owner,
+        team=asset.team,
+        external_id=asset.external_id,
+        description=asset.description,
+        tags=asset.tags,
+        metadata=asset.extra_data,
+        first_seen=asset.first_seen,
+        last_seen=asset.last_seen,
+        bytes_in_total=asset.bytes_in_total,
+        bytes_out_total=asset.bytes_out_total,
+        connections_in=asset.connections_in,
+        connections_out=asset.connections_out,
+        created_at=asset.created_at,
+        updated_at=asset.updated_at,
+    )
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)

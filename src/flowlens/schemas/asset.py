@@ -33,6 +33,14 @@ class AssetBase(BaseModel):
     tags: dict[str, str] | None = None
     metadata: dict | None = None
 
+    @field_validator("environment", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v: Any) -> Environment | None:
+        """Convert empty string to None for environment field."""
+        if v == "" or v is None:
+            return None
+        return v
+
 
 class AssetCreate(AssetBase):
     """Schema for creating an asset."""
@@ -62,6 +70,14 @@ class AssetUpdate(BaseModel):
     description: str | None = None
     tags: dict[str, str] | None = None
     metadata: dict | None = None
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v: Any) -> Environment | None:
+        """Convert empty string to None for environment field."""
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class AssetResponse(BaseModel):
