@@ -471,7 +471,7 @@ async def bulk_acknowledge_alerts(
     data: AlertAcknowledge,
     db: DbSession,
 ) -> dict:
-    """Acknowledge multiple alerts.
+    """Acknowledge multiple alerts by ID.
 
     Args:
         alert_ids: List of alert IDs.
@@ -507,7 +507,7 @@ async def bulk_resolve_alerts(
     data: AlertResolve,
     db: DbSession,
 ) -> dict:
-    """Resolve multiple alerts.
+    """Resolve multiple alerts by ID.
 
     Args:
         alert_ids: List of alert IDs.
@@ -537,6 +537,120 @@ async def bulk_resolve_alerts(
     )
 
     await db.commit()
+
+    return {"resolved_count": result.rowcount}
+
+
+@router.post("/bulk/acknowledge-filtered", response_model=dict)
+async def bulk_acknowledge_filtered(
+    data: AlertAcknowledge,
+    db: DbSession,
+    severity: str | None = Query(None, pattern="^(info|warning|error|critical)$"),
+    is_resolved: bool | None = None,
+    asset_id: UUID | None = None,
+) -> dict:
+    """Acknowledge all alerts matching filters.
+
+    Args:
+        data: Acknowledgment data.
+        db: Database session.
+        severity: Filter by severity.
+        is_resolved: Filter by resolution status.
+        asset_id: Filter by related asset.
+
+    Returns:
+        Count of acknowledged alerts.
+    """
+    now = datetime.utcnow()
+
+    # Build query conditions
+    conditions = [Alert.is_acknowledged == False]
+    if severity:
+        conditions.append(Alert.severity == severity)
+    if is_resolved is not None:
+        conditions.append(Alert.is_resolved == is_resolved)
+    if asset_id:
+        conditions.append(Alert.asset_id == asset_id)
+
+    result = await db.execute(
+        update(Alert)
+        .where(*conditions)
+        .values(
+            is_acknowledged=True,
+            acknowledged_at=now,
+            acknowledged_by=data.acknowledged_by,
+        )
+    )
+
+    await db.commit()
+
+    logger.info(
+        "Bulk acknowledged alerts with filters",
+        acknowledged_count=result.rowcount,
+        severity=severity,
+        is_resolved=is_resolved,
+        asset_id=str(asset_id) if asset_id else None,
+        acknowledged_by=data.acknowledged_by,
+    )
+
+    return {"acknowledged_count": result.rowcount}
+
+
+@router.post("/bulk/resolve-filtered", response_model=dict)
+async def bulk_resolve_filtered(
+    data: AlertResolve,
+    db: DbSession,
+    severity: str | None = Query(None, pattern="^(info|warning|error|critical)$"),
+    is_acknowledged: bool | None = None,
+    asset_id: UUID | None = None,
+) -> dict:
+    """Resolve all alerts matching filters.
+
+    Args:
+        data: Resolution data.
+        db: Database session.
+        severity: Filter by severity.
+        is_acknowledged: Filter by acknowledgment status.
+        asset_id: Filter by related asset.
+
+    Returns:
+        Count of resolved alerts.
+    """
+    now = datetime.utcnow()
+
+    # Build query conditions
+    conditions = [Alert.is_resolved == False]
+    if severity:
+        conditions.append(Alert.severity == severity)
+    if is_acknowledged is not None:
+        conditions.append(Alert.is_acknowledged == is_acknowledged)
+    if asset_id:
+        conditions.append(Alert.asset_id == asset_id)
+
+    result = await db.execute(
+        update(Alert)
+        .where(*conditions)
+        .values(
+            is_resolved=True,
+            resolved_at=now,
+            resolved_by=data.resolved_by,
+            resolution_notes=data.resolution_notes,
+            is_acknowledged=True,
+            acknowledged_at=func.coalesce(Alert.acknowledged_at, now),
+            acknowledged_by=func.coalesce(Alert.acknowledged_by, data.resolved_by),
+        )
+    )
+
+    await db.commit()
+
+    logger.info(
+        "Bulk resolved alerts with filters",
+        resolved_count=result.rowcount,
+        severity=severity,
+        is_acknowledged=is_acknowledged,
+        asset_id=str(asset_id) if asset_id else None,
+        resolved_by=data.resolved_by,
+    )
 
     return {"resolved_count": result.rowcount}
 

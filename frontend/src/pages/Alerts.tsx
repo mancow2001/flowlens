@@ -5,6 +5,7 @@ import Table from '../components/common/Table';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
+import AlertDetailSlideOver from '../components/alerts/AlertDetailSlideOver';
 import { alertApi } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import type { Alert, AlertSeverity } from '../types';
@@ -26,6 +27,8 @@ export default function Alerts() {
   );
   const [isResolved, setIsResolved] = useState<boolean | undefined>(undefined);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [isSlideOverOpen, setIsSlideOverOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['alerts', page, severity, isAcknowledged, isResolved],
@@ -42,15 +45,23 @@ export default function Alerts() {
 
   const acknowledgeMutation = useMutation({
     mutationFn: (id: string) => alertApi.acknowledge(id, 'admin'),
-    onSuccess: () => {
+    onSuccess: (updatedAlert) => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      // Update selected alert if it's the one we just acknowledged
+      if (selectedAlert?.id === updatedAlert.id) {
+        setSelectedAlert(updatedAlert);
+      }
     },
   });
 
   const resolveMutation = useMutation({
     mutationFn: (id: string) => alertApi.resolve(id, 'admin'),
-    onSuccess: () => {
+    onSuccess: (updatedAlert) => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      // Update selected alert if it's the one we just resolved
+      if (selectedAlert?.id === updatedAlert.id) {
+        setSelectedAlert(updatedAlert);
+      }
     },
   });
 
@@ -70,6 +81,28 @@ export default function Alerts() {
     },
   });
 
+  const bulkAcknowledgeFilteredMutation = useMutation({
+    mutationFn: () =>
+      alertApi.bulkAcknowledgeFiltered('admin', {
+        severity: severity || undefined,
+        is_resolved: isResolved,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+    },
+  });
+
+  const bulkResolveFilteredMutation = useMutation({
+    mutationFn: () =>
+      alertApi.bulkResolveFiltered('admin', undefined, {
+        severity: severity || undefined,
+        is_acknowledged: isAcknowledged,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+    },
+  });
+
   const toggleSelect = (id: string) => {
     const newSet = new Set(selectedIds);
     if (newSet.has(id)) {
@@ -86,6 +119,17 @@ export default function Alerts() {
     } else {
       setSelectedIds(new Set(data?.items.map((a) => a.id) ?? []));
     }
+  };
+
+  const handleRowClick = (alert: Alert) => {
+    setSelectedAlert(alert);
+    setIsSlideOverOpen(true);
+  };
+
+  const handleCloseSlideOver = () => {
+    setIsSlideOverOpen(false);
+    // Keep selectedAlert for transition animation
+    setTimeout(() => setSelectedAlert(null), 300);
   };
 
   const columns = [
@@ -203,6 +247,10 @@ export default function Alerts() {
 
   const totalPages = Math.ceil((data?.total ?? 0) / 20);
 
+  // Calculate counts for bulk action buttons
+  const unacknowledgedCount = data?.summary?.unacknowledged ?? 0;
+  const unresolvedCount = data?.summary?.unresolved ?? 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -260,7 +308,7 @@ export default function Alerts() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters and Bulk Actions */}
       <Card>
         <div className="flex flex-wrap items-center gap-4">
           <select
@@ -321,7 +369,7 @@ export default function Alerts() {
             </Button>
           )}
 
-          {/* Bulk actions */}
+          {/* Selected items bulk actions */}
           {selectedIds.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-sm text-slate-400">
@@ -350,6 +398,37 @@ export default function Alerts() {
             </div>
           )}
         </div>
+
+        {/* Bulk All Actions */}
+        {(unacknowledgedCount > 0 || unresolvedCount > 0) && selectedIds.size === 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-700 flex items-center gap-4">
+            <span className="text-sm text-slate-400">Bulk actions:</span>
+            {unacknowledgedCount > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => bulkAcknowledgeFilteredMutation.mutate()}
+                disabled={bulkAcknowledgeFilteredMutation.isPending}
+              >
+                {bulkAcknowledgeFilteredMutation.isPending
+                  ? 'Acknowledging...'
+                  : `Acknowledge All (${unacknowledgedCount})`}
+              </Button>
+            )}
+            {unresolvedCount > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => bulkResolveFilteredMutation.mutate()}
+                disabled={bulkResolveFilteredMutation.isPending}
+              >
+                {bulkResolveFilteredMutation.isPending
+                  ? 'Resolving...'
+                  : `Resolve All (${unresolvedCount})`}
+              </Button>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* Alerts Table */}
@@ -359,6 +438,7 @@ export default function Alerts() {
           data={data?.items ?? []}
           keyExtractor={(item) => item.id}
           emptyMessage="No alerts found"
+          onRowClick={handleRowClick}
         />
 
         {/* Pagination */}
@@ -388,6 +468,17 @@ export default function Alerts() {
           </div>
         )}
       </Card>
+
+      {/* Alert Detail Slide-over */}
+      <AlertDetailSlideOver
+        alert={selectedAlert}
+        isOpen={isSlideOverOpen}
+        onClose={handleCloseSlideOver}
+        onAcknowledge={(id) => acknowledgeMutation.mutate(id)}
+        onResolve={(id) => resolveMutation.mutate(id)}
+        isAcknowledging={acknowledgeMutation.isPending}
+        isResolving={resolveMutation.isPending}
+      />
     </div>
   );
 }

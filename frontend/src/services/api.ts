@@ -297,6 +297,39 @@ export const alertApi = {
     });
     return data;
   },
+
+  bulkAcknowledgeFiltered: async (
+    by: string,
+    filters?: {
+      severity?: string;
+      is_resolved?: boolean;
+      asset_id?: string;
+    }
+  ): Promise<{ acknowledged_count: number }> => {
+    const { data } = await api.post(
+      '/alerts/bulk/acknowledge-filtered',
+      { acknowledged_by: by },
+      { params: filters }
+    );
+    return data;
+  },
+
+  bulkResolveFiltered: async (
+    by: string,
+    notes?: string,
+    filters?: {
+      severity?: string;
+      is_acknowledged?: boolean;
+      asset_id?: string;
+    }
+  ): Promise<{ resolved_count: number }> => {
+    const { data } = await api.post(
+      '/alerts/bulk/resolve-filtered',
+      { resolved_by: by, resolution_notes: notes },
+      { params: filters }
+    );
+    return data;
+  },
 };
 
 // Change event endpoints
