@@ -28,6 +28,7 @@ import type {
   ApplicationMemberCreate,
   ApplicationMemberUpdate,
   ApplicationListResponse,
+  ApplicationTopology,
 } from '../types';
 
 const api = axios.create({
@@ -1018,16 +1019,24 @@ export const applicationsApi = {
   setEntryPoint: async (
     applicationId: string,
     assetId: string,
-    order?: number
+    options?: { order?: number; port?: number; protocol?: number }
   ): Promise<ApplicationMember> => {
     const { data } = await api.post(`/applications/${applicationId}/entry-points/${assetId}`, null, {
-      params: { order },
+      params: options,
     });
     return data;
   },
 
   unsetEntryPoint: async (applicationId: string, assetId: string): Promise<ApplicationMember> => {
     const { data } = await api.delete(`/applications/${applicationId}/entry-points/${assetId}`);
+    return data;
+  },
+
+  // Topology endpoint
+  getTopology: async (id: string, includeExternal?: boolean): Promise<ApplicationTopology> => {
+    const { data } = await api.get(`/applications/${id}/topology`, {
+      params: { include_external: includeExternal },
+    });
     return data;
   },
 };

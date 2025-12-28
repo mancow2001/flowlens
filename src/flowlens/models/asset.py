@@ -495,6 +495,15 @@ class ApplicationMember(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
+    # Entry point port/protocol (only used when is_entry_point=True)
+    entry_point_port: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+
+    entry_point_protocol: Mapped[int | None] = mapped_column(
+        nullable=True,  # IANA protocol number (6=TCP, 17=UDP, etc.)
+    )
+
     # Relationships
     application: Mapped["Application"] = relationship(
         "Application",

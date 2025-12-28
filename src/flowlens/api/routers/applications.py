@@ -42,6 +42,8 @@ def _build_member_response(member: ApplicationMember) -> ApplicationMemberRespon
         role=member.role,
         is_entry_point=member.is_entry_point,
         entry_point_order=member.entry_point_order,
+        entry_point_port=member.entry_point_port,
+        entry_point_protocol=member.entry_point_protocol,
         created_at=member.created_at,
         updated_at=member.updated_at,
     )
@@ -225,6 +227,8 @@ async def create_application(
                 role=member_data.role,
                 is_entry_point=member_data.is_entry_point,
                 entry_point_order=member_data.entry_point_order,
+                entry_point_port=member_data.entry_point_port,
+                entry_point_protocol=member_data.entry_point_protocol,
             )
             db.add(member)
             members.append((member, assets_map[member_data.asset_id]))
@@ -252,6 +256,8 @@ async def create_application(
             role=member.role,
             is_entry_point=member.is_entry_point,
             entry_point_order=member.entry_point_order,
+            entry_point_port=member.entry_point_port,
+            entry_point_protocol=member.entry_point_protocol,
             created_at=member.created_at,
             updated_at=member.updated_at,
         ))
@@ -453,6 +459,8 @@ async def add_application_member(
         role=data.role,
         is_entry_point=data.is_entry_point,
         entry_point_order=data.entry_point_order,
+        entry_point_port=data.entry_point_port,
+        entry_point_protocol=data.entry_point_protocol,
     )
     db.add(member)
     await db.flush()
@@ -475,6 +483,8 @@ async def add_application_member(
         role=member.role,
         is_entry_point=member.is_entry_point,
         entry_point_order=member.entry_point_order,
+        entry_point_port=member.entry_point_port,
+        entry_point_protocol=member.entry_point_protocol,
         created_at=member.created_at,
         updated_at=member.updated_at,
     )
@@ -564,8 +574,10 @@ async def set_entry_point(
     db: DbSession,
     user: AuthenticatedUser,
     order: int | None = Query(None, description="Entry point order (lower = first)"),
+    port: int | None = Query(None, ge=1, le=65535, description="Entry point port"),
+    protocol: int | None = Query(None, ge=0, le=255, description="Entry point protocol (IANA number)"),
 ) -> ApplicationMemberResponse:
-    """Mark an existing member as an entry point."""
+    """Mark an existing member as an entry point with optional port/protocol."""
     result = await db.execute(
         select(ApplicationMember)
         .where(
@@ -584,6 +596,8 @@ async def set_entry_point(
 
     member.is_entry_point = True
     member.entry_point_order = order
+    member.entry_point_port = port
+    member.entry_point_protocol = protocol
 
     await db.flush()
     await db.refresh(member)
@@ -620,8 +634,177 @@ async def unset_entry_point(
 
     member.is_entry_point = False
     member.entry_point_order = None
+    member.entry_point_port = None
+    member.entry_point_protocol = None
 
     await db.flush()
     await db.refresh(member)
 
     return _build_member_response(member)
+
+
+# =============================================================================
+# Application Topology Endpoint
+# =============================================================================
+
+
+@router.get("/{application_id}/topology")
+async def get_application_topology(
+    application_id: UUID,
+    db: DbSession,
+    user: AuthenticatedUser,
+    include_external: bool = Query(False, description="Include connections to/from external assets"),
+) -> dict:
+    """Get topology data for an application showing connections between members.
+
+    Returns nodes (application members) and edges (connections between them).
+    Entry points are marked with their port/protocol information.
+    """
+    from flowlens.models.dependency import Dependency
+
+    # Get application with members
+    query = (
+        select(Application)
+        .where(Application.id == application_id)
+        .options(
+            selectinload(Application.members).selectinload(ApplicationMember.asset)
+        )
+    )
+    result = await db.execute(query)
+    application = result.scalar_one_or_none()
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Application {application_id} not found",
+        )
+
+    # Get asset IDs of all members
+    member_asset_ids = {m.asset_id for m in application.members}
+
+    if not member_asset_ids:
+        return {
+            "application": {
+                "id": str(application.id),
+                "name": application.name,
+                "display_name": application.display_name,
+            },
+            "nodes": [],
+            "edges": [],
+            "entry_points": [],
+        }
+
+    # Get connections between members (internal connections)
+    connections_query = (
+        select(Dependency)
+        .where(
+            Dependency.source_asset_id.in_(member_asset_ids),
+            Dependency.target_asset_id.in_(member_asset_ids),
+        )
+    )
+
+    if include_external:
+        # Also get connections to/from external assets
+        external_query = (
+            select(Dependency)
+            .where(
+                (Dependency.source_asset_id.in_(member_asset_ids))
+                | (Dependency.target_asset_id.in_(member_asset_ids))
+            )
+        )
+        connections_query = external_query
+
+    result = await db.execute(connections_query)
+    connections = result.scalars().all()
+
+    # Build node data
+    nodes = []
+    member_map = {m.asset_id: m for m in application.members}
+
+    for member in application.members:
+        asset = member.asset
+        nodes.append({
+            "id": str(asset.id),
+            "name": asset.name,
+            "display_name": asset.display_name,
+            "ip_address": str(asset.ip_address),
+            "asset_type": asset.asset_type,
+            "is_entry_point": member.is_entry_point,
+            "entry_point_port": member.entry_point_port,
+            "entry_point_protocol": member.entry_point_protocol,
+            "entry_point_order": member.entry_point_order,
+            "role": member.role,
+            "is_critical": asset.is_critical,
+        })
+
+    # If including external, we need to fetch external assets
+    external_asset_ids = set()
+    if include_external:
+        for conn in connections:
+            if conn.source_asset_id not in member_asset_ids:
+                external_asset_ids.add(conn.source_asset_id)
+            if conn.target_asset_id not in member_asset_ids:
+                external_asset_ids.add(conn.target_asset_id)
+
+        if external_asset_ids:
+            ext_result = await db.execute(
+                select(Asset).where(Asset.id.in_(external_asset_ids))
+            )
+            for asset in ext_result.scalars().all():
+                nodes.append({
+                    "id": str(asset.id),
+                    "name": asset.name,
+                    "display_name": asset.display_name,
+                    "ip_address": str(asset.ip_address),
+                    "asset_type": asset.asset_type,
+                    "is_entry_point": False,
+                    "entry_point_port": None,
+                    "entry_point_protocol": None,
+                    "entry_point_order": None,
+                    "role": None,
+                    "is_critical": asset.is_critical,
+                    "is_external": True,  # Mark as external to application
+                })
+
+    # Build edge data
+    edges = []
+    for conn in connections:
+        edges.append({
+            "source": str(conn.source_asset_id),
+            "target": str(conn.target_asset_id),
+            "target_port": conn.target_port,
+            "protocol": conn.protocol,
+            "service_type": conn.service_type,
+            "bytes_last_24h": conn.bytes_last_24h,
+            "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
+            "is_internal": (
+                conn.source_asset_id in member_asset_ids
+                and conn.target_asset_id in member_asset_ids
+            ),
+        })
+
+    # Build entry points list with port/protocol info
+    entry_points = [
+        {
+            "asset_id": str(m.asset_id),
+            "asset_name": m.asset.name,
+            "port": m.entry_point_port,
+            "protocol": m.entry_point_protocol,
+            "order": m.entry_point_order,
+        }
+        for m in sorted(
+            [m for m in application.members if m.is_entry_point],
+            key=lambda m: m.entry_point_order or 9999,
+        )
+    ]
+
+    return {
+        "application": {
+            "id": str(application.id),
+            "name": application.name,
+            "display_name": application.display_name,
+        },
+        "nodes": nodes,
+        "edges": edges,
+        "entry_points": entry_points,
+    }

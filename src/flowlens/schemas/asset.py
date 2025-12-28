@@ -197,6 +197,8 @@ class ApplicationMemberCreate(BaseModel):
     role: str | None = Field(None, max_length=50)
     is_entry_point: bool = False
     entry_point_order: int | None = None
+    entry_point_port: int | None = Field(None, ge=1, le=65535)
+    entry_point_protocol: int | None = Field(None, ge=0, le=255)  # IANA protocol number
 
 
 class ApplicationMemberUpdate(BaseModel):
@@ -205,6 +207,8 @@ class ApplicationMemberUpdate(BaseModel):
     role: str | None = Field(None, max_length=50)
     is_entry_point: bool | None = None
     entry_point_order: int | None = None
+    entry_point_port: int | None = Field(None, ge=1, le=65535)
+    entry_point_protocol: int | None = Field(None, ge=0, le=255)
 
 
 class ApplicationMemberResponse(BaseModel):
@@ -218,6 +222,8 @@ class ApplicationMemberResponse(BaseModel):
     role: str | None
     is_entry_point: bool
     entry_point_order: int | None
+    entry_point_port: int | None
+    entry_point_protocol: int | None
     created_at: datetime
     updated_at: datetime
 

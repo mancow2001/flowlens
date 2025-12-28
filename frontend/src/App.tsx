@@ -6,6 +6,7 @@ import Topology from './pages/Topology';
 import Assets from './pages/Assets';
 import AssetDetail from './pages/AssetDetail';
 import Applications from './pages/Applications';
+import ApplicationDetail from './pages/ApplicationDetail';
 import Dependencies from './pages/Dependencies';
 import Alerts from './pages/Alerts';
 import AlertRules from './pages/AlertRules';
@@ -50,6 +51,7 @@ function App() {
           <Route path="/assets" element={<Assets />} />
           <Route path="/assets/:id" element={<AssetDetail />} />
           <Route path="/applications" element={<Applications />} />
+          <Route path="/applications/:id" element={<ApplicationDetail />} />
           <Route path="/dependencies" element={<Dependencies />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/changes" element={<Changes />} />

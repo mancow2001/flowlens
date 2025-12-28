@@ -498,6 +498,8 @@ export interface ApplicationMember {
   role: string | null;
   is_entry_point: boolean;
   entry_point_order: number | null;
+  entry_point_port: number | null;
+  entry_point_protocol: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -526,6 +528,8 @@ export interface ApplicationMemberCreate {
   role?: string | null;
   is_entry_point?: boolean;
   entry_point_order?: number | null;
+  entry_point_port?: number | null;
+  entry_point_protocol?: number | null;
 }
 
 export interface ApplicationCreate {
@@ -557,9 +561,57 @@ export interface ApplicationMemberUpdate {
   role?: string | null;
   is_entry_point?: boolean;
   entry_point_order?: number | null;
+  entry_point_port?: number | null;
+  entry_point_protocol?: number | null;
 }
 
 export interface ApplicationListResponse extends PaginatedResponse<Application> {}
+
+// Application topology types
+export interface ApplicationTopologyNode {
+  id: string;
+  name: string;
+  display_name: string | null;
+  ip_address: string;
+  asset_type: AssetType;
+  is_entry_point: boolean;
+  entry_point_port: number | null;
+  entry_point_protocol: number | null;
+  entry_point_order: number | null;
+  role: string | null;
+  is_critical: boolean;
+  is_external?: boolean;
+}
+
+export interface ApplicationTopologyEdge {
+  source: string;
+  target: string;
+  target_port: number;
+  protocol: number;
+  service_type: string | null;
+  bytes_last_24h: number | null;
+  last_seen: string | null;
+  is_internal: boolean;
+}
+
+export interface ApplicationEntryPoint {
+  asset_id: string;
+  asset_name: string;
+  port: number | null;
+  protocol: number | null;
+  order: number | null;
+}
+
+export interface ApplicationTopology {
+  application: {
+    id: string;
+    name: string;
+    display_name: string | null;
+  };
+  nodes: ApplicationTopologyNode[];
+  edges: ApplicationTopologyEdge[];
+  entry_points: ApplicationEntryPoint[];
+}
 
 // Asset summary type (referenced by ApplicationMember)
 export interface AssetSummary {
