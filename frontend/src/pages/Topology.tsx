@@ -994,29 +994,6 @@ export default function Topology() {
         setHoveredEdge(null);
       });
 
-    // Create port labels on edges
-    const edgeLabels = linksGroup
-      .selectAll('text.edge-label')
-      .data(links.filter(l => !l.isGatewayEdge))
-      .join('text')
-      .attr('class', 'edge-label')
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#94a3b8')
-      .attr('font-size', 9)
-      .attr('pointer-events', 'none')
-      .text((d) => {
-        // For aggregated edges from collapsed groups, show connection count
-        if (d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1) {
-          return `${d.aggregatedCount} conn`;
-        }
-        // For edges with multiple ports, format as "Port#1, Port#2, Port#N"
-        const ports = d.target_ports && d.target_ports.length > 0 ? d.target_ports : [d.target_port];
-        if (ports.length > 1) {
-          return ports.join(', ');
-        }
-        return ports[0].toString();
-      });
-
     // Create drag behavior for individual nodes
     const dragBehavior = d3
       .drag<SVGGElement, SimNode>()
@@ -1195,20 +1172,6 @@ export default function Topology() {
         .attr('y1', (d) => (d.source as SimNode).y!)
         .attr('x2', (d) => (d.target as SimNode).x!)
         .attr('y2', (d) => (d.target as SimNode).y!);
-
-      // Update edge label positions (midpoint of the edge)
-      edgeLabels
-        .attr('x', (d) => {
-          const source = d.source as SimNode;
-          const target = d.target as SimNode;
-          return (source.x! + target.x!) / 2;
-        })
-        .attr('y', (d) => {
-          const source = d.source as SimNode;
-          const target = d.target as SimNode;
-          // Offset slightly above the line
-          return ((source.y! + target.y!) / 2) - 5;
-        });
 
       node.attr('transform', (d) => `translate(${d.x},${d.y})`);
 
