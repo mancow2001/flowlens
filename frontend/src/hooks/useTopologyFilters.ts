@@ -59,28 +59,39 @@ export function useTopologyFilters() {
 
   // Sync filters to URL and localStorage
   useEffect(() => {
-    const params = new URLSearchParams();
+    // Use a function to get current params and preserve non-filter params (e.g., source, target from search)
+    setSearchParams((currentParams) => {
+      const params = new URLSearchParams(currentParams);
 
-    if (filters.environments.length > 0) {
-      params.set('environments', filters.environments.join(','));
-    }
-    if (filters.datacenters.length > 0) {
-      params.set('datacenters', filters.datacenters.join(','));
-    }
-    if (filters.assetTypes.length > 0) {
-      params.set('assetTypes', filters.assetTypes.join(','));
-    }
-    if (!filters.includeExternal) {
-      params.set('includeExternal', 'false');
-    }
-    if (filters.minBytes24h > 0) {
-      params.set('minBytes24h', filters.minBytes24h.toString());
-    }
-    if (filters.asOf) {
-      params.set('asOf', filters.asOf);
-    }
+      // Clear filter-specific params first, then set them if they have values
+      params.delete('environments');
+      params.delete('datacenters');
+      params.delete('assetTypes');
+      params.delete('includeExternal');
+      params.delete('minBytes24h');
+      params.delete('asOf');
 
-    setSearchParams(params, { replace: true });
+      if (filters.environments.length > 0) {
+        params.set('environments', filters.environments.join(','));
+      }
+      if (filters.datacenters.length > 0) {
+        params.set('datacenters', filters.datacenters.join(','));
+      }
+      if (filters.assetTypes.length > 0) {
+        params.set('assetTypes', filters.assetTypes.join(','));
+      }
+      if (!filters.includeExternal) {
+        params.set('includeExternal', 'false');
+      }
+      if (filters.minBytes24h > 0) {
+        params.set('minBytes24h', filters.minBytes24h.toString());
+      }
+      if (filters.asOf) {
+        params.set('asOf', filters.asOf);
+      }
+
+      return params;
+    }, { replace: true });
 
     // Also save to localStorage
     try {
