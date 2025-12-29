@@ -548,10 +548,10 @@ export default function ApplicationDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
         {/* Topology Visualization */}
-        <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative">
-          <div ref={containerRef} className="w-full h-[600px]">
+        <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative h-full min-h-[500px]">
+          <div ref={containerRef} className="w-full h-full">
             <svg
               ref={svgRef}
               width={dimensions.width}
