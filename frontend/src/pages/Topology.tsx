@@ -1317,16 +1317,16 @@ export default function Topology() {
       console.log('[SearchHighlight] Polling attempt', attempts);
       const svg = d3.select(svgRef.current);
       let nodeFound = false;
-      let nodeData: SimNode | null = null;
+      let nodePosition: { x: number; y: number } | null = null;
 
       svg.selectAll<SVGGElement, SimNode>('.node').each(function(d) {
         if (d.id === highlightSourceId && d.x !== undefined && d.y !== undefined) {
           nodeFound = true;
-          nodeData = d;
+          nodePosition = { x: d.x, y: d.y };
         }
       });
 
-      console.log('[SearchHighlight] Node found in DOM:', nodeFound, nodeData ? { x: nodeData.x, y: nodeData.y } : null);
+      console.log('[SearchHighlight] Node found in DOM:', nodeFound, nodePosition);
 
       if (nodeFound) {
         // Node has position, apply highlight and center
