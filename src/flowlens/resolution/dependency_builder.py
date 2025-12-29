@@ -8,7 +8,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.common.config import ResolutionSettings, get_settings
@@ -208,30 +209,49 @@ class DependencyBuilder:
             return dep_id
 
         # Create new dependency - set rolling window bytes to initial value
-        new_dep = Dependency(
-            id=uuid4(),
-            source_asset_id=source_asset_id,
-            target_asset_id=target_asset_id,
-            target_port=target_port,
-            protocol=protocol,
-            bytes_total=bytes_count,
-            packets_total=packets_count,
-            flows_total=flows_count,
-            bytes_last_24h=bytes_count,  # Initial value is current bytes
-            bytes_last_7d=bytes_count,   # Initial value is current bytes
-            first_seen=window_start,
-            last_seen=window_end,
-            dependency_type=dependency_type,
-            valid_from=window_start,
-        )
+        # Use a savepoint so we can retry on foreign key errors
+        new_dep_id = uuid4()
+        try:
+            async with db.begin_nested():
+                new_dep = Dependency(
+                    id=new_dep_id,
+                    source_asset_id=source_asset_id,
+                    target_asset_id=target_asset_id,
+                    target_port=target_port,
+                    protocol=protocol,
+                    bytes_total=bytes_count,
+                    packets_total=packets_count,
+                    flows_total=flows_count,
+                    bytes_last_24h=bytes_count,  # Initial value is current bytes
+                    bytes_last_7d=bytes_count,   # Initial value is current bytes
+                    first_seen=window_start,
+                    last_seen=window_end,
+                    dependency_type=dependency_type,
+                    valid_from=window_start,
+                )
 
-        db.add(new_dep)
-        await db.flush()
+                db.add(new_dep)
+                await db.flush()
+
+        except IntegrityError as e:
+            # Foreign key violation - asset doesn't exist
+            # This can happen if the asset was created but transaction rolled back
+            error_str = str(e).lower()
+            if "foreign key" in error_str:
+                logger.warning(
+                    "Dependency creation failed - asset not found",
+                    source=str(source_asset_id),
+                    target=str(target_asset_id),
+                    error=str(e),
+                )
+                # Re-raise to let caller handle
+                raise
+            raise
 
         # Record history
         await self._record_history(
             db,
-            dependency_id=new_dep.id,
+            dependency_id=new_dep_id,
             change_type="created",
             source_asset_id=source_asset_id,
             target_asset_id=target_asset_id,
@@ -244,7 +264,7 @@ class DependencyBuilder:
 
         logger.info(
             "Created new dependency",
-            dep_id=str(new_dep.id),
+            dep_id=str(new_dep_id),
             source=str(source_asset_id),
             target=str(target_asset_id),
             port=target_port,
@@ -253,7 +273,7 @@ class DependencyBuilder:
 
         DEPENDENCIES_CREATED.inc()
 
-        return new_dep.id
+        return new_dep_id
 
     async def _calculate_rolling_bytes(
         self,
