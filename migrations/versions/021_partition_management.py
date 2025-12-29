@@ -234,4 +234,4 @@ def downgrade() -> None:
 
     # Note: We don't drop the created partitions as they contain data.
     # To fully revert, manually run:
-    -- DROP TABLE IF EXISTS flow_records_YYYY_MM_DD;
+    #   DROP TABLE IF EXISTS flow_records_YYYY_MM_DD;
