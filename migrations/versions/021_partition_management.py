@@ -24,6 +24,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ==========================================================================
+    # Drop existing functions first (in case of re-run or signature change)
+    # ==========================================================================
+    op.execute("DROP FUNCTION IF EXISTS maintain_flow_partitions(INTEGER, INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS migrate_default_partition_data(INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS drop_old_flow_partitions(INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS create_flow_partitions_range(DATE, INTEGER)")
+    op.execute("DROP FUNCTION IF EXISTS create_flow_partition(DATE)")
+
+    # ==========================================================================
     # 1. Function to create a partition for a specific date
     # ==========================================================================
     op.execute("""
