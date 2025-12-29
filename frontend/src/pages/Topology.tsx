@@ -865,101 +865,31 @@ export default function Topology() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#475569');
 
-    // Highlighted arrow (upstream - cyan)
+    // Highlighted arrow (upstream - bright cyan)
     defs.append('marker')
       .attr('id', 'arrowhead-upstream')
       .attr('viewBox', '-0 -5 10 10')
       .attr('refX', 25)
       .attr('refY', 0)
       .attr('orient', 'auto')
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
+      .attr('markerWidth', 8)
+      .attr('markerHeight', 8)
       .append('path')
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
-      .attr('fill', '#06b6d4');
+      .attr('fill', '#22d3ee');
 
-    // Highlighted arrow (downstream - yellow)
+    // Highlighted arrow (downstream - bright amber)
     defs.append('marker')
       .attr('id', 'arrowhead-downstream')
       .attr('viewBox', '-0 -5 10 10')
       .attr('refX', 25)
       .attr('refY', 0)
       .attr('orient', 'auto')
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
+      .attr('markerWidth', 8)
+      .attr('markerHeight', 8)
       .append('path')
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
-      .attr('fill', '#eab308');
-
-    // Glow filter for selected node (white glow)
-    const selectedGlow = defs.append('filter')
-      .attr('id', 'glow-selected')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-    selectedGlow.append('feDropShadow')
-      .attr('dx', 0)
-      .attr('dy', 0)
-      .attr('stdDeviation', 8)
-      .attr('flood-color', '#ffffff')
-      .attr('flood-opacity', 0.8);
-
-    // Glow filter for upstream nodes (cyan glow)
-    const upstreamGlow = defs.append('filter')
-      .attr('id', 'glow-upstream')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-    upstreamGlow.append('feDropShadow')
-      .attr('dx', 0)
-      .attr('dy', 0)
-      .attr('stdDeviation', 6)
-      .attr('flood-color', '#06b6d4')
-      .attr('flood-opacity', 0.7);
-
-    // Glow filter for downstream nodes (yellow glow)
-    const downstreamGlow = defs.append('filter')
-      .attr('id', 'glow-downstream')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-    downstreamGlow.append('feDropShadow')
-      .attr('dx', 0)
-      .attr('dy', 0)
-      .attr('stdDeviation', 6)
-      .attr('flood-color', '#eab308')
-      .attr('flood-opacity', 0.7);
-
-    // Glow filter for upstream edges (cyan glow)
-    const upstreamEdgeGlow = defs.append('filter')
-      .attr('id', 'glow-edge-upstream')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-    upstreamEdgeGlow.append('feDropShadow')
-      .attr('dx', 0)
-      .attr('dy', 0)
-      .attr('stdDeviation', 4)
-      .attr('flood-color', '#06b6d4')
-      .attr('flood-opacity', 0.8);
-
-    // Glow filter for downstream edges (yellow glow)
-    const downstreamEdgeGlow = defs.append('filter')
-      .attr('id', 'glow-edge-downstream')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-    downstreamEdgeGlow.append('feDropShadow')
-      .attr('dx', 0)
-      .attr('dy', 0)
-      .attr('stdDeviation', 4)
-      .attr('flood-color', '#eab308')
-      .attr('flood-opacity', 0.8);
+      .attr('fill', '#fbbf24');
 
     // Gateway arrow (purple)
     defs.append('marker')
@@ -1452,40 +1382,35 @@ export default function Topology() {
       const circle = nodeGroup.select('circle');
 
       if (selectedNode?.id === d.id) {
-        // Selected node - bright white border with glow
+        // Selected node - bright white border, thick stroke
         circle
           .attr('stroke', '#ffffff')
-          .attr('stroke-width', 5)
-          .attr('opacity', 1)
-          .attr('filter', 'url(#glow-selected)');
+          .attr('stroke-width', 6)
+          .attr('opacity', 1);
       } else if (highlightedPaths?.upstream.has(d.id)) {
-        // Upstream node - cyan border with glow
+        // Upstream node - bright cyan border
         circle
-          .attr('stroke', '#06b6d4')
-          .attr('stroke-width', 4)
-          .attr('opacity', 1)
-          .attr('filter', 'url(#glow-upstream)');
+          .attr('stroke', '#22d3ee') // brighter cyan
+          .attr('stroke-width', 5)
+          .attr('opacity', 1);
       } else if (highlightedPaths?.downstream.has(d.id)) {
-        // Downstream node - yellow border with glow
+        // Downstream node - bright yellow/amber border
         circle
-          .attr('stroke', '#eab308')
-          .attr('stroke-width', 4)
-          .attr('opacity', 1)
-          .attr('filter', 'url(#glow-downstream)');
+          .attr('stroke', '#fbbf24') // brighter amber
+          .attr('stroke-width', 5)
+          .attr('opacity', 1);
       } else if (highlightedPaths) {
         // Non-connected node when something is selected - heavily dim
         circle
           .attr('stroke', '#1e293b')
           .attr('stroke-width', 1)
-          .attr('opacity', 0.15)
-          .attr('filter', null);
+          .attr('opacity', 0.12);
       } else {
         // Default state
         circle
           .attr('stroke', '#1e293b')
           .attr('stroke-width', 2)
-          .attr('opacity', 1)
-          .attr('filter', null);
+          .attr('opacity', 1);
       }
     });
 
@@ -1504,24 +1429,21 @@ export default function Topology() {
 
         if (isUpstream && !isDownstream) {
           edge
-            .attr('stroke', '#06b6d4')
-            .attr('stroke-width', 5)
+            .attr('stroke', '#22d3ee') // brighter cyan
+            .attr('stroke-width', 4)
             .attr('stroke-opacity', 1)
-            .attr('filter', 'url(#glow-edge-upstream)')
             .attr('marker-end', 'url(#arrowhead-upstream)');
         } else if (isDownstream) {
           edge
-            .attr('stroke', '#eab308')
-            .attr('stroke-width', 5)
+            .attr('stroke', '#fbbf24') // brighter amber
+            .attr('stroke-width', 4)
             .attr('stroke-opacity', 1)
-            .attr('filter', 'url(#glow-edge-downstream)')
             .attr('marker-end', 'url(#arrowhead-downstream)');
         } else {
           edge
             .attr('stroke', '#3b82f6')
-            .attr('stroke-width', 5)
+            .attr('stroke-width', 4)
             .attr('stroke-opacity', 1)
-            .attr('filter', null)
             .attr('marker-end', 'url(#arrowhead)');
         }
       } else if (highlightedPaths) {
@@ -1529,16 +1451,14 @@ export default function Topology() {
         edge
           .attr('stroke', '#475569')
           .attr('stroke-width', 1)
-          .attr('stroke-opacity', 0.08)
-          .attr('filter', null)
-          .attr('marker-end', 'url(#arrowhead)');
+          .attr('stroke-opacity', 0.06)
+          .attr('marker-end', null);
       } else {
         // Default state
         edge
           .attr('stroke', '#475569')
           .attr('stroke-width', 2)
           .attr('stroke-opacity', 0.6)
-          .attr('filter', null)
           .attr('marker-end', 'url(#arrowhead)');
       }
     });
