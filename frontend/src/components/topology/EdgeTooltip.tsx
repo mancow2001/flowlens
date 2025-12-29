@@ -6,6 +6,7 @@ interface EdgeTooltipProps {
     source: { name: string; ip_address: string };
     target: { name: string; ip_address: string };
     target_port: number;
+    target_ports?: number[];
     protocol: number;
     bytes_last_24h?: number;
     last_seen?: string;
@@ -40,7 +41,13 @@ function formatRelativeTime(dateString: string): string {
 
 const EdgeTooltip: React.FC<EdgeTooltipProps> = ({ edge, position, containerBounds }) => {
   const protocolName = getProtocolName(edge.protocol);
-  const portDisplay = formatPort(edge.target_port, true);
+  // Use target_ports if available, otherwise fall back to single port
+  const ports = edge.target_ports && edge.target_ports.length > 0
+    ? edge.target_ports
+    : [edge.target_port];
+  const portDisplay = ports.length > 1
+    ? ports.map(p => formatPort(p, true)).join(', ')
+    : formatPort(ports[0], true);
 
   // Calculate tooltip position with bounds checking
   const tooltipWidth = 280;
@@ -137,7 +144,7 @@ const EdgeTooltip: React.FC<EdgeTooltipProps> = ({ edge, position, containerBoun
         </div>
         <div>
           <div style={{ color: '#888', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>
-            Port
+            {ports.length > 1 ? 'Ports' : 'Port'}
           </div>
           <div style={{ color: '#fbbf24' }}>{portDisplay}</div>
         </div>

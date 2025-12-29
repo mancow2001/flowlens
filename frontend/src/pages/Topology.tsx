@@ -31,6 +31,8 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   isAggregated?: boolean;
   aggregatedCount?: number;
   originalEdgeIds?: string[];
+  // Multiple ports between same source/target
+  target_ports?: number[];
   // Gateway edge properties
   isGatewayEdge?: boolean;
   gatewayRole?: string;
@@ -772,13 +774,44 @@ export default function Topology() {
     const nodes: SimNode[] = filteredTopology.nodes.map((n) => ({ ...n }));
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-    const links: SimLink[] = filteredTopology.edges
-      .filter((e: TopologyEdge) => nodeMap.has(e.source) && nodeMap.has(e.target))
-      .map((e: TopologyEdge) => ({
-        ...e,
-        source: nodeMap.get(e.source)!,
-        target: nodeMap.get(e.target)!,
-      }));
+    // First, filter valid edges
+    const validEdges = filteredTopology.edges.filter(
+      (e: TopologyEdge) => nodeMap.has(e.source) && nodeMap.has(e.target)
+    );
+
+    // Aggregate edges between the same source/target pair to collect multiple ports
+    const edgeAggregation = new Map<string, {
+      edge: TopologyEdge;
+      ports: number[];
+    }>();
+
+    validEdges.forEach((e: TopologyEdge) => {
+      const key = `${e.source}->${e.target}`;
+      if (edgeAggregation.has(key)) {
+        const existing = edgeAggregation.get(key)!;
+        // Add port if not already present
+        if (!existing.ports.includes(e.target_port)) {
+          existing.ports.push(e.target_port);
+        }
+        // Aggregate traffic stats
+        existing.edge.bytes_total += e.bytes_total;
+        existing.edge.bytes_last_24h += e.bytes_last_24h;
+        existing.edge.is_critical = existing.edge.is_critical || e.is_critical;
+      } else {
+        edgeAggregation.set(key, {
+          edge: { ...e },
+          ports: [e.target_port],
+        });
+      }
+    });
+
+    // Create links from aggregated edges
+    const links: SimLink[] = Array.from(edgeAggregation.values()).map(({ edge, ports }) => ({
+      ...edge,
+      source: nodeMap.get(edge.source)!,
+      target: nodeMap.get(edge.target)!,
+      target_ports: ports.sort((a, b) => a - b), // Sort ports for consistent display
+    }));
 
     // Create zoom behavior
     const zoom = d3
@@ -972,10 +1005,16 @@ export default function Topology() {
       .attr('font-size', 9)
       .attr('pointer-events', 'none')
       .text((d) => {
+        // For aggregated edges from collapsed groups, show connection count
         if (d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1) {
           return `${d.aggregatedCount} conn`;
         }
-        return d.target_port.toString();
+        // For edges with multiple ports, format as "Port#1, Port#2, Port#N"
+        const ports = d.target_ports && d.target_ports.length > 0 ? d.target_ports : [d.target_port];
+        if (ports.length > 1) {
+          return ports.join(', ');
+        }
+        return ports[0].toString();
       });
 
     // Create drag behavior for individual nodes
@@ -2000,6 +2039,7 @@ export default function Topology() {
               ip_address: (hoveredEdge.edge.target as SimNode).ip_address || '',
             },
             target_port: hoveredEdge.edge.target_port,
+            target_ports: hoveredEdge.edge.target_ports,
             protocol: hoveredEdge.edge.protocol,
             bytes_last_24h: hoveredEdge.edge.bytes_last_24h,
             last_seen: hoveredEdge.edge.last_seen,
