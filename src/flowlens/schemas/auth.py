@@ -297,7 +297,38 @@ class AuthStatusResponse(BaseModel):
 
     auth_enabled: bool
     saml_enabled: bool
+    setup_required: bool = False  # True if no users exist and setup is needed
     active_provider: SAMLProviderResponse | None = None
+
+
+class InitialSetupRequest(BaseModel):
+    """Request to create the initial admin user during setup."""
+
+    email: EmailStr
+    name: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """Validate password meets minimum requirements."""
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
+
+
+class InitialSetupResponse(BaseModel):
+    """Response after completing initial setup."""
+
+    success: bool
+    message: str
+    user: UserResponse
 
 
 class SAMLLoginInitResponse(BaseModel):

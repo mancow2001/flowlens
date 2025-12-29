@@ -17,6 +17,7 @@ import Analysis from './pages/Analysis';
 import Tasks from './pages/Tasks';
 import SystemSettings from './pages/SystemSettings';
 import Login from './pages/Login';
+import Setup from './pages/Setup';
 import UserManagement from './pages/UserManagement';
 import SAMLConfiguration from './pages/SAMLConfiguration';
 import ProtectedRoute from './components/auth/ProtectedRoute';
@@ -48,8 +49,9 @@ function App() {
   return (
     <>
       <Routes>
-        {/* Public route */}
+        {/* Public routes */}
         <Route path="/login" element={<Login />} />
+        <Route path="/setup" element={<Setup />} />
 
         {/* Protected routes with layout */}
         <Route

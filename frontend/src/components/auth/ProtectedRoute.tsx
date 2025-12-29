@@ -79,6 +79,11 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
     return <>{children}</>;
   }
 
+  // If setup is required (no users exist), redirect to setup page
+  if (authStatus?.setup_required) {
+    return <Navigate to="/setup" replace />;
+  }
+
   // If not authenticated, redirect to login
   if (!accessToken || !user) {
     // Clear any stale auth state

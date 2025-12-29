@@ -1201,6 +1201,15 @@ export const authApi = {
   revokeSession: async (sessionId: string): Promise<void> => {
     await api.delete(`/auth/sessions/${sessionId}`);
   },
+
+  setup: async (data: { email: string; name: string; password: string }): Promise<{
+    success: boolean;
+    message: string;
+    user: User;
+  }> => {
+    const { data: response } = await api.post('/auth/setup', data);
+    return response;
+  },
 };
 
 // User Management API endpoints (admin only)

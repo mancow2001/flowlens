@@ -677,7 +677,20 @@ export interface TokenResponse {
 export interface AuthStatus {
   auth_enabled: boolean;
   saml_enabled: boolean;
+  setup_required: boolean;
   active_provider: SAMLProvider | null;
+}
+
+export interface InitialSetupRequest {
+  email: string;
+  name: string;
+  password: string;
+}
+
+export interface InitialSetupResponse {
+  success: boolean;
+  message: string;
+  user: User;
 }
 
 export interface SAMLProvider {

@@ -12,10 +12,13 @@ from flowlens.schemas.auth import (
     AuthSessionResponse,
     AuthStatusResponse,
     CurrentUserResponse,
+    InitialSetupRequest,
+    InitialSetupResponse,
     LoginRequest,
     PasswordChangeRequest,
     RefreshTokenRequest,
     TokenResponse,
+    UserResponse,
 )
 from flowlens.services.auth_service import AuthService
 
@@ -47,28 +50,121 @@ def get_client_info(request: Request) -> tuple[str | None, str | None]:
 async def get_auth_status(db: DbSession) -> AuthStatusResponse:
     """Get authentication system status.
 
-    Returns information about whether auth is enabled and SAML configuration.
+    Returns information about whether auth is enabled, SAML configuration,
+    and whether initial setup is required (no users exist).
     """
+    from sqlalchemy import func, select
+
+    from flowlens.models.auth import SAMLProvider, User
+
     settings = get_settings()
+
+    # Check if any users exist (setup required if none)
+    setup_required = False
+    if settings.auth.enabled:
+        user_count = await db.scalar(select(func.count()).select_from(User))
+        setup_required = user_count == 0
 
     # Get active SAML provider if any
     active_provider = None
     if settings.saml.enabled:
-        from sqlalchemy import select
-        from flowlens.models.auth import SAMLProvider
-
         result = await db.execute(
             select(SAMLProvider).where(SAMLProvider.is_active == True)  # noqa: E712
         )
         provider = result.scalar_one_or_none()
         if provider:
             from flowlens.schemas.auth import SAMLProviderResponse
+
             active_provider = SAMLProviderResponse.model_validate(provider)
 
     return AuthStatusResponse(
         auth_enabled=settings.auth.enabled,
         saml_enabled=settings.saml.enabled,
+        setup_required=setup_required,
         active_provider=active_provider,
+    )
+
+
+@router.post("/setup", response_model=InitialSetupResponse)
+async def initial_setup(
+    request: Request,
+    body: InitialSetupRequest,
+    db: DbSession,
+) -> InitialSetupResponse:
+    """Create the initial admin user during first-time setup.
+
+    This endpoint only works when:
+    1. Authentication is enabled
+    2. No users exist in the database
+
+    After the first user is created, this endpoint will return an error.
+    """
+    from sqlalchemy import func, select
+
+    from flowlens.models.auth import AuthAuditLog, AuthEventType, User, UserRole
+    from flowlens.services.auth_service import hash_password, validate_password_policy
+
+    settings = get_settings()
+
+    if not settings.auth.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Authentication is disabled",
+        )
+
+    # Check if any users exist
+    user_count = await db.scalar(select(func.count()).select_from(User))
+    if user_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Setup has already been completed. Users already exist.",
+        )
+
+    # Validate password policy
+    try:
+        validate_password_policy(body.password)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
+
+    ip_address, user_agent = get_client_info(request)
+
+    # Create the admin user
+    user = User(
+        email=body.email.lower(),
+        name=body.name,
+        role=UserRole.ADMIN.value,
+        is_active=True,
+        is_local=True,
+        hashed_password=hash_password(body.password),
+    )
+
+    db.add(user)
+
+    # Log the event
+    audit_log = AuthAuditLog.create_event(
+        event_type=AuthEventType.USER_CREATED,
+        user_id=user.id,
+        email=user.email,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        success=True,
+        event_details={
+            "action": "initial_setup",
+            "role": user.role,
+        },
+    )
+    db.add(audit_log)
+
+    await db.commit()
+    await db.refresh(user)
+
+    return InitialSetupResponse(
+        success=True,
+        message="Initial admin user created successfully",
+        user=UserResponse.model_validate(user),
     )
 
 

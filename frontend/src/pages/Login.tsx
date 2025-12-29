@@ -32,6 +32,12 @@ export default function Login() {
       // If auth is disabled, redirect to dashboard
       if (!authStatus.auth_enabled) {
         navigate('/dashboard', { replace: true });
+        return;
+      }
+
+      // If setup is required (no users exist), redirect to setup
+      if (authStatus.setup_required) {
+        navigate('/setup', { replace: true });
       }
     }
   }, [authStatus, setAuthSettings, navigate]);
