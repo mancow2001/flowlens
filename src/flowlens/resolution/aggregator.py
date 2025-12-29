@@ -44,7 +44,7 @@ def normalize_flow_direction(
     src_port: int,
     dst_port: int,
     protocol: int,
-) -> tuple[str, str, int, int]:
+) -> tuple[str, str, int, int, bool]:
     """Normalize flow direction to always point towards the service.
 
     When both ends have ephemeral or both have well-known ports,
@@ -59,7 +59,8 @@ def normalize_flow_direction(
         protocol: Protocol number.
 
     Returns:
-        Tuple of (client_ip, server_ip, service_port, protocol).
+        Tuple of (client_ip, server_ip, service_port, protocol, was_swapped).
+        was_swapped is True if the direction was reversed (response flow detected).
     """
     src_ephemeral = is_ephemeral_port(src_port)
     dst_ephemeral = is_ephemeral_port(dst_port)
@@ -69,10 +70,10 @@ def normalize_flow_direction(
     if dst_ephemeral and not src_ephemeral:
         # This looks like a response: server(src) → client(dst)
         # Normalize to client → server
-        return dst_ip, src_ip, src_port, protocol
+        return dst_ip, src_ip, src_port, protocol, True
 
     # Standard direction: src → dst where dst has the service port
-    return src_ip, dst_ip, dst_port, protocol
+    return src_ip, dst_ip, dst_port, protocol, False
 
 
 @dataclass
@@ -242,7 +243,7 @@ class FlowAggregator:
         for flow in flows:
             # Normalize flow direction to always point towards the service
             # This handles response flows (server → client on ephemeral port)
-            norm_src, norm_dst, norm_port, norm_proto = normalize_flow_direction(
+            norm_src, norm_dst, norm_port, norm_proto, was_swapped = normalize_flow_direction(
                 src_ip=str(flow.src_ip),
                 dst_ip=str(flow.dst_ip),
                 src_port=flow.src_port,
@@ -269,6 +270,11 @@ class FlowAggregator:
                     src_asset_id = UUID(enrichment["src_asset_id"])
                 if enrichment.get("dst_asset_id"):
                     dst_asset_id = UUID(enrichment["dst_asset_id"])
+
+            # If flow direction was normalized (swapped), also swap asset IDs
+            # so they match the normalized src/dst IPs
+            if was_swapped and (src_asset_id or dst_asset_id):
+                src_asset_id, dst_asset_id = dst_asset_id, src_asset_id
 
             # Extract gateway info from extended_fields
             gateway_ip = None

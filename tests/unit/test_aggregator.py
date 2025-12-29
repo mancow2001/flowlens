@@ -50,7 +50,7 @@ class TestNormalizeFlowDirection:
 
     def test_normal_client_to_server(self):
         """Test normal client → server direction is preserved."""
-        client_ip, server_ip, service_port, protocol = normalize_flow_direction(
+        client_ip, server_ip, service_port, protocol, was_swapped = normalize_flow_direction(
             src_ip="192.168.1.100",
             dst_ip="10.0.0.1",
             src_port=50000,  # Ephemeral
@@ -62,10 +62,11 @@ class TestNormalizeFlowDirection:
         assert server_ip == "10.0.0.1"
         assert service_port == 443
         assert protocol == 6
+        assert was_swapped is False
 
     def test_response_flow_normalized(self):
         """Test response flow (server → client) is normalized."""
-        client_ip, server_ip, service_port, protocol = normalize_flow_direction(
+        client_ip, server_ip, service_port, protocol, was_swapped = normalize_flow_direction(
             src_ip="10.0.0.1",     # Server
             dst_ip="192.168.1.100", # Client
             src_port=443,          # Well-known
@@ -78,10 +79,11 @@ class TestNormalizeFlowDirection:
         assert server_ip == "10.0.0.1"
         assert service_port == 443
         assert protocol == 6
+        assert was_swapped is True
 
     def test_both_well_known_ports(self):
         """Test when both ports are well-known (server to server)."""
-        client_ip, server_ip, service_port, protocol = normalize_flow_direction(
+        client_ip, server_ip, service_port, protocol, was_swapped = normalize_flow_direction(
             src_ip="192.168.1.100",
             dst_ip="10.0.0.1",
             src_port=80,   # Well-known
@@ -93,10 +95,11 @@ class TestNormalizeFlowDirection:
         assert client_ip == "192.168.1.100"
         assert server_ip == "10.0.0.1"
         assert service_port == 443
+        assert was_swapped is False
 
     def test_both_ephemeral_ports(self):
         """Test when both ports are ephemeral."""
-        client_ip, server_ip, service_port, protocol = normalize_flow_direction(
+        client_ip, server_ip, service_port, protocol, was_swapped = normalize_flow_direction(
             src_ip="192.168.1.100",
             dst_ip="10.0.0.1",
             src_port=50000,  # Ephemeral
@@ -108,10 +111,11 @@ class TestNormalizeFlowDirection:
         assert client_ip == "192.168.1.100"
         assert server_ip == "10.0.0.1"
         assert service_port == 60000
+        assert was_swapped is False
 
     def test_udp_protocol(self):
         """Test UDP flows work correctly."""
-        client_ip, server_ip, service_port, protocol = normalize_flow_direction(
+        client_ip, server_ip, service_port, protocol, was_swapped = normalize_flow_direction(
             src_ip="192.168.1.100",
             dst_ip="10.0.0.1",
             src_port=50000,
@@ -121,6 +125,7 @@ class TestNormalizeFlowDirection:
 
         assert protocol == 17
         assert service_port == 53
+        assert was_swapped is False
 
 
 @pytest.mark.unit
