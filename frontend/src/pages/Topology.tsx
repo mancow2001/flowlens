@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import Card from '../components/common/Card';
@@ -261,6 +262,15 @@ export default function Topology() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+
+  // Search highlight params from URL (e.g., from header search)
+  const highlightSourceId = searchParams.get('source');
+  const highlightTargetId = searchParams.get('target');
+  const hasSearchHighlight = !!(highlightSourceId && highlightTargetId);
+
+  // Track if we've applied the initial search highlight
+  const [searchHighlightApplied, setSearchHighlightApplied] = useState(false);
 
   // Topology filters hook
   const { filters, setFilters, resetFilters, hasActiveFilters } = useTopologyFilters();
@@ -1234,6 +1244,72 @@ export default function Topology() {
     };
   }, [filteredTopology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection, collapsedGroups, setCollapsedGroups]);
 
+  // Center and zoom to a specific node
+  const centerOnNode = useCallback((nodeId: string) => {
+    if (!svgRef.current || !zoomRef.current || !filteredTopology) return;
+
+    const svg = d3.select(svgRef.current);
+
+    // Find the node element
+    let targetX: number | undefined;
+    let targetY: number | undefined;
+    svg.selectAll<SVGGElement, SimNode>('.node').each(function (d) {
+      if (d.id === nodeId && d.x !== undefined && d.y !== undefined) {
+        targetX = d.x;
+        targetY = d.y;
+      }
+    });
+
+    if (targetX === undefined || targetY === undefined) return;
+
+    const { width, height } = dimensions;
+    const scale = 1.5; // Zoom level
+
+    // Calculate transform to center the node
+    const x = width / 2 - targetX * scale;
+    const y = height / 2 - targetY * scale;
+
+    svg.transition()
+      .duration(750)
+      .call(
+        zoomRef.current.transform,
+        d3.zoomIdentity.translate(x, y).scale(scale)
+      );
+  }, [filteredTopology, dimensions]);
+
+  // Apply search highlight from URL params
+  useEffect(() => {
+    if (!hasSearchHighlight || searchHighlightApplied || !topology || !filteredTopology) return;
+
+    // Wait for simulation to settle (nodes need positions)
+    const timer = setTimeout(() => {
+      // Find the source node
+      const sourceNode = topology.nodes.find(n => n.id === highlightSourceId);
+      if (sourceNode) {
+        // Select the source node to highlight the path
+        handleNodeClick(sourceNode);
+
+        // Center on the source node
+        centerOnNode(highlightSourceId!);
+
+        // Mark as applied
+        setSearchHighlightApplied(true);
+
+        // Clear the URL params after applying (optional - keeps URL clean)
+        // setSearchParams({});
+      }
+    }, 1000); // Wait for D3 simulation to stabilize
+
+    return () => clearTimeout(timer);
+  }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode]);
+
+  // Reset search highlight state when URL params change
+  useEffect(() => {
+    if (!hasSearchHighlight) {
+      setSearchHighlightApplied(false);
+    }
+  }, [hasSearchHighlight]);
+
   // Update highlighting when selection changes
   useEffect(() => {
     if (!svgRef.current || !topology) return;
@@ -1354,7 +1430,9 @@ export default function Topology() {
             )}
           </h1>
           <p className="text-slate-400 mt-1">
-            {historicalDate
+            {hasSearchHighlight && selectedNode
+              ? `Search result: ${selectedNode.name}`
+              : historicalDate
               ? `Viewing topology as of ${formatDate(historicalDate)}`
               : selectedNode
               ? `Showing dependencies for ${selectedNode.name}`
