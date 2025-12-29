@@ -1262,9 +1262,8 @@ export default function Topology() {
   // Center and zoom to a specific node
   const centerOnNode = useCallback((nodeId: string) => {
     console.log('[CenterOnNode] Called with nodeId:', nodeId);
-    console.log('[CenterOnNode] Refs:', { hasSvg: !!svgRef.current, hasZoom: !!zoomRef.current, hasTopology: !!filteredTopology, hasContainer: !!containerRef.current, hasSimulation: !!simulationRef.current });
 
-    if (!svgRef.current || !zoomRef.current || !filteredTopology || !containerRef.current) {
+    if (!svgRef.current || !zoomRef.current || !filteredTopology) {
       console.log('[CenterOnNode] Early return - missing refs');
       return;
     }
@@ -1294,29 +1293,23 @@ export default function Topology() {
       return;
     }
 
-    // Get actual container dimensions (not from state which may be stale)
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const width = containerRect.width;
-    const height = Math.max(containerRect.height, 500);
+    // Use the dimensions state which matches the SVG viewBox
+    const { width, height } = dimensions;
     const scale = 1.5; // Zoom level
 
-    // Calculate transform to center the node
+    // Calculate transform to center the node in the viewBox
     const x = width / 2 - targetX * scale;
     const y = height / 2 - targetY * scale;
 
-    console.log('[CenterOnNode] Applying transform:', { x, y, scale, width, height });
+    console.log('[CenterOnNode] Applying transform:', { x, y, scale, width, height, targetX, targetY });
 
     const newTransform = d3.zoomIdentity.translate(x, y).scale(scale);
-    console.log('[CenterOnNode] New transform:', newTransform.toString());
 
     // Apply transform with transition
     svg.transition()
       .duration(750)
-      .call(zoomRef.current.transform, newTransform)
-      .on('end', () => {
-        console.log('[CenterOnNode] Transition complete');
-      });
-  }, [filteredTopology]);
+      .call(zoomRef.current.transform, newTransform);
+  }, [filteredTopology, dimensions]);
 
   // Apply search highlight from URL params
   useEffect(() => {
