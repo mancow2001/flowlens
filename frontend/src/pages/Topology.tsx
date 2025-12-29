@@ -286,6 +286,7 @@ export default function Topology() {
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('none');
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const [isLocatingNode, setIsLocatingNode] = useState(false);
 
   // Refs for callbacks used in D3 to avoid re-running the effect when callbacks change
   const handleNodeClickRef = useRef<(node: TopologyNode) => void>(() => {});
@@ -1356,15 +1357,21 @@ export default function Topology() {
       return;
     }
 
-    // Wait 1 second for simulation to settle, then apply highlight and center
+    // Show locating indicator and wait 3 seconds for simulation to settle
+    setIsLocatingNode(true);
+
     const timer = setTimeout(() => {
-      console.log('[SearchHighlight] 1 second elapsed, applying highlight and centering');
+      console.log('[SearchHighlight] 3 seconds elapsed, applying highlight and centering');
       handleNodeClick(sourceNode);
       centerOnNode(highlightSourceId!);
       setSearchHighlightApplied(true);
-    }, 1000);
+      setIsLocatingNode(false);
+    }, 3000);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      setIsLocatingNode(false);
+    };
   }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode, resetFilters]);
 
   // Reset search highlight state when URL params change to new values
@@ -1699,7 +1706,7 @@ export default function Topology() {
         {/* Graph Area */}
         <div
           ref={containerRef}
-          className="flex-1 bg-slate-800 border border-slate-700 rounded-lg overflow-hidden"
+          className="flex-1 bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
         >
           {!filteredTopology || filteredTopology.nodes.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400">
@@ -1715,6 +1722,14 @@ export default function Topology() {
               viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
               preserveAspectRatio="xMidYMid meet"
             />
+          )}
+
+          {/* Locating node indicator */}
+          {isLocatingNode && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900/90 border border-primary-500 rounded-lg px-4 py-2 flex items-center gap-3 shadow-lg z-50">
+              <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-primary-400 font-medium">Locating node...</span>
+            </div>
           )}
         </div>
 
