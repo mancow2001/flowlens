@@ -4,6 +4,7 @@ Maps IP addresses to assets from flow aggregates,
 creating or updating assets as needed.
 """
 
+import hashlib
 import uuid as uuid_module
 from datetime import datetime
 from ipaddress import IPv4Address, IPv6Address, ip_address
@@ -20,6 +21,16 @@ from flowlens.models.asset import Asset, AssetType
 from flowlens.models.flow import FlowAggregate
 
 logger = get_logger(__name__)
+
+
+def _ip_to_advisory_lock_id(ip_str: str) -> int:
+    """Convert IP address to a consistent advisory lock ID.
+
+    Uses a hash to generate a 32-bit integer for PostgreSQL advisory locks.
+    """
+    # Use MD5 hash and take first 8 hex chars (32 bits)
+    hash_bytes = hashlib.md5(ip_str.encode()).hexdigest()[:8]
+    return int(hash_bytes, 16) & 0x7FFFFFFF  # Ensure positive 32-bit int
 
 
 class AssetMapper:
@@ -137,9 +148,10 @@ class AssetMapper:
         ip_str: str,
         hostname: str | None,
     ) -> UUID:
-        """Create a new asset or return existing one using INSERT ... ON CONFLICT.
+        """Create a new asset or return existing one using advisory locks.
 
-        This handles race conditions cleanly without generating database errors.
+        Uses PostgreSQL advisory locks to prevent deadlocks when multiple
+        workers try to create the same asset simultaneously.
 
         Args:
             db: Database session.
@@ -149,6 +161,22 @@ class AssetMapper:
         Returns:
             Asset ID (either newly created or existing).
         """
+        # Acquire advisory lock for this IP to prevent deadlocks
+        lock_id = _ip_to_advisory_lock_id(ip_str)
+        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+
+        # Now we have exclusive access for this IP - check if it exists
+        query_result = await db.execute(
+            select(Asset.id).where(
+                Asset.ip_address == ip_str,
+                Asset.deleted_at.is_(None),
+            )
+        )
+        existing_id = query_result.scalar_one_or_none()
+        if existing_id:
+            return existing_id
+
+        # Asset doesn't exist - create it
         # First check CIDR classification rules
         cidr_class = await self._get_cidr_classification(db, ip_str)
 
@@ -188,11 +216,10 @@ class AssetMapper:
         owner = cidr_class.get("default_owner") if cidr_class else None
         team = cidr_class.get("default_team") if cidr_class else None
 
-        # Generate a new UUID for potential insert
+        # Generate a new UUID for the insert
         new_id = uuid_module.uuid4()
 
-        # Use INSERT ... ON CONFLICT DO NOTHING
-        # This won't insert if the ip_address already exists
+        # Insert the new asset
         stmt = pg_insert(Asset).values(
             id=new_id,
             name=name,
@@ -214,7 +241,6 @@ class AssetMapper:
 
         # Check if we inserted a new row
         if result.rowcount > 0:
-            # Flush to ensure the insert is visible within this transaction
             await db.flush()
             logger.info(
                 "Created new asset",
@@ -229,52 +255,18 @@ class AssetMapper:
             ).inc()
             return new_id
 
-        # Row already existed (conflict) - query to get the existing ID
-        # Use a loop in case of race condition where asset was just deleted
-        for _ in range(3):
-            query_result = await db.execute(
-                select(Asset.id).where(
-                    Asset.ip_address == ip_str,
-                    Asset.deleted_at.is_(None),
-                )
+        # Conflict occurred (another transaction committed while we had the lock)
+        # This shouldn't happen with advisory locks, but handle it anyway
+        query_result = await db.execute(
+            select(Asset.id).where(
+                Asset.ip_address == ip_str,
+                Asset.deleted_at.is_(None),
             )
-            existing_id = query_result.scalar_one_or_none()
-            if existing_id:
-                return existing_id
+        )
+        existing_id = query_result.scalar_one_or_none()
+        if existing_id:
+            return existing_id
 
-            # Asset might have been deleted - try to insert again
-            new_id = uuid_module.uuid4()
-            stmt = pg_insert(Asset).values(
-                id=new_id,
-                name=name,
-                ip_address=ip_str,
-                hostname=hostname,
-                fqdn=hostname if hostname and "." in hostname else None,
-                asset_type=asset_type,
-                is_internal=is_internal,
-                is_critical=False,
-                country_code=country_code,
-                city=city,
-                environment=environment,
-                datacenter=datacenter,
-                owner=owner,
-                team=team,
-            ).on_conflict_do_nothing(index_elements=['ip_address'])
-
-            retry_result = await db.execute(stmt)
-            if retry_result.rowcount > 0:
-                await db.flush()
-                logger.info(
-                    "Created new asset (retry)",
-                    asset_id=str(new_id),
-                    ip=ip_str,
-                )
-                ASSETS_DISCOVERED.labels(
-                    asset_type="internal" if is_internal else "external"
-                ).inc()
-                return new_id
-
-        # Should not reach here, but raise if we do
         raise RuntimeError(f"Failed to get or create asset for IP {ip_str}")
 
     async def map_aggregate_to_assets(
