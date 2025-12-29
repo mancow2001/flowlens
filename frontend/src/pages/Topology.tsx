@@ -1279,10 +1279,24 @@ export default function Topology() {
 
   // Apply search highlight from URL params
   useEffect(() => {
-    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology || !svgRef.current) return;
+    console.log('[SearchHighlight] Effect running:', {
+      hasSearchHighlight,
+      searchHighlightApplied,
+      highlightSourceId,
+      highlightTargetId,
+      hasFilteredTopology: !!filteredTopology,
+      hasSvgRef: !!svgRef.current,
+      filteredNodeCount: filteredTopology?.nodes?.length,
+    });
+
+    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology || !svgRef.current) {
+      console.log('[SearchHighlight] Early return - conditions not met');
+      return;
+    }
 
     // Find the source node in filtered topology
     const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
+    console.log('[SearchHighlight] Source node found:', sourceNode ? sourceNode.name : 'NOT FOUND');
     if (!sourceNode) {
       // Node not in filtered view - try finding in full topology
       const nodeInFull = topology?.nodes.find(n => n.id === highlightSourceId);
@@ -1300,17 +1314,23 @@ export default function Topology() {
 
     const checkAndApply = () => {
       attempts++;
+      console.log('[SearchHighlight] Polling attempt', attempts);
       const svg = d3.select(svgRef.current);
       let nodeFound = false;
+      let nodeData: SimNode | null = null;
 
       svg.selectAll<SVGGElement, SimNode>('.node').each(function(d) {
         if (d.id === highlightSourceId && d.x !== undefined && d.y !== undefined) {
           nodeFound = true;
+          nodeData = d;
         }
       });
 
+      console.log('[SearchHighlight] Node found in DOM:', nodeFound, nodeData ? { x: nodeData.x, y: nodeData.y } : null);
+
       if (nodeFound) {
         // Node has position, apply highlight and center
+        console.log('[SearchHighlight] Applying highlight and centering');
         handleNodeClick(sourceNode);
         centerOnNode(highlightSourceId!);
         setSearchHighlightApplied(true);
@@ -1319,6 +1339,7 @@ export default function Topology() {
         setTimeout(checkAndApply, 200);
       } else {
         // Give up after max attempts
+        console.log('[SearchHighlight] Max attempts reached, giving up');
         setSearchHighlightApplied(true);
       }
     };
