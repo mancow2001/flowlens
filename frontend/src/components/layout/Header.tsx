@@ -256,8 +256,13 @@ export default function Header() {
                       </div>
                       {searchResults!.assets.map((asset) => (
                         <button
+                          type="button"
                           key={asset.id}
-                          onClick={() => handleAssetClick(asset)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleAssetClick(asset);
+                          }}
                           className="w-full px-4 py-3 text-left hover:bg-slate-700 transition-colors border-b border-slate-700/50"
                         >
                           <div className="flex items-center justify-between">
@@ -285,8 +290,13 @@ export default function Header() {
                       </div>
                       {searchResults!.connections.map((conn) => (
                         <button
+                          type="button"
                           key={conn.id}
-                          onClick={() => handleConnectionClick(conn)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleConnectionClick(conn);
+                          }}
                           className="w-full px-4 py-3 text-left hover:bg-slate-700 transition-colors border-b border-slate-700/50"
                         >
                           <div className="flex items-center gap-3">
