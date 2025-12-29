@@ -8,9 +8,14 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   ArrowRightIcon,
+  UserCircleIcon,
+  ArrowRightOnRectangleIcon,
+  Cog6ToothIcon,
+  UsersIcon,
 } from '@heroicons/react/24/outline';
 import { useWebSocketStore } from '../../hooks/useWebSocket';
-import { searchApi, alertApi } from '../../services/api';
+import { searchApi, alertApi, authApi } from '../../services/api';
+import { useAuthStore } from '../../stores/authStore';
 import Badge from '../common/Badge';
 import clsx from 'clsx';
 import { getProtocolName } from '../../utils/network';
@@ -21,6 +26,7 @@ type SearchMode = 'simple' | 'advanced';
 export default function Header() {
   const navigate = useNavigate();
   const isConnected = useWebSocketStore((state) => state.isConnected);
+  const { user, clearAuth, authEnabled, isAdmin, refreshToken } = useAuthStore();
 
   // Search state
   const [searchMode, setSearchMode] = useState<SearchMode>('simple');
@@ -42,6 +48,10 @@ export default function Header() {
   // Notification state
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
+
+  // User menu state
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Debounce search inputs
   useEffect(() => {
@@ -90,11 +100,25 @@ export default function Header() {
       if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
         setIsNotificationsOpen(false);
       }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await authApi.logout(refreshToken ?? undefined);
+    } catch {
+      // Ignore logout API errors
+    }
+    clearAuth();
+    navigate('/login');
+  };
 
   // Handle alert click
   const handleAlertClick = (_alert: Alert) => {
@@ -418,6 +442,79 @@ export default function Header() {
             </div>
           )}
         </div>
+
+        {/* User Menu */}
+        {authEnabled && user && (
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              <UserCircleIcon className="w-5 h-5" />
+              <span className="text-sm font-medium max-w-[120px] truncate">
+                {user.name}
+              </span>
+              <ChevronDownIcon className={clsx(
+                'w-4 h-4 transition-transform',
+                isUserMenuOpen && 'rotate-180'
+              )} />
+            </button>
+
+            {/* User Menu Dropdown */}
+            {isUserMenuOpen && (
+              <div className="absolute top-full right-0 mt-1 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50">
+                {/* User Info */}
+                <div className="px-4 py-3 border-b border-slate-700">
+                  <div className="font-medium text-white">{user.name}</div>
+                  <div className="text-sm text-slate-400 truncate">{user.email}</div>
+                  <div className="mt-2">
+                    <Badge variant={
+                      user.role === 'admin' ? 'error' :
+                      user.role === 'analyst' ? 'warning' : 'info'
+                    }>
+                      {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Menu Items */}
+                <div className="py-1">
+                  {isAdmin() && (
+                    <>
+                      <button
+                        onClick={() => {
+                          navigate('/settings/users');
+                          setIsUserMenuOpen(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center gap-2"
+                      >
+                        <UsersIcon className="w-4 h-4" />
+                        User Management
+                      </button>
+                      <button
+                        onClick={() => {
+                          navigate('/settings/system');
+                          setIsUserMenuOpen(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center gap-2"
+                      >
+                        <Cog6ToothIcon className="w-4 h-4" />
+                        System Settings
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={handleLogout}
+                    className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-slate-700 hover:text-red-300 flex items-center gap-2"
+                  >
+                    <ArrowRightOnRectangleIcon className="w-4 h-4" />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

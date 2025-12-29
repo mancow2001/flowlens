@@ -236,6 +236,38 @@ class AuthSettings(BaseSettings):
     access_token_expire_minutes: int = Field(default=30, ge=1)
     refresh_token_expire_days: int = Field(default=7, ge=1)
 
+    # Account lockout settings
+    max_failed_login_attempts: int = Field(default=5, ge=1, le=20)
+    lockout_duration_minutes: int = Field(default=15, ge=1, le=1440)
+
+    # Password policy
+    password_min_length: int = Field(default=8, ge=8, le=128)
+    password_require_uppercase: bool = True
+    password_require_lowercase: bool = True
+    password_require_digit: bool = True
+    password_require_special: bool = False
+
+
+class SAMLSettings(BaseSettings):
+    """SAML authentication configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="SAML_")
+
+    enabled: bool = False
+
+    # Service Provider settings
+    sp_entity_id: str = "https://flowlens.local/saml/metadata"
+    sp_acs_url: str = "https://flowlens.local/api/v1/auth/saml/acs"
+    sp_slo_url: str | None = None
+
+    # Security settings
+    want_assertions_signed: bool = True
+    want_assertions_encrypted: bool = False
+    authn_requests_signed: bool = True
+
+    # Session settings
+    session_lifetime_minutes: int = Field(default=480, ge=1)  # 8 hours
+
 
 class LoggingSettings(BaseSettings):
     """Logging configuration."""
@@ -431,6 +463,7 @@ class Settings(BaseSettings):
     classification: ClassificationSettings = Field(default_factory=ClassificationSettings)
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    saml: SAMLSettings = Field(default_factory=SAMLSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import type {
   Asset,
   Dependency,
@@ -30,7 +30,15 @@ import type {
   ApplicationListResponse,
   ApplicationTopology,
   SearchResponse,
+  User,
+  TokenResponse,
+  AuthStatus,
+  UserListResponse,
+  UserRole,
+  SAMLProvider,
+  AuthSession,
 } from '../types';
+import { useAuthStore } from '../stores/authStore';
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -38,6 +46,102 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Flag to prevent multiple refresh requests
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (token: string) => void;
+  reject: (error: unknown) => void;
+}> = [];
+
+const processQueue = (error: unknown, token: string | null = null) => {
+  failedQueue.forEach((promise) => {
+    if (error) {
+      promise.reject(error);
+    } else {
+      promise.resolve(token!);
+    }
+  });
+  failedQueue = [];
+};
+
+// Request interceptor - add auth token
+api.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const { accessToken } = useAuthStore.getState();
+    if (accessToken && config.headers) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor - handle 401 and token refresh
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    // If error is not 401 or request already retried, reject
+    if (error.response?.status !== 401 || originalRequest._retry) {
+      return Promise.reject(error);
+    }
+
+    // Don't try to refresh for auth endpoints
+    if (originalRequest.url?.includes('/auth/login') || originalRequest.url?.includes('/auth/refresh')) {
+      return Promise.reject(error);
+    }
+
+    if (isRefreshing) {
+      // Queue the request while refresh is in progress
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then((token) => {
+        if (originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+        }
+        return api(originalRequest);
+      });
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+
+    const { refreshToken, clearAuth, setTokens } = useAuthStore.getState();
+
+    if (!refreshToken) {
+      isRefreshing = false;
+      clearAuth();
+      window.location.href = '/login';
+      return Promise.reject(error);
+    }
+
+    try {
+      const response = await axios.post<TokenResponse>('/api/v1/auth/refresh', {
+        refresh_token: refreshToken,
+      });
+
+      const { access_token, refresh_token } = response.data;
+      setTokens(access_token, refresh_token);
+
+      processQueue(null, access_token);
+
+      if (originalRequest.headers) {
+        originalRequest.headers.Authorization = `Bearer ${access_token}`;
+      }
+
+      return api(originalRequest);
+    } catch (refreshError) {
+      processQueue(refreshError, null);
+      clearAuth();
+      window.location.href = '/login';
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+);
 
 // Asset endpoints
 export const assetApi = {
@@ -1052,6 +1156,162 @@ export const applicationsApi = {
     const { data } = await api.get(`/applications/${id}/topology`, {
       params: { include_external: includeExternal },
     });
+    return data;
+  },
+};
+
+// Auth API endpoints
+export const authApi = {
+  getStatus: async (): Promise<AuthStatus> => {
+    const { data } = await api.get('/auth/status');
+    return data;
+  },
+
+  login: async (email: string, password: string): Promise<TokenResponse> => {
+    const { data } = await api.post('/auth/login', { email, password });
+    return data;
+  },
+
+  refresh: async (refreshToken: string): Promise<TokenResponse> => {
+    const { data } = await api.post('/auth/refresh', { refresh_token: refreshToken });
+    return data;
+  },
+
+  logout: async (refreshToken?: string): Promise<void> => {
+    await api.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : undefined);
+  },
+
+  getCurrentUser: async (): Promise<User> => {
+    const { data } = await api.get('/auth/me');
+    return data;
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+    await api.post('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  },
+
+  getSessions: async (): Promise<{ items: AuthSession[]; total: number }> => {
+    const { data } = await api.get('/auth/sessions');
+    return data;
+  },
+
+  revokeSession: async (sessionId: string): Promise<void> => {
+    await api.delete(`/auth/sessions/${sessionId}`);
+  },
+};
+
+// User Management API endpoints (admin only)
+export const userApi = {
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    is_active?: boolean;
+    is_local?: boolean;
+    role?: UserRole;
+    search?: string;
+  }): Promise<UserListResponse> => {
+    const { data } = await api.get('/users', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<User> => {
+    const { data } = await api.get(`/users/${id}`);
+    return data;
+  },
+
+  create: async (user: {
+    email: string;
+    name: string;
+    password: string;
+    role: UserRole;
+  }): Promise<User> => {
+    const { data } = await api.post('/users', user);
+    return data;
+  },
+
+  update: async (
+    id: string,
+    updates: {
+      email?: string;
+      name?: string;
+      role?: UserRole;
+      is_active?: boolean;
+    }
+  ): Promise<User> => {
+    const { data } = await api.patch(`/users/${id}`, updates);
+    return data;
+  },
+
+  deactivate: async (id: string): Promise<void> => {
+    await api.delete(`/users/${id}`);
+  },
+
+  resetPassword: async (id: string, newPassword: string): Promise<void> => {
+    await api.post(`/users/${id}/reset-password`, { new_password: newPassword });
+  },
+
+  unlock: async (id: string): Promise<void> => {
+    await api.post(`/users/${id}/unlock`);
+  },
+};
+
+// SAML Provider API endpoints (admin only)
+export const samlProviderApi = {
+  list: async (): Promise<{ items: SAMLProvider[]; total: number }> => {
+    const { data } = await api.get('/saml-providers');
+    return data;
+  },
+
+  get: async (id: string): Promise<SAMLProvider & { certificate: string }> => {
+    const { data } = await api.get(`/saml-providers/${id}`);
+    return data;
+  },
+
+  create: async (provider: {
+    name: string;
+    provider_type: 'azure_ad' | 'okta' | 'ping_identity';
+    entity_id: string;
+    sso_url: string;
+    slo_url?: string;
+    certificate: string;
+    sp_entity_id: string;
+    role_attribute?: string;
+    role_mapping?: Record<string, string>;
+    default_role?: UserRole;
+    auto_provision_users?: boolean;
+  }): Promise<SAMLProvider> => {
+    const { data } = await api.post('/saml-providers', provider);
+    return data;
+  },
+
+  update: async (
+    id: string,
+    updates: Partial<{
+      name: string;
+      entity_id: string;
+      sso_url: string;
+      slo_url: string;
+      certificate: string;
+      sp_entity_id: string;
+      role_attribute: string;
+      role_mapping: Record<string, string>;
+      default_role: UserRole;
+      auto_provision_users: boolean;
+    }>
+  ): Promise<SAMLProvider> => {
+    const { data } = await api.patch(`/saml-providers/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/saml-providers/${id}`);
+  },
+
+  activate: async (id: string): Promise<SAMLProvider> => {
+    const { data } = await api.post(`/saml-providers/${id}/activate`);
     return data;
   },
 };

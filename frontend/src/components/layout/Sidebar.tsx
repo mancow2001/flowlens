@@ -15,9 +15,13 @@ import {
   Cog6ToothIcon,
   QueueListIcon,
   CubeTransparentIcon,
+  UsersIcon,
+  ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
+import { useAuthStore } from '../../stores/authStore';
 import clsx from 'clsx';
+import type { UserRole } from '../../types';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
@@ -31,16 +35,36 @@ const navigation = [
   { name: 'Tasks', href: '/tasks', icon: QueueListIcon },
 ];
 
-const settingsNavigation = [
-  { name: 'Classification Rules', href: '/settings/classification', icon: TagIcon },
-  { name: 'Alert Rules', href: '/settings/alert-rules', icon: AdjustmentsHorizontalIcon },
-  { name: 'Maintenance', href: '/settings/maintenance', icon: WrenchScrewdriverIcon },
-  { name: 'System Settings', href: '/settings/system', icon: Cog6ToothIcon },
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  requiredRoles?: UserRole[];
+}
+
+const settingsNavigation: NavItem[] = [
+  { name: 'Classification Rules', href: '/settings/classification', icon: TagIcon, requiredRoles: ['admin', 'analyst'] },
+  { name: 'Alert Rules', href: '/settings/alert-rules', icon: AdjustmentsHorizontalIcon, requiredRoles: ['admin', 'analyst'] },
+  { name: 'Maintenance', href: '/settings/maintenance', icon: WrenchScrewdriverIcon, requiredRoles: ['admin', 'analyst'] },
+  { name: 'System Settings', href: '/settings/system', icon: Cog6ToothIcon, requiredRoles: ['admin'] },
+  { name: 'User Management', href: '/settings/users', icon: UsersIcon, requiredRoles: ['admin'] },
+  { name: 'SAML Configuration', href: '/settings/saml', icon: ShieldCheckIcon, requiredRoles: ['admin'] },
 ];
 
 export default function Sidebar() {
   const location = useLocation();
   const { sidebarCollapsed, toggleSidebar } = useAppStore();
+  const { hasRole, authEnabled } = useAuthStore();
+
+  // Filter settings navigation based on user role
+  const filteredSettingsNavigation = settingsNavigation.filter((item) => {
+    // If auth is disabled, show all items
+    if (!authEnabled) return true;
+    // If no role requirements, show the item
+    if (!item.requiredRoles) return true;
+    // Check if user has required role
+    return hasRole(item.requiredRoles);
+  });
 
   return (
     <div
@@ -83,31 +107,33 @@ export default function Sidebar() {
         })}
 
         {/* Settings Section */}
-        <div className="pt-4 mt-4 border-t border-slate-700">
-          {!sidebarCollapsed && (
-            <p className="px-3 pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Settings
-            </p>
-          )}
-          {settingsNavigation.map((item) => {
-            const isActive = location.pathname === item.href;
-            return (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={clsx(
-                  'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
-                  isActive
-                    ? 'bg-primary-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                )}
-              >
-                <item.icon className="w-5 h-5 flex-shrink-0" />
-                {!sidebarCollapsed && <span>{item.name}</span>}
-              </Link>
-            );
-          })}
-        </div>
+        {filteredSettingsNavigation.length > 0 && (
+          <div className="pt-4 mt-4 border-t border-slate-700">
+            {!sidebarCollapsed && (
+              <p className="px-3 pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Settings
+              </p>
+            )}
+            {filteredSettingsNavigation.map((item) => {
+              const isActive = location.pathname === item.href;
+              return (
+                <Link
+                  key={item.name}
+                  to={item.href}
+                  className={clsx(
+                    'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                    isActive
+                      ? 'bg-primary-600 text-white'
+                      : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                  )}
+                >
+                  <item.icon className="w-5 h-5 flex-shrink-0" />
+                  {!sidebarCollapsed && <span>{item.name}</span>}
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       {/* Collapse button */}

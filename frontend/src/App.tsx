@@ -16,6 +16,10 @@ import ClassificationRules from './pages/ClassificationRules';
 import Analysis from './pages/Analysis';
 import Tasks from './pages/Tasks';
 import SystemSettings from './pages/SystemSettings';
+import Login from './pages/Login';
+import UserManagement from './pages/UserManagement';
+import SAMLConfiguration from './pages/SAMLConfiguration';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebSocketEvents } from './hooks/useWebSocketEvents';
 import { ToastContainer, toast } from './components/common/Toast';
@@ -43,26 +47,87 @@ function App() {
 
   return (
     <>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/topology" element={<Topology />} />
-          <Route path="/assets" element={<Assets />} />
-          <Route path="/assets/:id" element={<AssetDetail />} />
-          <Route path="/applications" element={<Applications />} />
-          <Route path="/applications/:id" element={<ApplicationDetail />} />
-          <Route path="/dependencies" element={<Dependencies />} />
-          <Route path="/alerts" element={<Alerts />} />
-          <Route path="/changes" element={<Changes />} />
-          <Route path="/analysis" element={<Analysis />} />
-          <Route path="/tasks" element={<Tasks />} />
-          <Route path="/settings/classification" element={<ClassificationRules />} />
-          <Route path="/settings/alert-rules" element={<AlertRules />} />
-          <Route path="/settings/maintenance" element={<Maintenance />} />
-          <Route path="/settings/system" element={<SystemSettings />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        {/* Public route */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Protected routes with layout */}
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/topology" element={<Topology />} />
+                  <Route path="/assets" element={<Assets />} />
+                  <Route path="/assets/:id" element={<AssetDetail />} />
+                  <Route path="/applications" element={<Applications />} />
+                  <Route path="/applications/:id" element={<ApplicationDetail />} />
+                  <Route path="/dependencies" element={<Dependencies />} />
+                  <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/changes" element={<Changes />} />
+                  <Route path="/analysis" element={<Analysis />} />
+                  <Route path="/tasks" element={<Tasks />} />
+
+                  {/* Analyst+ routes */}
+                  <Route
+                    path="/settings/classification"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin', 'analyst']}>
+                        <ClassificationRules />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/alert-rules"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin', 'analyst']}>
+                        <AlertRules />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/maintenance"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin', 'analyst']}>
+                        <Maintenance />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Admin-only routes */}
+                  <Route
+                    path="/settings/system"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin']}>
+                        <SystemSettings />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/users"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin']}>
+                        <UserManagement />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/saml"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin']}>
+                        <SAMLConfiguration />
+                      </ProtectedRoute>
+                    }
+                  />
+                </Routes>
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
       <ToastContainer />
     </>
   );

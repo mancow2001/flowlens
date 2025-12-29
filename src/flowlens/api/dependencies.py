@@ -111,6 +111,40 @@ async def require_auth(
 AuthenticatedUser = Annotated[TokenPayload, Depends(require_auth)]
 
 
+def require_role(required_roles: list[str]):
+    """Create a dependency that requires specific roles.
+
+    Args:
+        required_roles: List of roles that are allowed access.
+
+    Returns:
+        FastAPI dependency function.
+    """
+    async def role_checker(user: AuthenticatedUser) -> TokenPayload:
+        settings = get_settings()
+
+        # Skip role check if auth is disabled
+        if not settings.auth.enabled:
+            return user
+
+        # Check if user has any of the required roles
+        if not any(role in user.roles for role in required_roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+
+        return user
+
+    return role_checker
+
+
+# Role-based user dependencies
+AdminUser = Annotated[TokenPayload, Depends(require_role(["admin"]))]
+AnalystUser = Annotated[TokenPayload, Depends(require_role(["admin", "analyst"]))]
+ViewerUser = Annotated[TokenPayload, Depends(require_role(["admin", "analyst", "viewer"]))]
+
+
 class PaginationParams:
     """Common pagination parameters."""
 

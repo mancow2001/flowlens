@@ -651,3 +651,63 @@ export interface SearchResponse {
   assets: AssetSummary[];
   connections: ConnectionMatch[];
 }
+
+// Auth types
+export type UserRole = 'admin' | 'analyst' | 'viewer';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  is_active: boolean;
+  is_local: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface AuthStatus {
+  auth_enabled: boolean;
+  saml_enabled: boolean;
+  active_provider: SAMLProvider | null;
+}
+
+export interface SAMLProvider {
+  id: string;
+  name: string;
+  provider_type: SAMLProviderType;
+  entity_id: string;
+  sso_url: string;
+  slo_url: string | null;
+  certificate: string;
+  sp_entity_id: string;
+  role_attribute: string | null;
+  role_mapping: Record<string, string> | null;
+  default_role: UserRole;
+  auto_provision_users: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SAMLProviderType = 'azure_ad' | 'okta' | 'ping_identity';
+
+export interface UserListResponse extends PaginatedResponse<User> {}
+
+export interface AuthSession {
+  id: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+  is_current: boolean;
+}
