@@ -286,7 +286,6 @@ export default function Topology() {
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('none');
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
-  const [simulationReady, setSimulationReady] = useState(false);
 
   // Refs for callbacks used in D3 to avoid re-running the effect when callbacks change
   const handleNodeClickRef = useRef<(node: TopologyNode) => void>(() => {});
@@ -1253,16 +1252,9 @@ export default function Topology() {
       }
     });
 
-    // Mark simulation as ready when it settles
-    simulation.on('end', () => {
-      console.log('[Simulation] Ended - marking as ready');
-      setSimulationReady(true);
-    });
-
     // Cleanup
     return () => {
       simulation.stop();
-      setSimulationReady(false);
     };
   }, [filteredTopology, dimensions, groupingMode, groups, groupColors, collapsedGroups, setCollapsedGroups]);
 
@@ -1335,10 +1327,9 @@ export default function Topology() {
       hasFilteredTopology: !!filteredTopology,
       hasSvgRef: !!svgRef.current,
       filteredNodeCount: filteredTopology?.nodes?.length,
-      simulationReady,
     });
 
-    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology || !svgRef.current || !simulationReady) {
+    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology || !svgRef.current) {
       console.log('[SearchHighlight] Early return - conditions not met');
       return;
     }
@@ -1346,8 +1337,6 @@ export default function Topology() {
     // Find the source node in filtered topology
     const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
     console.log('[SearchHighlight] Source node found:', sourceNode ? sourceNode.name : 'NOT FOUND');
-    console.log('[SearchHighlight] Filtered nodes count:', filteredTopology.nodes.length);
-    console.log('[SearchHighlight] Full topology nodes count:', topology?.nodes?.length);
 
     if (!sourceNode) {
       // Node not in filtered view - try finding in full topology
@@ -1358,7 +1347,6 @@ export default function Topology() {
         // Node exists but is filtered out - clear filters and retry
         console.log('[SearchHighlight] Resetting filters to show node');
         resetFilters();
-        // Don't set searchHighlightApplied - let the effect re-run after filters reset
         return;
       }
 
@@ -1368,12 +1356,38 @@ export default function Topology() {
       return;
     }
 
-    // Simulation is ready, nodes have their final positions - apply immediately
-    console.log('[SearchHighlight] Simulation ready, applying highlight and centering');
-    handleNodeClick(sourceNode);
-    centerOnNode(highlightSourceId!);
-    setSearchHighlightApplied(true);
-  }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode, resetFilters, simulationReady]);
+    // Poll for node to have position in DOM (D3 assigns x/y after a few ticks)
+    let attempts = 0;
+    const maxAttempts = 15; // 15 * 100ms = 1.5 seconds max
+
+    const checkAndApply = () => {
+      attempts++;
+      const svg = d3.select(svgRef.current);
+      let nodePosition: { x: number; y: number } | null = null;
+
+      svg.selectAll<SVGGElement, SimNode>('.node').each(function(d) {
+        if (d.id === highlightSourceId && d.x !== undefined && d.y !== undefined) {
+          nodePosition = { x: d.x, y: d.y };
+        }
+      });
+
+      if (nodePosition) {
+        console.log('[SearchHighlight] Node has position, applying highlight and centering');
+        handleNodeClick(sourceNode);
+        centerOnNode(highlightSourceId!);
+        setSearchHighlightApplied(true);
+      } else if (attempts < maxAttempts) {
+        setTimeout(checkAndApply, 100);
+      } else {
+        console.log('[SearchHighlight] Max attempts reached');
+        setSearchHighlightApplied(true);
+      }
+    };
+
+    // Start polling quickly
+    const timer = setTimeout(checkAndApply, 100);
+    return () => clearTimeout(timer);
+  }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode, resetFilters]);
 
   // Reset search highlight state when URL params change to new values
   useEffect(() => {
