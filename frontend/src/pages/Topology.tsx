@@ -285,6 +285,7 @@ export default function Topology() {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('none');
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
 
   // Time slider state - now synced with filters hook
   const historicalDate = filters.asOf ? new Date(filters.asOf) : null;
@@ -795,6 +796,9 @@ export default function Topology() {
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide().radius(40));
 
+    // Store simulation ref for external access (e.g., stopping before centering)
+    simulationRef.current = simulation;
+
     // Add grouping force if grouping is enabled
     if (groupingMode !== 'none') {
       // Compute group centers
@@ -1247,11 +1251,17 @@ export default function Topology() {
   // Center and zoom to a specific node
   const centerOnNode = useCallback((nodeId: string) => {
     console.log('[CenterOnNode] Called with nodeId:', nodeId);
-    console.log('[CenterOnNode] Refs:', { hasSvg: !!svgRef.current, hasZoom: !!zoomRef.current, hasTopology: !!filteredTopology });
+    console.log('[CenterOnNode] Refs:', { hasSvg: !!svgRef.current, hasZoom: !!zoomRef.current, hasTopology: !!filteredTopology, hasContainer: !!containerRef.current, hasSimulation: !!simulationRef.current });
 
-    if (!svgRef.current || !zoomRef.current || !filteredTopology) {
+    if (!svgRef.current || !zoomRef.current || !filteredTopology || !containerRef.current) {
       console.log('[CenterOnNode] Early return - missing refs');
       return;
+    }
+
+    // Stop the simulation to prevent it from moving nodes after we center
+    if (simulationRef.current) {
+      console.log('[CenterOnNode] Stopping simulation');
+      simulationRef.current.stop();
     }
 
     const svg = d3.select(svgRef.current);
@@ -1273,7 +1283,10 @@ export default function Topology() {
       return;
     }
 
-    const { width, height } = dimensions;
+    // Get actual container dimensions (not from state which may be stale)
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const width = containerRect.width;
+    const height = Math.max(containerRect.height, 500);
     const scale = 1.5; // Zoom level
 
     // Calculate transform to center the node
@@ -1288,7 +1301,7 @@ export default function Topology() {
         zoomRef.current.transform,
         d3.zoomIdentity.translate(x, y).scale(scale)
       );
-  }, [filteredTopology, dimensions]);
+  }, [filteredTopology]);
 
   // Apply search highlight from URL params
   useEffect(() => {
