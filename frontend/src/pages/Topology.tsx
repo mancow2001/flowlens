@@ -880,6 +880,48 @@ export default function Topology() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#eab308');
 
+    // Glow filter for selected node (white glow)
+    const selectedGlow = defs.append('filter')
+      .attr('id', 'glow-selected')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+    selectedGlow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 0)
+      .attr('stdDeviation', 8)
+      .attr('flood-color', '#ffffff')
+      .attr('flood-opacity', 0.8);
+
+    // Glow filter for upstream nodes (cyan glow)
+    const upstreamGlow = defs.append('filter')
+      .attr('id', 'glow-upstream')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+    upstreamGlow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 0)
+      .attr('stdDeviation', 6)
+      .attr('flood-color', '#06b6d4')
+      .attr('flood-opacity', 0.7);
+
+    // Glow filter for downstream nodes (yellow glow)
+    const downstreamGlow = defs.append('filter')
+      .attr('id', 'glow-downstream')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+    downstreamGlow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 0)
+      .attr('stdDeviation', 6)
+      .attr('flood-color', '#eab308')
+      .attr('flood-opacity', 0.7);
+
     // Gateway arrow (purple)
     defs.append('marker')
       .attr('id', 'arrowhead-gateway')
@@ -1261,16 +1303,12 @@ export default function Topology() {
 
   // Center and zoom to a specific node
   const centerOnNode = useCallback((nodeId: string) => {
-    console.log('[CenterOnNode] Called with nodeId:', nodeId);
-
     if (!svgRef.current || !zoomRef.current || !filteredTopology) {
-      console.log('[CenterOnNode] Early return - missing refs');
       return;
     }
 
     // Stop the simulation to prevent it from moving nodes after we center
     if (simulationRef.current) {
-      console.log('[CenterOnNode] Stopping simulation');
       simulationRef.current.stop();
     }
 
@@ -1286,10 +1324,7 @@ export default function Topology() {
       }
     });
 
-    console.log('[CenterOnNode] Node position:', { targetX, targetY });
-
     if (targetX === undefined || targetY === undefined) {
-      console.log('[CenterOnNode] Node position not found');
       return;
     }
 
@@ -1301,8 +1336,6 @@ export default function Topology() {
     const x = width / 2 - targetX * scale;
     const y = height / 2 - targetY * scale;
 
-    console.log('[CenterOnNode] Applying transform:', { x, y, scale, width, height, targetX, targetY });
-
     const newTransform = d3.zoomIdentity.translate(x, y).scale(scale);
 
     // Apply transform with transition
@@ -1313,39 +1346,24 @@ export default function Topology() {
 
   // Apply search highlight from URL params
   useEffect(() => {
-    console.log('[SearchHighlight] Effect running:', {
-      hasSearchHighlight,
-      searchHighlightApplied,
-      highlightSourceId,
-      highlightTargetId,
-      hasFilteredTopology: !!filteredTopology,
-      hasSvgRef: !!svgRef.current,
-      filteredNodeCount: filteredTopology?.nodes?.length,
-    });
-
     if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology || !svgRef.current) {
-      console.log('[SearchHighlight] Early return - conditions not met');
       return;
     }
 
     // Find the source node in filtered topology
     const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
-    console.log('[SearchHighlight] Source node found:', sourceNode ? sourceNode.name : 'NOT FOUND');
 
     if (!sourceNode) {
       // Node not in filtered view - try finding in full topology
       const nodeInFull = topology?.nodes.find(n => n.id === highlightSourceId);
-      console.log('[SearchHighlight] Node in full topology:', nodeInFull ? nodeInFull.name : 'NOT FOUND');
 
       if (nodeInFull) {
         // Node exists but is filtered out - clear filters and retry
-        console.log('[SearchHighlight] Resetting filters to show node');
         resetFilters();
         return;
       }
 
       // Node doesn't exist in topology at all
-      console.log('[SearchHighlight] Node not in any topology data');
       setSearchHighlightApplied(true);
       return;
     }
@@ -1354,7 +1372,6 @@ export default function Topology() {
     setIsLocatingNode(true);
 
     const timer = setTimeout(() => {
-      console.log('[SearchHighlight] 3 seconds elapsed, applying highlight and centering');
       handleNodeClick(sourceNode);
       centerOnNode(highlightSourceId!);
       setSearchHighlightApplied(true);
@@ -1385,32 +1402,40 @@ export default function Topology() {
       const circle = nodeGroup.select('circle');
 
       if (selectedNode?.id === d.id) {
-        // Selected node - bright white border
+        // Selected node - bright white border with glow
         circle
           .attr('stroke', '#ffffff')
-          .attr('stroke-width', 4);
+          .attr('stroke-width', 5)
+          .attr('opacity', 1)
+          .attr('filter', 'url(#glow-selected)');
       } else if (highlightedPaths?.upstream.has(d.id)) {
-        // Upstream node - cyan border
+        // Upstream node - cyan border with glow
         circle
           .attr('stroke', '#06b6d4')
-          .attr('stroke-width', 3);
+          .attr('stroke-width', 4)
+          .attr('opacity', 1)
+          .attr('filter', 'url(#glow-upstream)');
       } else if (highlightedPaths?.downstream.has(d.id)) {
-        // Downstream node - yellow border
+        // Downstream node - yellow border with glow
         circle
           .attr('stroke', '#eab308')
-          .attr('stroke-width', 3);
+          .attr('stroke-width', 4)
+          .attr('opacity', 1)
+          .attr('filter', 'url(#glow-downstream)');
       } else if (highlightedPaths) {
-        // Non-connected node when something is selected - dim
+        // Non-connected node when something is selected - heavily dim
         circle
           .attr('stroke', '#1e293b')
-          .attr('stroke-width', 2)
-          .attr('opacity', 0.3);
+          .attr('stroke-width', 1)
+          .attr('opacity', 0.15)
+          .attr('filter', null);
       } else {
         // Default state
         circle
           .attr('stroke', '#1e293b')
           .attr('stroke-width', 2)
-          .attr('opacity', 1);
+          .attr('opacity', 1)
+          .attr('filter', null);
       }
     });
 
@@ -1430,28 +1455,28 @@ export default function Topology() {
         if (isUpstream && !isDownstream) {
           edge
             .attr('stroke', '#06b6d4')
-            .attr('stroke-width', 3)
+            .attr('stroke-width', 4)
             .attr('stroke-opacity', 1)
             .attr('marker-end', 'url(#arrowhead-upstream)');
         } else if (isDownstream) {
           edge
             .attr('stroke', '#eab308')
-            .attr('stroke-width', 3)
+            .attr('stroke-width', 4)
             .attr('stroke-opacity', 1)
             .attr('marker-end', 'url(#arrowhead-downstream)');
         } else {
           edge
             .attr('stroke', '#3b82f6')
-            .attr('stroke-width', 3)
+            .attr('stroke-width', 4)
             .attr('stroke-opacity', 1)
             .attr('marker-end', 'url(#arrowhead)');
         }
       } else if (highlightedPaths) {
-        // Non-connected edge when something is selected - dim
+        // Non-connected edge when something is selected - heavily dim
         edge
           .attr('stroke', '#475569')
           .attr('stroke-width', 1)
-          .attr('stroke-opacity', 0.2)
+          .attr('stroke-opacity', 0.1)
           .attr('marker-end', 'url(#arrowhead)');
       } else {
         // Default state
@@ -1471,7 +1496,7 @@ export default function Topology() {
                          highlightedPaths?.downstream.has(d.id);
 
       if (highlightedPaths && !isConnected) {
-        nodeGroup.selectAll('text').attr('opacity', 0.3);
+        nodeGroup.selectAll('text').attr('opacity', 0.15);
       } else {
         nodeGroup.selectAll('text').attr('opacity', 1);
       }

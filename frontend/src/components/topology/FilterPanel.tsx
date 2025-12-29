@@ -5,16 +5,18 @@ import Button from '../common/Button';
 import { classificationApi } from '../../services/api';
 import type { TopologyFilters } from '../../hooks/useTopologyFilters';
 
-// Standard asset types
+// Standard asset types - must match backend AssetType enum in models/asset.py
 const ASSET_TYPES = [
   { value: 'server', label: 'Server' },
   { value: 'workstation', label: 'Workstation' },
-  { value: 'network_device', label: 'Network Device' },
-  { value: 'load_balancer', label: 'Load Balancer' },
   { value: 'database', label: 'Database' },
+  { value: 'load_balancer', label: 'Load Balancer' },
+  { value: 'firewall', label: 'Firewall' },
+  { value: 'router', label: 'Router' },
+  { value: 'switch', label: 'Switch' },
   { value: 'storage', label: 'Storage' },
-  { value: 'virtual_machine', label: 'Virtual Machine' },
   { value: 'container', label: 'Container' },
+  { value: 'virtual_machine', label: 'Virtual Machine' },
   { value: 'cloud_service', label: 'Cloud Service' },
   { value: 'unknown', label: 'Unknown' },
 ];
