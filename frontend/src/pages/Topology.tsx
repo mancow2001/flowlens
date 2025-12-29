@@ -1246,7 +1246,13 @@ export default function Topology() {
 
   // Center and zoom to a specific node
   const centerOnNode = useCallback((nodeId: string) => {
-    if (!svgRef.current || !zoomRef.current || !filteredTopology) return;
+    console.log('[CenterOnNode] Called with nodeId:', nodeId);
+    console.log('[CenterOnNode] Refs:', { hasSvg: !!svgRef.current, hasZoom: !!zoomRef.current, hasTopology: !!filteredTopology });
+
+    if (!svgRef.current || !zoomRef.current || !filteredTopology) {
+      console.log('[CenterOnNode] Early return - missing refs');
+      return;
+    }
 
     const svg = d3.select(svgRef.current);
 
@@ -1260,7 +1266,12 @@ export default function Topology() {
       }
     });
 
-    if (targetX === undefined || targetY === undefined) return;
+    console.log('[CenterOnNode] Node position:', { targetX, targetY });
+
+    if (targetX === undefined || targetY === undefined) {
+      console.log('[CenterOnNode] Node position not found');
+      return;
+    }
 
     const { width, height } = dimensions;
     const scale = 1.5; // Zoom level
@@ -1268,6 +1279,8 @@ export default function Topology() {
     // Calculate transform to center the node
     const x = width / 2 - targetX * scale;
     const y = height / 2 - targetY * scale;
+
+    console.log('[CenterOnNode] Applying transform:', { x, y, scale, width, height });
 
     svg.transition()
       .duration(750)
