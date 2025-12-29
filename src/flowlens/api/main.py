@@ -207,10 +207,10 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, changes, classification, dependencies, gateways, maintenance, saved_views, search, settings, tasks, topology, ws
+    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, changes, classification, dependencies, gateways, maintenance, saved_views, search, settings as settings_router, tasks, topology, ws
 
     app.include_router(admin.router)
-    app.include_router(settings.router, prefix="/api/v1")
+    app.include_router(settings_router.router, prefix="/api/v1")
     app.include_router(assets.router, prefix="/api/v1")
     app.include_router(applications.router, prefix="/api/v1")
     app.include_router(asset_classification.router, prefix="/api/v1")  # Behavioral classification
@@ -231,10 +231,11 @@ def create_app() -> FastAPI:
     # Root endpoint
     @app.get("/")
     async def root() -> dict:
+        app_settings = get_settings()
         return {
             "name": "FlowLens API",
-            "version": settings.app_version,
-            "docs": "/docs" if not settings.is_production else None,
+            "version": app_settings.app_version,
+            "docs": "/docs" if not app_settings.is_production else None,
         }
 
     return app

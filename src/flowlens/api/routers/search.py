@@ -53,12 +53,20 @@ async def unified_search(
         )
         result = await db.execute(query)
         for asset in result.scalars().all():
+            # Handle asset_type which could be an enum or a string
+            if hasattr(asset.asset_type, 'value'):
+                asset_type_str = asset.asset_type.value
+            elif asset.asset_type:
+                asset_type_str = str(asset.asset_type)
+            else:
+                asset_type_str = "unknown"
+
             assets.append(
                 AssetMatch(
                     id=asset.id,
                     name=asset.name,
                     display_name=asset.display_name,
-                    asset_type=asset.asset_type.value if asset.asset_type else "unknown",
+                    asset_type=asset_type_str,
                     ip_address=str(asset.ip_address),
                     hostname=asset.hostname,
                     is_internal=asset.is_internal,
