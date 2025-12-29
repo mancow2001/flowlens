@@ -214,6 +214,8 @@ class AssetMapper:
 
         # Check if we inserted a new row
         if result.rowcount > 0:
+            # Flush to ensure the insert is visible within this transaction
+            await db.flush()
             logger.info(
                 "Created new asset",
                 asset_id=str(new_id),
@@ -227,15 +229,53 @@ class AssetMapper:
             ).inc()
             return new_id
 
-        # Row already existed - query to get the existing ID
-        query_result = await db.execute(
-            select(Asset.id).where(
-                Asset.ip_address == ip_str,
-                Asset.deleted_at.is_(None),
+        # Row already existed (conflict) - query to get the existing ID
+        # Use a loop in case of race condition where asset was just deleted
+        for _ in range(3):
+            query_result = await db.execute(
+                select(Asset.id).where(
+                    Asset.ip_address == ip_str,
+                    Asset.deleted_at.is_(None),
+                )
             )
-        )
-        existing_id = query_result.scalar_one()
-        return existing_id
+            existing_id = query_result.scalar_one_or_none()
+            if existing_id:
+                return existing_id
+
+            # Asset might have been deleted - try to insert again
+            new_id = uuid_module.uuid4()
+            stmt = pg_insert(Asset).values(
+                id=new_id,
+                name=name,
+                ip_address=ip_str,
+                hostname=hostname,
+                fqdn=hostname if hostname and "." in hostname else None,
+                asset_type=asset_type,
+                is_internal=is_internal,
+                is_critical=False,
+                country_code=country_code,
+                city=city,
+                environment=environment,
+                datacenter=datacenter,
+                owner=owner,
+                team=team,
+            ).on_conflict_do_nothing(index_elements=['ip_address'])
+
+            retry_result = await db.execute(stmt)
+            if retry_result.rowcount > 0:
+                await db.flush()
+                logger.info(
+                    "Created new asset (retry)",
+                    asset_id=str(new_id),
+                    ip=ip_str,
+                )
+                ASSETS_DISCOVERED.labels(
+                    asset_type="internal" if is_internal else "external"
+                ).inc()
+                return new_id
+
+        # Should not reach here, but raise if we do
+        raise RuntimeError(f"Failed to get or create asset for IP {ip_str}")
 
     async def map_aggregate_to_assets(
         self,
