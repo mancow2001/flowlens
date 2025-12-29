@@ -1310,13 +1310,24 @@ export default function Topology() {
     // Find the source node in filtered topology
     const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
     console.log('[SearchHighlight] Source node found:', sourceNode ? sourceNode.name : 'NOT FOUND');
+    console.log('[SearchHighlight] Filtered nodes count:', filteredTopology.nodes.length);
+    console.log('[SearchHighlight] Full topology nodes count:', topology?.nodes?.length);
+
     if (!sourceNode) {
       // Node not in filtered view - try finding in full topology
       const nodeInFull = topology?.nodes.find(n => n.id === highlightSourceId);
+      console.log('[SearchHighlight] Node in full topology:', nodeInFull ? nodeInFull.name : 'NOT FOUND');
+
       if (nodeInFull) {
         // Node exists but is filtered out - clear filters and retry
+        console.log('[SearchHighlight] Resetting filters to show node');
         resetFilters();
+        // Don't set searchHighlightApplied - let the effect re-run after filters reset
+        return;
       }
+
+      // Node doesn't exist in topology at all
+      console.log('[SearchHighlight] Node not in any topology data');
       setSearchHighlightApplied(true);
       return;
     }
