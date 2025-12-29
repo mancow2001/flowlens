@@ -581,6 +581,12 @@ export interface ApplicationTopologyNode {
   role: string | null;
   is_critical: boolean;
   is_external?: boolean;
+  is_internal_asset?: boolean;
+  hop_distance?: number;
+  from_entry_points?: Array<{
+    entry_point_id: string;
+    distance: number;
+  }>;
 }
 
 export interface ApplicationTopologyEdge {
@@ -592,6 +598,8 @@ export interface ApplicationTopologyEdge {
   bytes_last_24h: number | null;
   last_seen: string | null;
   is_internal: boolean;
+  is_from_entry_point?: boolean;
+  hop_distance?: number;
 }
 
 export interface ApplicationEntryPoint {
@@ -621,6 +629,7 @@ export interface ApplicationTopology {
   edges: ApplicationTopologyEdge[];
   entry_points: ApplicationEntryPoint[];
   inbound_summary: InboundSummary[];
+  max_depth: number;
 }
 
 // Asset summary type (referenced by ApplicationMember)

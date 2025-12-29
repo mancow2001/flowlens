@@ -1158,9 +1158,12 @@ export const applicationsApi = {
   },
 
   // Topology endpoint
-  getTopology: async (id: string, includeExternal?: boolean): Promise<ApplicationTopology> => {
+  getTopology: async (id: string, includeExternal?: boolean, maxDepth?: number): Promise<ApplicationTopology> => {
     const { data } = await api.get(`/applications/${id}/topology`, {
-      params: { include_external: includeExternal },
+      params: {
+        include_external: includeExternal,
+        max_depth: maxDepth,
+      },
     });
     return data;
   },

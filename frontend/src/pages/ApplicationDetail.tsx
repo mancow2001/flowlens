@@ -30,6 +30,8 @@ interface SimNode extends d3.SimulationNodeDatum {
   role: string | null;
   is_critical: boolean;
   is_external?: boolean;
+  is_internal_asset?: boolean;
+  hop_distance?: number;
   // For client summary nodes
   is_client_summary?: boolean;
   client_count?: number;
@@ -57,11 +59,22 @@ const NODE_COLORS = {
   client_summary: '#10b981', // green for client summary
 };
 
-// Layout positions
+// Layout positions - dynamically calculated based on hop distance
+const getLayoutX = (hopDistance: number) => {
+  const clientX = 80;        // Client summary nodes (leftmost)
+  const entryPointX = 200;   // Entry points (hop 0)
+  const hopSpacing = 180;    // Spacing between each hop level
+
+  if (hopDistance < 0) return clientX;  // Client summary
+  if (hopDistance === 0) return entryPointX;  // Entry points
+  return entryPointX + (hopDistance * hopSpacing);  // Downstream by hop
+};
+
+// Legacy layout for backwards compatibility
 const LAYOUT = {
-  clientX: 100,     // X position for client summary nodes (left)
-  entryPointX: 300, // X position for entry points (center-left)
-  memberX: 550,     // Starting X for other members (right)
+  clientX: 80,      // X position for client summary nodes (left)
+  entryPointX: 200, // X position for entry points (center-left)
+  memberX: 380,     // Starting X for hop 1 members
 };
 
 export default function ApplicationDetail() {
@@ -75,16 +88,17 @@ export default function ApplicationDetail() {
     position: { x: number; y: number };
   } | null>(null);
   const [showExternal, setShowExternal] = useState(false);
+  const [maxDepth, setMaxDepth] = useState(3);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
   // Fetch application topology
   const { data: topology, isLoading, error } = useQuery({
-    queryKey: ['application-topology', id, showExternal],
-    queryFn: () => applicationsApi.getTopology(id!, showExternal),
+    queryKey: ['application-topology', id, showExternal, maxDepth],
+    queryFn: () => applicationsApi.getTopology(id!, showExternal, maxDepth),
     enabled: !!id,
   });
 
-  // Transform data for D3 with hierarchical layout
+  // Transform data for D3 with hierarchical layout based on hop distance
   const { nodes, links } = useMemo(() => {
     if (!topology) return { nodes: [], links: [] };
 
@@ -92,35 +106,46 @@ export default function ApplicationDetail() {
     const simNodes: SimNode[] = [];
     const simLinks: SimLink[] = [];
 
-    // Find entry points and non-entry-point members
-    const entryPointNodes = topology.nodes.filter(n => n.is_entry_point);
-    const memberNodes = topology.nodes.filter(n => !n.is_entry_point);
+    // Group nodes by hop distance
+    const nodesByHop: Map<number, typeof topology.nodes> = new Map();
+    topology.nodes.forEach(node => {
+      const hop = node.hop_distance ?? 0;
+      if (!nodesByHop.has(hop)) nodesByHop.set(hop, []);
+      nodesByHop.get(hop)!.push(node);
+    });
 
-    // Calculate Y positions for entry points (evenly distributed)
-    const entryPointYSpacing = height / (entryPointNodes.length + 1);
+    // Create nodes positioned by hop distance (columns)
+    nodesByHop.forEach((nodesAtHop, hopDistance) => {
+      const xPos = getLayoutX(hopDistance);
+      const ySpacing = height / (nodesAtHop.length + 1);
 
-    // Create entry point nodes at center-left position
-    entryPointNodes.forEach((node, i) => {
-      simNodes.push({
-        ...node,
-        x: LAYOUT.entryPointX,
-        y: entryPointYSpacing * (i + 1),
-        fx: LAYOUT.entryPointX, // Fixed X position
+      nodesAtHop.forEach((node, i) => {
+        const yPos = ySpacing * (i + 1);
+        simNodes.push({
+          ...node,
+          hop_distance: hopDistance,
+          x: xPos,
+          y: yPos,
+          fx: xPos, // Fixed X position for column layout
+        });
       });
     });
 
-    // Create client summary nodes from inbound_summary (left side)
+    // Create client summary nodes from inbound_summary (leftmost column)
     if (topology.inbound_summary) {
-      topology.inbound_summary.forEach((summary: InboundSummary) => {
-        if (summary.client_count === 0) return; // Skip if no clients
+      const entryPointNodes = topology.nodes.filter(n => n.is_entry_point);
+      const entryPointYSpacing = height / (entryPointNodes.length + 1);
 
-        // Find the Y position of the corresponding entry point
+      topology.inbound_summary.forEach((summary: InboundSummary) => {
+        if (summary.client_count === 0) return;
+
         const entryPointIndex = entryPointNodes.findIndex(
           n => n.id === summary.entry_point_asset_id
         );
         const yPos = entryPointYSpacing * (entryPointIndex + 1);
 
         const clientNodeId = `client-summary-${summary.entry_point_asset_id}`;
+        const xPos = getLayoutX(-1); // -1 for client summary column
 
         simNodes.push({
           id: clientNodeId,
@@ -139,13 +164,13 @@ export default function ApplicationDetail() {
           client_count: summary.client_count,
           total_bytes_24h: summary.total_bytes_24h,
           target_entry_point_id: summary.entry_point_asset_id,
-          x: LAYOUT.clientX,
+          hop_distance: -1,
+          x: xPos,
           y: yPos,
-          fx: LAYOUT.clientX, // Fixed X position
-          fy: yPos, // Fixed Y position to align with entry point
+          fx: xPos,
+          fy: yPos,
         });
 
-        // Create edge from client summary to entry point
         simLinks.push({
           id: `${clientNodeId}-${summary.entry_point_asset_id}`,
           source: clientNodeId,
@@ -160,16 +185,6 @@ export default function ApplicationDetail() {
         });
       });
     }
-
-    // Create member nodes (right side) - these will be positioned by the simulation
-    const memberYSpacing = height / (memberNodes.length + 1);
-    memberNodes.forEach((node, i) => {
-      simNodes.push({
-        ...node,
-        x: LAYOUT.memberX + Math.random() * 100,
-        y: memberYSpacing * (i + 1),
-      });
-    });
 
     // Create edges from topology.edges
     const nodeMap = new Map(simNodes.map(n => [n.id, n]));
@@ -535,7 +550,19 @@ export default function ApplicationDetail() {
             <p className="text-slate-400 mt-1">Application Topology</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-slate-400">Hop Depth:</label>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              value={maxDepth}
+              onChange={(e) => setMaxDepth(parseInt(e.target.value))}
+              className="w-24 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+            <span className="text-sm text-white font-medium w-4">{maxDepth}</span>
+          </div>
           <label className="flex items-center gap-2 text-sm text-slate-400">
             <input
               type="checkbox"

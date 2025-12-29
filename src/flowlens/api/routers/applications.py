@@ -653,21 +653,23 @@ async def get_application_topology(
     application_id: UUID,
     db: DbSession,
     _user: ViewerUser,
+    max_depth: int = Query(default=3, ge=1, le=5, description="Maximum hop depth for downstream traversal"),
 ) -> dict:
     """Get topology data for an application with entry point flow visualization.
 
-    Returns a hierarchical view:
+    Returns a hierarchical view organized by hop distance:
     - Left: Aggregated inbound client counts for each entry point
-    - Center: Entry point nodes
-    - Right: Internal application members and their connections
+    - Center: Entry point nodes (hop 0)
+    - Right: Downstream dependencies organized by hop distance (1, 2, 3...)
 
     The topology shows:
     1. External clients connecting TO entry points (aggregated by entry point port)
-    2. Connections FROM entry points to other application members
-    3. Connections between non-entry-point members
+    2. Connections FROM entry points traversed up to max_depth hops
+    3. All downstream assets with their hop distance from entry points
     """
     from sqlalchemy import func as sql_func
     from flowlens.models.dependency import Dependency
+    from flowlens.graph.traversal import GraphTraversal
 
     # Get application with members
     query = (
@@ -743,34 +745,58 @@ async def get_application_topology(
             "total_bytes_24h": row.total_bytes or 0,
         })
 
-    # Query 2: Get outbound connections FROM entry points to other members
-    outbound_from_entry_points_query = (
-        select(Dependency)
-        .where(
-            Dependency.source_asset_id.in_(entry_point_asset_ids),
-            Dependency.target_asset_id.in_(member_asset_ids),
-        )
-    )
-    result = await db.execute(outbound_from_entry_points_query)
-    outbound_from_ep = result.scalars().all()
+    # Use GraphTraversal to get downstream dependencies from each entry point
+    traversal = GraphTraversal(max_depth=max_depth)
 
-    # Query 3: Get connections between non-entry-point members
-    non_ep_asset_ids = member_asset_ids - entry_point_asset_ids
-    internal_connections = []
-    if non_ep_asset_ids:
-        internal_query = (
-            select(Dependency)
+    # Track downstream assets with their minimum hop distance from any entry point
+    # Key: asset_id, Value: {min_hop_distance, paths_from_entry_points}
+    downstream_assets: dict[UUID, dict] = {}
+
+    # Traverse downstream from each entry point
+    for ep_member in entry_point_members:
+        result = await traversal.get_downstream(db, ep_member.asset_id, max_depth=max_depth)
+
+        for node in result.nodes:
+            if node.asset_id in downstream_assets:
+                # Update if this path is shorter
+                if node.depth < downstream_assets[node.asset_id]["hop_distance"]:
+                    downstream_assets[node.asset_id]["hop_distance"] = node.depth
+                # Track all entry points that reach this asset
+                downstream_assets[node.asset_id]["from_entry_points"].append({
+                    "entry_point_id": str(ep_member.asset_id),
+                    "distance": node.depth,
+                })
+            else:
+                downstream_assets[node.asset_id] = {
+                    "hop_distance": node.depth,
+                    "from_entry_points": [{
+                        "entry_point_id": str(ep_member.asset_id),
+                        "distance": node.depth,
+                    }],
+                    "bytes_total": node.bytes_total,
+                    "last_seen": node.last_seen,
+                }
+
+    # Get full asset details for all downstream assets
+    downstream_asset_ids = set(downstream_assets.keys())
+    downstream_asset_details = {}
+    if downstream_asset_ids:
+        assets_query = (
+            select(Asset)
             .where(
-                Dependency.source_asset_id.in_(non_ep_asset_ids),
-                Dependency.target_asset_id.in_(non_ep_asset_ids),
+                Asset.id.in_(list(downstream_asset_ids)),
+                Asset.deleted_at.is_(None),
             )
         )
-        result = await db.execute(internal_query)
-        internal_connections = result.scalars().all()
+        result = await db.execute(assets_query)
+        for asset in result.scalars().all():
+            downstream_asset_details[asset.id] = asset
 
-    # Build node data for application members
+    # Build node data - entry points first (hop 0), then downstream by hop distance
     nodes = []
-    for member in application.members:
+
+    # Add entry point nodes (hop 0)
+    for member in entry_point_members:
         asset = member.asset
         nodes.append({
             "id": str(asset.id),
@@ -778,43 +804,79 @@ async def get_application_topology(
             "display_name": asset.display_name,
             "ip_address": str(asset.ip_address),
             "asset_type": asset.asset_type,
-            "is_entry_point": member.is_entry_point,
+            "is_entry_point": True,
             "entry_point_port": member.entry_point_port,
             "entry_point_protocol": member.entry_point_protocol,
             "entry_point_order": member.entry_point_order,
             "role": member.role,
             "is_critical": asset.is_critical,
             "is_external": False,
+            "hop_distance": 0,
         })
 
-    # Build edge data - only outbound from entry points + internal connections
+    # Add downstream nodes with hop distance
+    for asset_id, info in sorted(downstream_assets.items(), key=lambda x: x[1]["hop_distance"]):
+        asset = downstream_asset_details.get(asset_id)
+        if not asset:
+            continue
+
+        # Check if this is an application member
+        member = member_map.get(asset_id)
+        is_app_member = member is not None
+
+        # Skip entry points (already added)
+        if asset_id in entry_point_asset_ids:
+            continue
+
+        nodes.append({
+            "id": str(asset.id),
+            "name": asset.name,
+            "display_name": asset.display_name,
+            "ip_address": str(asset.ip_address),
+            "asset_type": asset.asset_type,
+            "is_entry_point": False,
+            "entry_point_port": None,
+            "entry_point_protocol": None,
+            "entry_point_order": None,
+            "role": member.role if member else None,
+            "is_critical": asset.is_critical,
+            "is_external": not is_app_member,
+            "is_internal_asset": asset.is_internal,
+            "hop_distance": info["hop_distance"],
+            "from_entry_points": info["from_entry_points"],
+        })
+
+    # Build edge data - get all dependencies between nodes in our graph
+    node_ids = {UUID(n["id"]) for n in nodes}
     edges = []
 
-    # Edges from entry points to other members
-    for conn in outbound_from_ep:
-        edges.append({
-            "source": str(conn.source_asset_id),
-            "target": str(conn.target_asset_id),
-            "target_port": conn.target_port,
-            "protocol": conn.protocol,
-            "dependency_type": conn.dependency_type,
-            "bytes_last_24h": conn.bytes_last_24h,
-            "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
-            "is_from_entry_point": True,
-        })
+    if node_ids:
+        # Get all dependencies where both source and target are in our node set
+        deps_query = (
+            select(Dependency)
+            .where(
+                Dependency.source_asset_id.in_(list(node_ids)),
+                Dependency.target_asset_id.in_(list(node_ids)),
+                Dependency.valid_to.is_(None),
+            )
+        )
+        result = await db.execute(deps_query)
 
-    # Internal edges between non-entry-point members
-    for conn in internal_connections:
-        edges.append({
-            "source": str(conn.source_asset_id),
-            "target": str(conn.target_asset_id),
-            "target_port": conn.target_port,
-            "protocol": conn.protocol,
-            "dependency_type": conn.dependency_type,
-            "bytes_last_24h": conn.bytes_last_24h,
-            "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
-            "is_from_entry_point": False,
-        })
+        for conn in result.scalars().all():
+            # Calculate hop distance for the edge (based on target's hop distance)
+            target_hop = downstream_assets.get(conn.target_asset_id, {}).get("hop_distance", 0)
+
+            edges.append({
+                "source": str(conn.source_asset_id),
+                "target": str(conn.target_asset_id),
+                "target_port": conn.target_port,
+                "protocol": conn.protocol,
+                "dependency_type": conn.dependency_type,
+                "bytes_last_24h": conn.bytes_last_24h,
+                "last_seen": conn.last_seen.isoformat() if conn.last_seen else None,
+                "is_from_entry_point": conn.source_asset_id in entry_point_asset_ids,
+                "hop_distance": target_hop,
+            })
 
     # Build entry points list with port/protocol info
     entry_points = [
@@ -841,4 +903,5 @@ async def get_application_topology(
         "edges": edges,
         "entry_points": entry_points,
         "inbound_summary": inbound_summary,
+        "max_depth": max_depth,
     }
