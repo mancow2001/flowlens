@@ -635,3 +635,19 @@ export interface AssetSummary {
   is_critical: boolean;
   last_seen: string;
 }
+
+// Search types
+export interface ConnectionMatch {
+  id: string;
+  source: AssetInfo;
+  target: AssetInfo;
+  target_port: number;
+  protocol: number;
+  bytes_last_24h: number;
+  last_seen: string;
+}
+
+export interface SearchResponse {
+  assets: AssetSummary[];
+  connections: ConnectionMatch[];
+}

@@ -29,6 +29,7 @@ import type {
   ApplicationMemberUpdate,
   ApplicationListResponse,
   ApplicationTopology,
+  SearchResponse,
 } from '../types';
 
 const api = axios.create({
@@ -81,6 +82,20 @@ export const assetApi = {
 
   delete: async (id: string): Promise<void> => {
     await api.delete(`/assets/${id}`);
+  },
+};
+
+// Search endpoints
+export const searchApi = {
+  search: async (params: {
+    q?: string;
+    source?: string;
+    destination?: string;
+    port?: number;
+    limit?: number;
+  }): Promise<SearchResponse> => {
+    const { data } = await api.get('/search', { params });
+    return data;
   },
 };
 
