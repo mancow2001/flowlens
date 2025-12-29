@@ -1279,32 +1279,52 @@ export default function Topology() {
 
   // Apply search highlight from URL params
   useEffect(() => {
-    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology) return;
+    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology || !svgRef.current) return;
 
-    // Wait for simulation to settle (nodes need positions)
-    const timer = setTimeout(() => {
-      // Find the source node in filtered topology (what's displayed)
-      const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
-      if (sourceNode) {
-        // Select the source node to highlight the path
-        handleNodeClick(sourceNode);
+    // Find the source node in filtered topology
+    const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
+    if (!sourceNode) {
+      // Node not in filtered view - try finding in full topology
+      const nodeInFull = topology?.nodes.find(n => n.id === highlightSourceId);
+      if (nodeInFull) {
+        // Node exists but is filtered out - clear filters and retry
+        resetFilters();
+      }
+      setSearchHighlightApplied(true);
+      return;
+    }
 
-        // Center on the source node
-        centerOnNode(highlightSourceId!);
+    // Poll for node positions (D3 assigns x/y after simulation runs)
+    let attempts = 0;
+    const maxAttempts = 20; // 20 * 200ms = 4 seconds max
 
-        // Mark as applied
-        setSearchHighlightApplied(true);
-      } else {
-        // Node not in filtered view - try finding in full topology
-        const nodeInFull = topology?.nodes.find(n => n.id === highlightSourceId);
-        if (nodeInFull) {
-          // Node exists but is filtered out - clear filters and retry
-          resetFilters();
+    const checkAndApply = () => {
+      attempts++;
+      const svg = d3.select(svgRef.current);
+      let nodeFound = false;
+
+      svg.selectAll<SVGGElement, SimNode>('.node').each(function(d) {
+        if (d.id === highlightSourceId && d.x !== undefined && d.y !== undefined) {
+          nodeFound = true;
         }
-        // Still mark as applied to avoid infinite retries
+      });
+
+      if (nodeFound) {
+        // Node has position, apply highlight and center
+        handleNodeClick(sourceNode);
+        centerOnNode(highlightSourceId!);
+        setSearchHighlightApplied(true);
+      } else if (attempts < maxAttempts) {
+        // Keep polling
+        setTimeout(checkAndApply, 200);
+      } else {
+        // Give up after max attempts
         setSearchHighlightApplied(true);
       }
-    }, 1000); // Wait for D3 simulation to stabilize
+    };
+
+    // Start polling after a small delay to let D3 initialize
+    const timer = setTimeout(checkAndApply, 500);
 
     return () => clearTimeout(timer);
   }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode, resetFilters]);
