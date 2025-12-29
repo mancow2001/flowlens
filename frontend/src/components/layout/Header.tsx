@@ -104,8 +104,10 @@ export default function Header() {
 
   // Handle connection result click
   const handleConnectionClick = (connection: ConnectionMatch) => {
-    navigate(`/topology?source=${connection.source.id}&target=${connection.target.id}`);
+    const url = `/topology?source=${connection.source.id}&target=${connection.target.id}`;
+    console.log('Navigating to:', url);
     clearSearch();
+    navigate(url);
   };
 
   // Handle alert click
