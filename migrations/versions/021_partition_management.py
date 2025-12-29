@@ -150,6 +150,7 @@ def upgrade() -> None:
         DECLARE
             rec RECORD;
             migrated BIGINT;
+            batch_count BIGINT;
             partition_name TEXT;
         BEGIN
             -- Get distinct dates in the default partition
@@ -181,10 +182,11 @@ def upgrade() -> None:
                     INSERT INTO flow_records
                     SELECT * FROM moved;
 
-                    GET DIAGNOSTICS migrated = migrated + ROW_COUNT;
+                    GET DIAGNOSTICS batch_count = ROW_COUNT;
+                    migrated := migrated + batch_count;
 
                     -- Exit when no more rows to move
-                    EXIT WHEN NOT FOUND OR ROW_COUNT = 0;
+                    EXIT WHEN batch_count = 0;
 
                     -- Yield control periodically
                     PERFORM pg_sleep(0.01);
