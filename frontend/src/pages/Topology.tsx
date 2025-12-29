@@ -661,9 +661,18 @@ export default function Topology() {
     highlightedPathsRef.current = highlightedPaths;
   }, [selectedNode, highlightedPaths]);
 
-  // Keep lockLayout ref in sync with state
+  // Keep lockLayout ref in sync with state and stop/start simulation accordingly
   useEffect(() => {
     lockLayoutRef.current = lockLayout;
+    if (simulationRef.current) {
+      if (lockLayout) {
+        // Stop simulation and fix all nodes in place
+        simulationRef.current.stop();
+      } else {
+        // Restart simulation briefly to allow physics to settle
+        simulationRef.current.alpha(0.3).restart();
+      }
+    }
   }, [lockLayout]);
 
   // Handle resize
@@ -1077,9 +1086,12 @@ export default function Topology() {
       .on('drag', function (event, groupKey) {
         const dx = event.dx;
         const dy = event.dy;
+        // Collect node IDs in this group for edge filtering
+        const groupNodeIds = new Set<string>();
         // Move all nodes in this group by the drag delta
         nodes.forEach(n => {
           if (getGroupKey(n, groupingMode) === groupKey) {
+            groupNodeIds.add(n.id);
             const newX = (n.fx ?? n.x ?? 0) + dx;
             const newY = (n.fy ?? n.y ?? 0) + dy;
             n.fx = newX;
@@ -1088,16 +1100,23 @@ export default function Topology() {
             n.y = newY;
           }
         });
-        // If layout is locked, manually update visual positions
+        // If layout is locked, manually update visual positions for only affected elements
         if (lockLayoutRef.current) {
-          // Update node positions
-          node.attr('transform', (d) => `translate(${d.x},${d.y})`);
-          // Update edge positions
-          link
-            .attr('x1', (d) => (d.source as SimNode).x!)
-            .attr('y1', (d) => (d.source as SimNode).y!)
-            .attr('x2', (d) => (d.target as SimNode).x!)
-            .attr('y2', (d) => (d.target as SimNode).y!);
+          // Update only nodes in this group
+          node.filter((d) => groupNodeIds.has(d.id))
+            .attr('transform', (d) => `translate(${d.x},${d.y})`);
+          // Update only edges connected to nodes in this group
+          link.each(function(l) {
+            const sourceNode = l.source as SimNode;
+            const targetNode = l.target as SimNode;
+            if (groupNodeIds.has(sourceNode.id) || groupNodeIds.has(targetNode.id)) {
+              d3.select(this)
+                .attr('x1', sourceNode.x!)
+                .attr('y1', sourceNode.y!)
+                .attr('x2', targetNode.x!)
+                .attr('y2', targetNode.y!);
+            }
+          });
         }
       })
       .on('end', function (event, groupKey) {
