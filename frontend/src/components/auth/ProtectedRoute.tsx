@@ -19,18 +19,17 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
     setAuthSettings,
     setInitialized,
     isInitialized,
-    authEnabled,
     hasRole,
     clearAuth,
   } = useAuthStore();
 
   const [isChecking, setIsChecking] = useState(!isInitialized);
 
-  // Check auth status on mount
-  const { data: authStatus, isLoading: isLoadingStatus } = useQuery({
+  // Check auth status on mount - this is the source of truth for auth_enabled
+  const { data: authStatus, isLoading: isLoadingStatus, isError: isStatusError } = useQuery({
     queryKey: ['auth-status'],
     queryFn: authApi.getStatus,
-    retry: false,
+    retry: 1,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
@@ -41,6 +40,10 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
     }
   }, [authStatus, setAuthSettings]);
 
+  // Determine if auth is enabled from the API response (source of truth)
+  // Only fetch user if auth is enabled AND we have a token
+  const authEnabledFromApi = authStatus?.auth_enabled ?? true;
+
   // Fetch current user if we have a token but no user data
   const { isLoading: isLoadingUser } = useQuery({
     queryKey: ['current-user'],
@@ -49,7 +52,7 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
       setUser(userData);
       return userData;
     },
-    enabled: authEnabled && !!accessToken && !user,
+    enabled: authEnabledFromApi && !!accessToken && !user,
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -62,8 +65,9 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
     }
   }, [isLoadingStatus, isLoadingUser, setInitialized]);
 
-  // Show loading state while checking auth
-  if (isChecking || isLoadingStatus || isLoadingUser) {
+  // Show loading state while checking auth status
+  // We must wait for auth status before making any redirect decisions
+  if (isChecking || isLoadingStatus) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900">
         <div className="flex flex-col items-center gap-4">
@@ -74,9 +78,39 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
     );
   }
 
-  // If auth is disabled, allow access to all routes
-  if (!authEnabled) {
+  // If auth status fetch failed, show error
+  if (isStatusError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="text-center">
+          <h1 className="text-xl font-bold text-white mb-2">Connection Error</h1>
+          <p className="text-slate-400 mb-4">Unable to connect to the API server.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // If auth is disabled (from API response), allow access to all routes
+  if (!authEnabledFromApi) {
     return <>{children}</>;
+  }
+
+  // Still loading user data after auth status confirmed
+  if (isLoadingUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-slate-400">Loading...</span>
+        </div>
+      </div>
+    );
   }
 
   // If setup is required (no users exist), redirect to setup page

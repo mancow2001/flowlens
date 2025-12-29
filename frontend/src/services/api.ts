@@ -88,8 +88,14 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Don't try to refresh for auth endpoints
-    if (originalRequest.url?.includes('/auth/login') || originalRequest.url?.includes('/auth/refresh')) {
+    // Don't try to refresh for auth endpoints that don't require authentication
+    if (
+      originalRequest.url?.includes('/auth/login') ||
+      originalRequest.url?.includes('/auth/refresh') ||
+      originalRequest.url?.includes('/auth/status') ||
+      originalRequest.url?.includes('/auth/setup') ||
+      originalRequest.url?.includes('/auth/saml/')
+    ) {
       return Promise.reject(error);
     }
 

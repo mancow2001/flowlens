@@ -35,6 +35,10 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       // Initial state
+      // Note: authEnabled defaults to true for safety, but ProtectedRoute
+      // uses the API response as the source of truth and waits for it before
+      // making any auth decisions. This default only matters for UI elements
+      // that might check authEnabled before the API call completes.
       user: null,
       accessToken: null,
       refreshToken: null,
