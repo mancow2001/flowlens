@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select, text
 
 from flowlens.api.cache import get_topology_cache
-from flowlens.api.dependencies import AuthenticatedUser, DbSession
+from flowlens.api.dependencies import DbSession, ViewerUser
 from flowlens.common.config import get_settings
 from flowlens.common.logging import get_logger
 from flowlens.models.asset import Asset
@@ -113,7 +113,7 @@ async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> di
 async def get_topology_graph(
     filters: TopologyFilter,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> TopologyGraph:
     """Get topology graph with optional filtering.
 
@@ -303,7 +303,7 @@ async def get_topology_graph(
 async def get_downstream_dependencies(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     max_depth: int = Query(5, ge=1, le=10, alias="maxDepth"),
 ) -> TraversalResult:
     """Get downstream dependencies (what this asset depends on).
@@ -356,7 +356,7 @@ async def get_downstream_dependencies(
 async def get_upstream_dependencies(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     max_depth: int = Query(5, ge=1, le=10, alias="maxDepth"),
 ) -> TraversalResult:
     """Get upstream dependencies (what depends on this asset).
@@ -408,7 +408,7 @@ async def get_upstream_dependencies(
 @router.get("/path", response_model=PathResult)
 async def find_path(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     source_id: UUID = Query(..., alias="sourceId"),
     target_id: UUID = Query(..., alias="targetId"),
     max_depth: int = Query(5, ge=1, le=10, alias="maxDepth"),
@@ -542,7 +542,7 @@ async def find_path(
 async def get_subgraph(
     request: SubgraphRequest,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> TopologyGraph:
     """Get subgraph centered on an asset.
 
@@ -576,4 +576,4 @@ async def get_subgraph(
         as_of=request.as_of,
     )
 
-    return await get_topology_graph(filters, db, user)
+    return await get_topology_graph(filters, db, _user)

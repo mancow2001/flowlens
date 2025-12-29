@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination
 from flowlens.models.alert_rule import AlertRule
 from flowlens.models.change import ChangeType
 from flowlens.schemas.alert_rule import (
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/alert-rules", tags=["alert-rules"])
 @router.get("", response_model=AlertRuleList)
 async def list_alert_rules(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     pagination: Pagination,
     is_active: bool | None = Query(None, alias="isActive"),
     severity: str | None = None,
@@ -80,7 +80,7 @@ async def list_alert_rules(
 
 @router.get("/change-types", response_model=list[ChangeTypeInfo])
 async def list_change_types(
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> list[ChangeTypeInfo]:
     """List all available change types for rule configuration."""
     change_type_info = {
@@ -117,7 +117,7 @@ async def list_change_types(
 async def get_alert_rule(
     rule_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AlertRuleResponse:
     """Get alert rule by ID."""
     result = await db.execute(
@@ -157,7 +157,7 @@ async def get_alert_rule(
 async def create_alert_rule(
     data: AlertRuleCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AlertRuleResponse:
     """Create a new alert rule."""
     # Check for duplicate name
@@ -226,7 +226,7 @@ async def update_alert_rule(
     rule_id: UUID,
     data: AlertRuleUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AlertRuleResponse:
     """Update an alert rule."""
     result = await db.execute(
@@ -295,7 +295,7 @@ async def update_alert_rule(
 async def delete_alert_rule(
     rule_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Delete an alert rule."""
     result = await db.execute(
@@ -318,7 +318,7 @@ async def test_alert_rule(
     rule_id: UUID,
     request: AlertRuleTestRequest,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AlertRuleTestResult:
     """Test an alert rule against a sample change event.
 
@@ -384,7 +384,7 @@ async def test_alert_rule(
 async def toggle_alert_rule(
     rule_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AlertRuleResponse:
     """Toggle an alert rule's active status."""
     result = await db.execute(

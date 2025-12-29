@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import selectinload
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination, Sorting
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, Sorting, ViewerUser
 from flowlens.models.asset import Asset, AssetType, Service
 from flowlens.models.dependency import Dependency
 from flowlens.schemas.asset import (
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 @router.get("", response_model=AssetList)
 async def list_assets(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     pagination: Pagination,
     sorting: Sorting,
     asset_type: AssetType | None = Query(None, alias="assetType"),
@@ -127,7 +127,7 @@ async def list_assets(
 @router.get("/export", response_class=StreamingResponse)
 async def export_assets(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     format: Literal["csv", "json"] = Query("csv"),
     asset_type: AssetType | None = Query(None, alias="assetType"),
     environment: str | None = None,
@@ -205,7 +205,7 @@ async def export_assets(
 @router.post("/import/preview", response_model=AssetImportPreview)
 async def preview_asset_import(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     file: UploadFile = File(...),
 ) -> AssetImportPreview:
     """Preview what an asset import will do before committing.
@@ -383,7 +383,7 @@ async def preview_asset_import(
 @router.post("/import", response_model=AssetImportResult)
 async def import_assets(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     file: UploadFile = File(...),
     skip_errors: bool = Query(False, alias="skipErrors"),
 ) -> AssetImportResult:
@@ -604,7 +604,7 @@ class BulkUpdateResult(BaseModel):
 async def bulk_update_assets(
     data: BulkAssetUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> BulkUpdateResult:
     """Update multiple assets at once.
 
@@ -655,7 +655,7 @@ async def bulk_update_assets(
 async def bulk_delete_assets(
     ids: list[UUID],
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> dict:
     """Soft delete multiple assets at once."""
     result = await db.execute(
@@ -685,7 +685,7 @@ async def bulk_delete_assets(
 async def get_asset(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> AssetWithServices:
     """Get asset by ID with services."""
     query = (
@@ -760,7 +760,7 @@ async def get_asset(
 async def create_asset(
     data: AssetCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AssetResponse:
     """Create a new asset."""
     # Check for duplicate IP
@@ -844,7 +844,7 @@ async def update_asset(
     asset_id: UUID,
     data: AssetUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AssetResponse:
     """Update an asset (full replacement)."""
     result = await db.execute(
@@ -910,7 +910,7 @@ async def patch_asset(
     asset_id: UUID,
     data: AssetUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> AssetResponse:
     """Partially update an asset."""
     result = await db.execute(
@@ -975,7 +975,7 @@ async def patch_asset(
 async def delete_asset(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Soft delete an asset."""
     result = await db.execute(
@@ -997,7 +997,7 @@ async def delete_asset(
 async def get_asset_services(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> list[ServiceResponse]:
     """Get services running on an asset."""
     # Verify asset exists
@@ -1025,7 +1025,7 @@ async def get_asset_services(
 async def get_asset_dependencies(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     direction: Literal["upstream", "downstream", "both"] = Query("both"),
 ) -> list[DependencyWithAssets]:
     """Get dependencies for an asset.

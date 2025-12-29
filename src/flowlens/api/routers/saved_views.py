@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select, update
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination
+from flowlens.api.dependencies import DbSession, Pagination, ViewerUser
 from flowlens.models.saved_view import SavedView
 from flowlens.schemas.saved_view import (
     SavedViewCreate,
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/saved-views", tags=["saved-views"])
 @router.get("", response_model=list[SavedViewSummary])
 async def list_saved_views(
     db: DbSession,
-    user: AuthenticatedUser,
+    user: ViewerUser,
     pagination: Pagination,
     include_public: bool = True,
 ) -> list[SavedViewSummary]:
@@ -63,7 +63,7 @@ async def list_saved_views(
 async def create_saved_view(
     view_data: SavedViewCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    user: ViewerUser,
 ) -> SavedViewResponse:
     """Create a new saved view."""
     # If setting as default, unset other defaults for this user
@@ -96,7 +96,7 @@ async def create_saved_view(
 async def get_saved_view(
     view_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    user: ViewerUser,
 ) -> SavedViewResponse:
     """Get a saved view by ID.
 
@@ -134,7 +134,7 @@ async def update_saved_view(
     view_id: UUID,
     view_data: SavedViewUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    user: ViewerUser,
 ) -> SavedViewResponse:
     """Update a saved view."""
     result = await db.execute(
@@ -183,7 +183,7 @@ async def update_saved_view(
 async def delete_saved_view(
     view_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    user: ViewerUser,
 ) -> None:
     """Delete a saved view."""
     result = await db.execute(
@@ -211,7 +211,7 @@ async def delete_saved_view(
 @router.get("/default", response_model=SavedViewResponse | None)
 async def get_default_view(
     db: DbSession,
-    user: AuthenticatedUser,
+    user: ViewerUser,
 ) -> SavedViewResponse | None:
     """Get the user's default view if one exists."""
     result = await db.execute(

@@ -8,11 +8,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import (
-    AuthenticatedUser,
+    AdminUser,
+    AnalystUser,
     DbSession,
     Pagination,
     Sorting,
     TimeRange,
+    ViewerUser,
 )
 from flowlens.models.asset import Asset
 from flowlens.models.dependency import Dependency, DependencyHistory
@@ -33,7 +35,7 @@ router = APIRouter(prefix="/dependencies", tags=["dependencies"])
 @router.get("", response_model=DependencyList)
 async def list_dependencies(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     pagination: Pagination,
     sorting: Sorting,
     time_range: TimeRange,
@@ -151,7 +153,7 @@ async def list_dependencies(
 async def get_dependency(
     dependency_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> DependencyWithAssets:
     """Get dependency by ID with asset info."""
     query = (
@@ -219,7 +221,7 @@ async def get_dependency(
 async def create_dependency(
     data: DependencyCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> DependencyResponse:
     """Create a manual dependency."""
     # Verify source asset exists
@@ -292,7 +294,7 @@ async def update_dependency(
     dependency_id: UUID,
     data: DependencyUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> DependencyResponse:
     """Update a dependency."""
     result = await db.execute(
@@ -324,7 +326,7 @@ async def update_dependency(
 async def delete_dependency(
     dependency_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Mark a dependency as invalid (soft delete)."""
     result = await db.execute(
@@ -349,7 +351,7 @@ async def delete_dependency(
 async def get_dependency_history(
     dependency_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     limit: int = Query(50, ge=1, le=100),
 ) -> list[DependencyHistoryEntry]:
     """Get history of changes for a dependency."""
@@ -368,7 +370,7 @@ async def get_dependency_history(
 async def get_asset_outbound_dependencies(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> list[DependencySummary]:
     """Get all outbound dependencies of an asset (what it depends on)."""
     result = await db.execute(
@@ -388,7 +390,7 @@ async def get_asset_outbound_dependencies(
 async def get_asset_inbound_dependencies(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> list[DependencySummary]:
     """Get all inbound dependencies of an asset (what depends on it)."""
     result = await db.execute(
@@ -407,7 +409,7 @@ async def get_asset_inbound_dependencies(
 @router.post("/refresh-rolling-bytes", response_model=dict)
 async def refresh_rolling_bytes(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> dict:
     """Refresh bytes_last_24h and bytes_last_7d for all active dependencies.
 

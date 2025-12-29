@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination, Sorting
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, Sorting, ViewerUser
 from flowlens.models.asset import Application, ApplicationMember, Asset
 from flowlens.schemas.asset import (
     ApplicationCreate,
@@ -52,7 +52,7 @@ def _build_member_response(member: ApplicationMember) -> ApplicationMemberRespon
 @router.get("", response_model=ApplicationList)
 async def list_applications(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     pagination: Pagination,
     sorting: Sorting,
     search: str | None = None,
@@ -129,7 +129,7 @@ async def list_applications(
 async def get_application(
     application_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> ApplicationWithMembers:
     """Get application by ID with all members."""
     query = (
@@ -175,7 +175,7 @@ async def get_application(
 async def create_application(
     data: ApplicationCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ApplicationWithMembers:
     """Create a new application."""
     # Check for duplicate name
@@ -284,7 +284,7 @@ async def update_application(
     application_id: UUID,
     data: ApplicationUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ApplicationResponse:
     """Update an application."""
     result = await db.execute(
@@ -343,7 +343,7 @@ async def update_application(
 async def delete_application(
     application_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Delete an application."""
     result = await db.execute(
@@ -370,7 +370,7 @@ async def delete_application(
 async def list_application_members(
     application_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     entry_points_only: bool = Query(False, alias="entryPointsOnly"),
 ) -> list[ApplicationMemberResponse]:
     """List all members of an application."""
@@ -415,7 +415,7 @@ async def add_application_member(
     application_id: UUID,
     data: ApplicationMemberCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ApplicationMemberResponse:
     """Add an asset to an application."""
     # Verify application exists
@@ -499,7 +499,7 @@ async def update_application_member(
     asset_id: UUID,
     data: ApplicationMemberUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ApplicationMemberResponse:
     """Update a member's role or entry point status."""
     # Get member with asset
@@ -538,7 +538,7 @@ async def remove_application_member(
     application_id: UUID,
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> None:
     """Remove an asset from an application."""
     result = await db.execute(
@@ -572,7 +572,7 @@ async def set_entry_point(
     application_id: UUID,
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     order: int | None = Query(None, description="Entry point order (lower = first)"),
     port: int | None = Query(None, ge=1, le=65535, description="Entry point port"),
     protocol: int | None = Query(None, ge=0, le=255, description="Entry point protocol (IANA number)"),
@@ -613,7 +613,7 @@ async def unset_entry_point(
     application_id: UUID,
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ApplicationMemberResponse:
     """Remove entry point status from a member."""
     result = await db.execute(
@@ -652,7 +652,7 @@ async def unset_entry_point(
 async def get_application_topology(
     application_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> dict:
     """Get topology data for an application with entry point flow visualization.
 

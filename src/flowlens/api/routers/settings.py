@@ -4,13 +4,10 @@ Provides endpoints for viewing and managing application configuration.
 Requires admin role for all operations.
 """
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
 
-from flowlens.api.auth.jwt import TokenPayload
-from flowlens.api.dependencies import AuthenticatedUser
+from flowlens.api.dependencies import AdminUser
 from flowlens.common.config import get_settings
 from flowlens.common.logging import get_logger
 from flowlens.common.settings_service import (
@@ -40,37 +37,6 @@ from flowlens.schemas.settings import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-
-
-async def require_admin(user: AuthenticatedUser) -> TokenPayload:
-    """Require admin role for access.
-
-    Args:
-        user: Authenticated user.
-
-    Returns:
-        User if admin.
-
-    Raises:
-        HTTPException: If not admin.
-    """
-    settings = get_settings()
-
-    # If auth is disabled, allow all access
-    if not settings.auth.enabled:
-        return user
-
-    # Check for admin role
-    if "admin" not in user.roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-
-    return user
-
-
-AdminUser = Annotated[TokenPayload, Depends(require_admin)]
 
 
 @router.get("", response_model=SettingsResponse)

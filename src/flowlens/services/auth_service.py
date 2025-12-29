@@ -563,6 +563,42 @@ class AuthService:
 
         return user
 
+    async def create_session(
+        self,
+        user: User,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> TokenPair:
+        """Create a new session for a user (used by SAML auth).
+
+        Args:
+            user: User model.
+            ip_address: Client IP address.
+            user_agent: Client user agent.
+
+        Returns:
+            TokenPair with access and refresh tokens.
+        """
+        # Create tokens
+        token_pair = create_token_pair(
+            subject=str(user.id),
+            roles=[user.role],
+        )
+
+        # Create session record
+        session = AuthSession(
+            user_id=user.id,
+            refresh_token_hash=hash_token(token_pair.refresh_token),
+            ip_address=ip_address,
+            user_agent=user_agent,
+            expires_at=datetime.now(timezone.utc) + timedelta(
+                days=self.settings.auth.refresh_token_expire_days
+            ),
+        )
+        self.db.add(session)
+
+        return token_pair
+
     async def get_user_sessions(
         self,
         user_id: uuid.UUID,

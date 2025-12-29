@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, ViewerUser
 from flowlens.common.logging import get_logger
 from flowlens.models.task import BackgroundTask, TaskStatus, TaskType
 from flowlens.schemas.task import (
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 @router.get("", response_model=TaskList)
 async def list_tasks(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     pagination: Pagination,
     status_filter: str | None = Query(None, alias="status"),
     task_type: str | None = Query(None, alias="taskType"),
@@ -82,7 +82,7 @@ async def list_tasks(
 async def get_task(
     task_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> TaskResponse:
     """Get task by ID."""
     result = await db.execute(
@@ -127,7 +127,7 @@ async def get_task(
 async def cancel_task(
     task_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> TaskResponse:
     """Cancel a running task."""
     executor = TaskExecutor(db)
@@ -142,14 +142,14 @@ async def cancel_task(
     await db.commit()
 
     # Return updated task
-    return await get_task(task_id, db, user)
+    return await get_task(task_id, db, _user)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
     task_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Delete a completed task."""
     result = await db.execute(
@@ -177,7 +177,7 @@ async def delete_task(
 async def create_apply_classification_rules_task(
     data: ApplyRulesTaskCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> TaskResponse:
     """Create a task to apply classification rules to assets.
 
@@ -212,13 +212,13 @@ async def create_apply_classification_rules_task(
         force=data.force,
     )
 
-    return await get_task(task.id, db, user)
+    return await get_task(task.id, db, _user)
 
 
 @router.get("/running/count", response_model=dict)
 async def get_running_task_count(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
 ) -> dict:
     """Get count of running tasks."""
     result = await db.execute(

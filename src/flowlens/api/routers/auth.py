@@ -462,3 +462,148 @@ async def revoke_session(
     )
 
     await db.commit()
+
+
+# ============================================================================
+# SAML Endpoints
+# ============================================================================
+
+
+@router.get("/saml/login")
+async def saml_login(
+    request: Request,
+    db: DbSession,
+    return_to: str | None = None,
+):
+    """Initiate SAML SSO login.
+
+    Redirects to IdP for authentication.
+    """
+    from fastapi.responses import RedirectResponse
+
+    from flowlens.services.saml_service import SAMLService
+
+    settings = get_settings()
+
+    if not settings.saml.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SAML authentication is not enabled",
+        )
+
+    saml_service = SAMLService(db)
+
+    try:
+        redirect_url = await saml_service.initiate_login(
+            request_url=str(request.url),
+            relay_state=return_to or "/dashboard",
+        )
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active SAML provider configured",
+        )
+
+
+@router.post("/saml/acs")
+async def saml_acs(
+    request: Request,
+    db: DbSession,
+):
+    """SAML Assertion Consumer Service (ACS) callback.
+
+    Processes the SAML response from the IdP and creates a session.
+    Redirects to the frontend with tokens.
+    """
+    from fastapi.responses import RedirectResponse
+
+    from flowlens.services.saml_service import SAMLService
+
+    settings = get_settings()
+
+    if not settings.saml.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SAML authentication is not enabled",
+        )
+
+    ip_address, user_agent = get_client_info(request)
+
+    # Get form data
+    form_data = await request.form()
+    request_data = dict(form_data)
+
+    # Get relay state (return URL)
+    relay_state = request_data.get("RelayState", "/dashboard")
+
+    saml_service = SAMLService(db)
+
+    try:
+        user, token_pair = await saml_service.process_acs(
+            request_url=str(request.url),
+            request_data=request_data,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+        # Redirect to frontend with tokens in URL fragment
+        # The frontend will extract these and store them
+        base_url = settings.saml.sp_base_url.rstrip("/")
+        redirect_url = (
+            f"{base_url}/login?"
+            f"access_token={token_pair.access_token}&"
+            f"refresh_token={token_pair.refresh_token}&"
+            f"return_to={relay_state}"
+        )
+
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    except AuthenticationError as e:
+        # Redirect to login with error
+        base_url = settings.saml.sp_base_url.rstrip("/")
+        redirect_url = f"{base_url}/login?error={e.message}"
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active SAML provider configured",
+        )
+
+
+@router.get("/saml/metadata")
+async def saml_metadata(db: DbSession):
+    """Get Service Provider SAML metadata XML.
+
+    Returns the SP metadata that should be registered with the IdP.
+    """
+    from fastapi.responses import Response
+
+    from flowlens.services.saml_service import SAMLService
+
+    settings = get_settings()
+
+    if not settings.saml.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SAML authentication is not enabled",
+        )
+
+    saml_service = SAMLService(db)
+
+    provider = await saml_service.get_active_provider()
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active SAML provider configured",
+        )
+
+    metadata = saml_service.generate_metadata(provider)
+
+    return Response(
+        content=metadata,
+        media_type="application/xml",
+        headers={"Content-Disposition": "attachment; filename=metadata.xml"},
+    )

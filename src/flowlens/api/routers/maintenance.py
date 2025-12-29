@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select, text
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination
 from flowlens.models.maintenance_window import MaintenanceWindow
 from flowlens.schemas.maintenance import (
     ActiveMaintenanceCheck,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 @router.get("", response_model=MaintenanceWindowList)
 async def list_maintenance_windows(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     pagination: Pagination,
     is_active: bool | None = Query(None, alias="isActive"),
     include_past: bool = Query(False, alias="includePast"),
@@ -86,7 +86,7 @@ async def list_maintenance_windows(
 @router.get("/active", response_model=list[MaintenanceWindowSummary])
 async def get_active_windows(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> list[MaintenanceWindowSummary]:
     """Get all currently active maintenance windows."""
     now = datetime.utcnow()
@@ -121,7 +121,7 @@ async def get_active_windows(
 async def check_asset_maintenance(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     environment: str | None = None,
     datacenter: str | None = None,
 ) -> ActiveMaintenanceCheck:
@@ -171,7 +171,7 @@ async def check_asset_maintenance(
 async def get_maintenance_window(
     window_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> MaintenanceWindowResponse:
     """Get maintenance window by ID."""
     result = await db.execute(
@@ -211,7 +211,7 @@ async def get_maintenance_window(
 async def create_maintenance_window(
     data: MaintenanceWindowCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> MaintenanceWindowResponse:
     """Create a new maintenance window."""
     window = MaintenanceWindow(
@@ -261,7 +261,7 @@ async def update_maintenance_window(
     window_id: UUID,
     data: MaintenanceWindowUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> MaintenanceWindowResponse:
     """Update a maintenance window."""
     result = await db.execute(
@@ -328,7 +328,7 @@ async def update_maintenance_window(
 async def delete_maintenance_window(
     window_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Delete a maintenance window."""
     result = await db.execute(
@@ -350,7 +350,7 @@ async def delete_maintenance_window(
 async def cancel_maintenance_window(
     window_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> MaintenanceWindowResponse:
     """Cancel (deactivate) a maintenance window."""
     result = await db.execute(

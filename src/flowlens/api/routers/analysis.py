@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select, text
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession
+from flowlens.api.dependencies import AnalystUser, DbSession, ViewerUser
 from flowlens.models.asset import Asset
 from flowlens.schemas.analysis import (
     BlastRadiusResult,
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/analysis", tags=["analysis"])
 async def calculate_blast_radius(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     max_depth: int = Query(5, ge=1, le=10, alias="maxDepth"),
 ) -> BlastRadiusResult:
     """Calculate blast radius for an asset.
@@ -78,7 +78,7 @@ async def calculate_blast_radius(
 async def analyze_impact(
     request: ImpactAnalysisRequest,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ImpactAnalysisResult:
     """Analyze impact of an asset failure.
 
@@ -158,7 +158,7 @@ async def analyze_impact(
 @router.get("/spof", response_model=SPOFAnalysisResult)
 async def detect_spof(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     environment: str | None = None,
     min_dependents: int = Query(3, ge=1, alias="minDependents"),
     limit: int = Query(20, ge=1, le=100),
@@ -278,7 +278,7 @@ async def detect_spof(
 async def get_critical_paths(
     asset_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     direction: str = Query("both", pattern=r"^(upstream|downstream|both)$"),
 ) -> dict:
     """Get critical dependency paths for an asset.

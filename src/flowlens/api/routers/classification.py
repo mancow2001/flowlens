@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import String, cast, func, select, text
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession, Pagination
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination
 from flowlens.common.logging import get_logger
 from flowlens.models.asset import Asset
 from flowlens.models.classification import ClassificationRule
@@ -93,7 +93,7 @@ async def _trigger_classification_task(
 @router.get("", response_model=ClassificationRuleList)
 async def list_classification_rules(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     pagination: Pagination,
     is_active: bool | None = Query(None, alias="isActive"),
     environment: str | None = None,
@@ -147,7 +147,7 @@ async def list_classification_rules(
 async def classify_ip(
     ip_address: str,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> IPClassificationResult:
     """Get classification for a specific IP address.
 
@@ -195,7 +195,7 @@ async def classify_ip(
 async def classify_ip_debug(
     ip_address: str,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> IPClassificationDebug:
     """Debug view showing all matching rules for an IP.
 
@@ -246,7 +246,7 @@ async def classify_ip_debug(
 async def get_classification_rule(
     rule_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> ClassificationRuleResponse:
     """Get classification rule by ID."""
     result = await db.execute(
@@ -283,7 +283,7 @@ async def get_classification_rule(
 async def create_classification_rule(
     data: ClassificationRuleCreate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     auto_apply: bool = Query(True, alias="autoApply", description="Automatically apply rule to matching assets"),
 ) -> ClassificationRuleResponse:
     """Create a new classification rule.
@@ -348,7 +348,7 @@ async def update_classification_rule(
     rule_id: UUID,
     data: ClassificationRuleUpdate,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     auto_apply: bool = Query(True, alias="autoApply", description="Automatically apply rule to matching assets"),
 ) -> ClassificationRuleResponse:
     """Update a classification rule.
@@ -413,7 +413,7 @@ async def update_classification_rule(
 async def delete_classification_rule(
     rule_id: UUID,
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AdminUser,
 ) -> None:
     """Delete a classification rule."""
     result = await db.execute(
@@ -434,7 +434,7 @@ async def delete_classification_rule(
 @router.get("/environments/list", response_model=list[str])
 async def list_environments(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> list[str]:
     """List all unique environments from classification rules."""
     result = await db.execute(
@@ -452,7 +452,7 @@ async def list_environments(
 @router.get("/datacenters/list", response_model=list[str])
 async def list_datacenters(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> list[str]:
     """List all unique datacenters from classification rules."""
     result = await db.execute(
@@ -470,7 +470,7 @@ async def list_datacenters(
 @router.get("/locations/list", response_model=list[str])
 async def list_locations(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
 ) -> list[str]:
     """List all unique locations from classification rules."""
     result = await db.execute(
@@ -503,7 +503,7 @@ class ApplyRulesResult(BaseModel):
 @router.post("/apply", response_model=ApplyRulesResult)
 async def apply_classification_rules(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: AnalystUser,
     dry_run: bool = Query(False, alias="dryRun", description="Preview changes without applying"),
     force: bool = Query(False, description="Update even if asset has manually set values"),
 ) -> ApplyRulesResult:

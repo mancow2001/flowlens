@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import aliased
 
-from flowlens.api.dependencies import AuthenticatedUser, DbSession
+from flowlens.api.dependencies import DbSession, ViewerUser
 from flowlens.models.asset import Asset
 from flowlens.models.dependency import Dependency
 from flowlens.schemas.search import (
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 @router.get("", response_model=SearchResponse)
 async def unified_search(
     db: DbSession,
-    user: AuthenticatedUser,
+    _user: ViewerUser,
     q: str | None = Query(None, description="Simple text search for assets"),
     source: str | None = Query(None, description="Source IP or hostname pattern"),
     destination: str | None = Query(None, description="Destination IP or hostname pattern"),

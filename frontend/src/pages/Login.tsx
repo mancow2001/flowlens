@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { authApi } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
@@ -8,6 +8,7 @@ import Button from '../components/common/Button';
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -16,6 +17,36 @@ export default function Login() {
 
   // Get redirect path from location state or default to dashboard
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+
+  // Handle SAML callback with tokens in URL
+  useEffect(() => {
+    const accessToken = searchParams.get('access_token');
+    const refreshToken = searchParams.get('refresh_token');
+    const returnTo = searchParams.get('return_to') || '/dashboard';
+    const errorParam = searchParams.get('error');
+
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam));
+      // Clear URL params
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    if (accessToken && refreshToken) {
+      // SAML callback - store tokens and fetch user
+      setTokens(accessToken, refreshToken);
+
+      authApi.getCurrentUser()
+        .then((user) => {
+          setUser(user);
+          navigate(returnTo, { replace: true });
+        })
+        .catch(() => {
+          setError('Failed to fetch user information after SAML login');
+          navigate('/login', { replace: true });
+        });
+    }
+  }, [searchParams, setTokens, setUser, navigate]);
 
   // Check auth status
   const { data: authStatus, isLoading: isLoadingStatus } = useQuery({
