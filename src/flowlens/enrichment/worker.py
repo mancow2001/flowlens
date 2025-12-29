@@ -5,6 +5,7 @@ and marks them as enriched.
 """
 
 import asyncio
+import random
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,9 @@ from flowlens.enrichment.resolvers.protocol import ProtocolResolver
 from flowlens.models.flow import FlowRecord
 
 logger = get_logger(__name__)
+
+# Maximum retries for deadlock errors
+MAX_DEADLOCK_RETRIES = 3
 
 
 class EnrichmentWorker:
@@ -92,16 +96,53 @@ class EnrichmentWorker:
     async def _process_batch(self) -> int:
         """Process a batch of unenriched flows.
 
+        Uses FOR UPDATE SKIP LOCKED to prevent multiple workers from
+        grabbing the same rows, avoiding deadlocks.
+
+        Returns:
+            Number of flows processed.
+        """
+        for attempt in range(MAX_DEADLOCK_RETRIES):
+            try:
+                return await self._process_batch_internal()
+            except Exception as e:
+                error_str = str(e).lower()
+                if "deadlock" in error_str:
+                    if attempt < MAX_DEADLOCK_RETRIES - 1:
+                        # Exponential backoff with jitter
+                        delay = (0.1 * (2 ** attempt)) + random.uniform(0, 0.1)
+                        logger.warning(
+                            "Deadlock detected, retrying",
+                            attempt=attempt + 1,
+                            max_retries=MAX_DEADLOCK_RETRIES,
+                            delay=delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(
+                            "Deadlock persisted after retries",
+                            attempts=MAX_DEADLOCK_RETRIES,
+                        )
+                        ENRICHMENT_ERRORS.labels(error_type="deadlock").inc()
+                raise
+        return 0
+
+    async def _process_batch_internal(self) -> int:
+        """Internal batch processing with row locking.
+
         Returns:
             Number of flows processed.
         """
         async with get_session() as db:
-            # Fetch unenriched flows
+            # Fetch unenriched flows with FOR UPDATE SKIP LOCKED
+            # This prevents multiple workers from grabbing the same rows
             result = await db.execute(
                 select(FlowRecord)
-                .where(FlowRecord.is_enriched == False)
+                .where(FlowRecord.is_enriched == False)  # noqa: E712
                 .order_by(FlowRecord.timestamp)
                 .limit(self._batch_size)
+                .with_for_update(skip_locked=True)
             )
             flows = result.scalars().all()
 
