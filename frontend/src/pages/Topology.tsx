@@ -288,9 +288,15 @@ export default function Topology() {
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const [isLocatingNode, setIsLocatingNode] = useState(false);
 
-  // Refs for callbacks used in D3 to avoid re-running the effect when callbacks change
+  // Refs for callbacks and state used in D3 to avoid re-running the effect when they change
   const handleNodeClickRef = useRef<(node: TopologyNode) => void>(() => {});
   const clearSelectionRef = useRef<() => void>(() => {});
+  const selectedNodeRef = useRef<TopologyNode | null>(null);
+  const highlightedPathsRef = useRef<{
+    upstream: Set<string>;
+    downstream: Set<string>;
+    edges: Set<string>;
+  } | null>(null);
 
   // Time slider state - now synced with filters hook
   const historicalDate = filters.asOf ? new Date(filters.asOf) : null;
@@ -638,11 +644,16 @@ export default function Topology() {
     setHighlightedPaths(null);
   }, []);
 
-  // Keep refs updated with latest callbacks (for D3 to use without causing re-renders)
+  // Keep refs updated with latest callbacks and state (for D3 to use without causing re-renders)
   useEffect(() => {
     handleNodeClickRef.current = handleNodeClick;
     clearSelectionRef.current = clearSelection;
   }, [handleNodeClick, clearSelection]);
+
+  useEffect(() => {
+    selectedNodeRef.current = selectedNode;
+    highlightedPathsRef.current = highlightedPaths;
+  }, [selectedNode, highlightedPaths]);
 
   // Handle resize
   useEffect(() => {
@@ -922,6 +933,34 @@ export default function Topology() {
       .attr('flood-color', '#eab308')
       .attr('flood-opacity', 0.7);
 
+    // Glow filter for upstream edges (cyan glow)
+    const upstreamEdgeGlow = defs.append('filter')
+      .attr('id', 'glow-edge-upstream')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+    upstreamEdgeGlow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 0)
+      .attr('stdDeviation', 4)
+      .attr('flood-color', '#06b6d4')
+      .attr('flood-opacity', 0.8);
+
+    // Glow filter for downstream edges (yellow glow)
+    const downstreamEdgeGlow = defs.append('filter')
+      .attr('id', 'glow-edge-downstream')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+    downstreamEdgeGlow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 0)
+      .attr('stdDeviation', 4)
+      .attr('flood-color', '#eab308')
+      .attr('flood-opacity', 0.8);
+
     // Gateway arrow (purple)
     defs.append('marker')
       .attr('id', 'arrowhead-gateway')
@@ -1153,20 +1192,31 @@ export default function Topology() {
       }
     });
 
-    // Handle hover
+    // Handle hover - but don't override highlighted/selected states
     node
       .on('mouseenter', function (_, d) {
+        // Skip hover effect if node is selected or highlighted (use refs for current state)
+        const isSelected = selectedNodeRef.current?.id === d.id;
+        const isUpstream = highlightedPathsRef.current?.upstream.has(d.id);
+        const isDownstream = highlightedPathsRef.current?.downstream.has(d.id);
+        if (isSelected || isUpstream || isDownstream) return;
+
+        // Only apply hover effect to non-highlighted nodes
         const strokeColor = d.isGroupNode ? '#ffffff' : '#3b82f6';
         d3.select(this).select('circle').attr('stroke', strokeColor).attr('stroke-width', d.isGroupNode ? 4 : 3);
       })
       .on('mouseleave', function (_, d) {
-        const isSelected = selectedNode?.id === d.id;
-        const isHighlighted = highlightedPaths?.upstream.has(d.id) || highlightedPaths?.downstream.has(d.id);
-        if (!isSelected && !isHighlighted) {
-          d3.select(this).select('circle')
-            .attr('stroke', d.isGroupNode ? '#ffffff' : '#1e293b')
-            .attr('stroke-width', d.isGroupNode ? 3 : 2);
-        }
+        const isSelected = selectedNodeRef.current?.id === d.id;
+        const isUpstream = highlightedPathsRef.current?.upstream.has(d.id);
+        const isDownstream = highlightedPathsRef.current?.downstream.has(d.id);
+
+        // Don't change anything for highlighted/selected nodes
+        if (isSelected || isUpstream || isDownstream) return;
+
+        // Restore default state for non-highlighted nodes
+        d3.select(this).select('circle')
+          .attr('stroke', d.isGroupNode ? '#ffffff' : '#1e293b')
+          .attr('stroke-width', d.isGroupNode ? 3 : 2);
       });
 
     // Update positions on tick
@@ -1455,20 +1505,23 @@ export default function Topology() {
         if (isUpstream && !isDownstream) {
           edge
             .attr('stroke', '#06b6d4')
-            .attr('stroke-width', 4)
+            .attr('stroke-width', 5)
             .attr('stroke-opacity', 1)
+            .attr('filter', 'url(#glow-edge-upstream)')
             .attr('marker-end', 'url(#arrowhead-upstream)');
         } else if (isDownstream) {
           edge
             .attr('stroke', '#eab308')
-            .attr('stroke-width', 4)
+            .attr('stroke-width', 5)
             .attr('stroke-opacity', 1)
+            .attr('filter', 'url(#glow-edge-downstream)')
             .attr('marker-end', 'url(#arrowhead-downstream)');
         } else {
           edge
             .attr('stroke', '#3b82f6')
-            .attr('stroke-width', 4)
+            .attr('stroke-width', 5)
             .attr('stroke-opacity', 1)
+            .attr('filter', null)
             .attr('marker-end', 'url(#arrowhead)');
         }
       } else if (highlightedPaths) {
@@ -1476,7 +1529,8 @@ export default function Topology() {
         edge
           .attr('stroke', '#475569')
           .attr('stroke-width', 1)
-          .attr('stroke-opacity', 0.1)
+          .attr('stroke-opacity', 0.08)
+          .attr('filter', null)
           .attr('marker-end', 'url(#arrowhead)');
       } else {
         // Default state
@@ -1484,6 +1538,7 @@ export default function Topology() {
           .attr('stroke', '#475569')
           .attr('stroke-width', 2)
           .attr('stroke-opacity', 0.6)
+          .attr('filter', null)
           .attr('marker-end', 'url(#arrowhead)');
       }
     });
