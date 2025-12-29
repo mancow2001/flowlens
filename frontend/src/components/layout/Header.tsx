@@ -14,7 +14,7 @@ import { searchApi, alertApi } from '../../services/api';
 import Badge from '../common/Badge';
 import clsx from 'clsx';
 import { getProtocolName } from '../../utils/network';
-import type { Alert, AssetSummary, ConnectionMatch } from '../../types';
+import type { Alert } from '../../types';
 
 type SearchMode = 'simple' | 'advanced';
 
@@ -95,20 +95,6 @@ export default function Header() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  // Handle asset result click
-  const handleAssetClick = (asset: AssetSummary) => {
-    navigate(`/assets/${asset.id}`);
-    clearSearch();
-  };
-
-  // Handle connection result click
-  const handleConnectionClick = (connection: ConnectionMatch) => {
-    const url = `/topology?source=${connection.source.id}&target=${connection.target.id}`;
-    console.log('Navigating to:', url);
-    clearSearch();
-    navigate(url);
-  };
 
   // Handle alert click
   const handleAlertClick = (_alert: Alert) => {
@@ -260,10 +246,11 @@ export default function Header() {
                         <button
                           type="button"
                           key={asset.id}
-                          onClick={(e) => {
+                          onMouseDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            handleAssetClick(asset);
+                            setIsSearchOpen(false);
+                            navigate(`/assets/${asset.id}`);
                           }}
                           className="w-full px-4 py-3 text-left hover:bg-slate-700 transition-colors border-b border-slate-700/50"
                         >
@@ -294,10 +281,13 @@ export default function Header() {
                         <button
                           type="button"
                           key={conn.id}
-                          onClick={(e) => {
+                          onMouseDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            handleConnectionClick(conn);
+                            console.log('Connection clicked:', conn.source.id, conn.target.id);
+                            const url = `/topology?source=${conn.source.id}&target=${conn.target.id}`;
+                            setIsSearchOpen(false);
+                            navigate(url);
                           }}
                           className="w-full px-4 py-3 text-left hover:bg-slate-700 transition-colors border-b border-slate-700/50"
                         >
