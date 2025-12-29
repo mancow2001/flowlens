@@ -284,10 +284,10 @@ export default function Header() {
                           onMouseDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('Connection clicked:', conn.source.id, conn.target.id);
                             const url = `/topology?source=${conn.source.id}&target=${conn.target.id}`;
+                            console.log('Navigating to:', url);
                             setIsSearchOpen(false);
-                            navigate(url);
+                            window.location.href = url;
                           }}
                           className="w-full px-4 py-3 text-left hover:bg-slate-700 transition-colors border-b border-slate-700/50"
                         >
