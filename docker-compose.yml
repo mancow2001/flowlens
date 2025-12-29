@@ -97,7 +97,7 @@ services:
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       API_WORKERS: "2"
-      AUTH_ENABLED: "false"
+      AUTH_ENABLED: "true"
       CLASSIFICATION_MIN_OBSERVATION_HOURS: "1"
       CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
       LOG_LEVEL: INFO
