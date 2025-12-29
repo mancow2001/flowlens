@@ -328,10 +328,6 @@ export default function Topology() {
   // Gateway visualization state
   const [showGateways, setShowGateways] = useState(false);
 
-  // Lock layout state - when enabled, dragging a node won't affect other nodes
-  const [lockLayout, setLockLayout] = useState(false);
-  const lockLayoutRef = useRef(false);
-
   // Edge hover state for tooltip
   const [hoveredEdge, setHoveredEdge] = useState<{
     edge: SimLink;
@@ -660,20 +656,6 @@ export default function Topology() {
     selectedNodeRef.current = selectedNode;
     highlightedPathsRef.current = highlightedPaths;
   }, [selectedNode, highlightedPaths]);
-
-  // Keep lockLayout ref in sync with state and stop/start simulation accordingly
-  useEffect(() => {
-    lockLayoutRef.current = lockLayout;
-    if (simulationRef.current) {
-      if (lockLayout) {
-        // Stop simulation and fix all nodes in place
-        simulationRef.current.stop();
-      } else {
-        // Restart simulation briefly to allow physics to settle
-        simulationRef.current.alpha(0.3).restart();
-      }
-    }
-  }, [lockLayout]);
 
   // Handle resize
   useEffect(() => {
@@ -1016,52 +998,23 @@ export default function Topology() {
     const dragBehavior = d3
       .drag<SVGGElement, SimNode>()
       .on('start', (event, d) => {
-        // Only restart simulation if layout is not locked
-        if (!lockLayoutRef.current && !event.active) {
-          simulation.alphaTarget(0.3).restart();
-        }
+        if (!event.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
       .on('drag', (event, d) => {
         d.fx = event.x;
         d.fy = event.y;
-        d.x = event.x;
-        d.y = event.y;
         // Store position for group nodes
         if (d.isGroupNode && d.groupKey) {
           groupPositionsRef.current.set(d.groupKey, { x: event.x, y: event.y });
         }
-        // If layout is locked, manually update visual positions without simulation
-        if (lockLayoutRef.current) {
-          // Update this node's position
-          d3.select(event.sourceEvent.target.parentNode)
-            .attr('transform', `translate(${event.x},${event.y})`);
-          // Update connected edges
-          link.each(function(l) {
-            const sourceNode = l.source as SimNode;
-            const targetNode = l.target as SimNode;
-            if (sourceNode.id === d.id || targetNode.id === d.id) {
-              d3.select(this)
-                .attr('x1', sourceNode.x!)
-                .attr('y1', sourceNode.y!)
-                .attr('x2', targetNode.x!)
-                .attr('y2', targetNode.y!);
-            }
-          });
-        }
       })
       .on('end', (event, d) => {
-        if (!lockLayoutRef.current && !event.active) {
-          simulation.alphaTarget(0);
-        }
-        // Keep node pinned if layout is locked, or if it's a group node
-        if (lockLayoutRef.current || (d.isGroupNode && d.groupKey)) {
-          if (d.isGroupNode && d.groupKey) {
-            groupPositionsRef.current.set(d.groupKey, { x: d.x!, y: d.y! });
-          }
-          d.fx = d.x;
-          d.fy = d.y;
+        if (!event.active) simulation.alphaTarget(0);
+        // Keep group nodes pinned where they were dragged
+        if (d.isGroupNode && d.groupKey) {
+          groupPositionsRef.current.set(d.groupKey, { x: d.x!, y: d.y! });
         } else {
           d.fx = null;
           d.fy = null;
@@ -1072,9 +1025,7 @@ export default function Topology() {
     const groupDragBehavior = d3
       .drag<SVGPathElement, string>()
       .on('start', function (event, groupKey) {
-        if (!lockLayoutRef.current && !event.active) {
-          simulation.alphaTarget(0.3).restart();
-        }
+        if (!event.active) simulation.alphaTarget(0.3).restart();
         // Fix all nodes in this group at their current positions
         nodes.forEach(n => {
           if (getGroupKey(n, groupingMode) === groupKey) {
@@ -1086,12 +1037,9 @@ export default function Topology() {
       .on('drag', function (event, groupKey) {
         const dx = event.dx;
         const dy = event.dy;
-        // Collect node IDs in this group for edge filtering
-        const groupNodeIds = new Set<string>();
         // Move all nodes in this group by the drag delta
         nodes.forEach(n => {
           if (getGroupKey(n, groupingMode) === groupKey) {
-            groupNodeIds.add(n.id);
             const newX = (n.fx ?? n.x ?? 0) + dx;
             const newY = (n.fy ?? n.y ?? 0) + dy;
             n.fx = newX;
@@ -1100,39 +1048,14 @@ export default function Topology() {
             n.y = newY;
           }
         });
-        // If layout is locked, manually update visual positions for only affected elements
-        if (lockLayoutRef.current) {
-          // Update only nodes in this group
-          node.filter((d) => groupNodeIds.has(d.id))
-            .attr('transform', (d) => `translate(${d.x},${d.y})`);
-          // Update only edges connected to nodes in this group
-          link.each(function(l) {
-            const sourceNode = l.source as SimNode;
-            const targetNode = l.target as SimNode;
-            if (groupNodeIds.has(sourceNode.id) || groupNodeIds.has(targetNode.id)) {
-              d3.select(this)
-                .attr('x1', sourceNode.x!)
-                .attr('y1', sourceNode.y!)
-                .attr('x2', targetNode.x!)
-                .attr('y2', targetNode.y!);
-            }
-          });
-        }
       })
       .on('end', function (event, groupKey) {
-        if (!lockLayoutRef.current && !event.active) {
-          simulation.alphaTarget(0);
-        }
-        // Keep nodes pinned if layout is locked, otherwise release
+        if (!event.active) simulation.alphaTarget(0);
+        // Release all nodes in this group
         nodes.forEach(n => {
           if (getGroupKey(n, groupingMode) === groupKey) {
-            if (lockLayoutRef.current) {
-              n.fx = n.x;
-              n.fy = n.y;
-            } else {
-              n.fx = null;
-              n.fy = null;
-            }
+            n.fx = null;
+            n.fy = null;
           }
         });
       });
@@ -1582,16 +1505,6 @@ export default function Topology() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Lock Layout toggle */}
-          <Button
-            variant={lockLayout ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setLockLayout(!lockLayout)}
-            title={lockLayout ? 'Unlock layout to allow physics simulation' : 'Lock layout to prevent other nodes from moving when dragging'}
-          >
-            {lockLayout ? 'Unlock Layout' : 'Lock Layout'}
-          </Button>
-
           {/* Show Gateways toggle */}
           <Button
             variant={showGateways ? 'primary' : 'secondary'}
