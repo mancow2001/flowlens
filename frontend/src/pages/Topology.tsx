@@ -1356,36 +1356,14 @@ export default function Topology() {
       return;
     }
 
-    // Poll for node to have position in DOM (D3 assigns x/y after a few ticks)
-    let attempts = 0;
-    const maxAttempts = 15; // 15 * 100ms = 1.5 seconds max
+    // Wait 1 second for simulation to settle, then apply highlight and center
+    const timer = setTimeout(() => {
+      console.log('[SearchHighlight] 1 second elapsed, applying highlight and centering');
+      handleNodeClick(sourceNode);
+      centerOnNode(highlightSourceId!);
+      setSearchHighlightApplied(true);
+    }, 1000);
 
-    const checkAndApply = () => {
-      attempts++;
-      const svg = d3.select(svgRef.current);
-      let nodePosition: { x: number; y: number } | null = null;
-
-      svg.selectAll<SVGGElement, SimNode>('.node').each(function(d) {
-        if (d.id === highlightSourceId && d.x !== undefined && d.y !== undefined) {
-          nodePosition = { x: d.x, y: d.y };
-        }
-      });
-
-      if (nodePosition) {
-        console.log('[SearchHighlight] Node has position, applying highlight and centering');
-        handleNodeClick(sourceNode);
-        centerOnNode(highlightSourceId!);
-        setSearchHighlightApplied(true);
-      } else if (attempts < maxAttempts) {
-        setTimeout(checkAndApply, 100);
-      } else {
-        console.log('[SearchHighlight] Max attempts reached');
-        setSearchHighlightApplied(true);
-      }
-    };
-
-    // Start polling quickly
-    const timer = setTimeout(checkAndApply, 100);
     return () => clearTimeout(timer);
   }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode, resetFilters]);
 
