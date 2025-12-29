@@ -288,6 +288,10 @@ export default function Topology() {
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const [simulationReady, setSimulationReady] = useState(false);
 
+  // Refs for callbacks used in D3 to avoid re-running the effect when callbacks change
+  const handleNodeClickRef = useRef<(node: TopologyNode) => void>(() => {});
+  const clearSelectionRef = useRef<() => void>(() => {});
+
   // Time slider state - now synced with filters hook
   const historicalDate = filters.asOf ? new Date(filters.asOf) : null;
   const setHistoricalDate = useCallback((date: Date | null) => {
@@ -634,6 +638,12 @@ export default function Topology() {
     setHighlightedPaths(null);
   }, []);
 
+  // Keep refs updated with latest callbacks (for D3 to use without causing re-renders)
+  useEffect(() => {
+    handleNodeClickRef.current = handleNodeClick;
+    clearSelectionRef.current = clearSelection;
+  }, [handleNodeClick, clearSelection]);
+
   // Handle resize
   useEffect(() => {
     const updateDimensions = () => {
@@ -773,7 +783,7 @@ export default function Topology() {
     // Click on background to clear selection
     svg.on('click', (event) => {
       if (event.target === svgRef.current) {
-        clearSelection();
+        clearSelectionRef.current();
       }
     });
 
@@ -1084,7 +1094,7 @@ export default function Topology() {
           return next;
         });
       } else {
-        handleNodeClick(d);
+        handleNodeClickRef.current(d);
       }
     });
 
@@ -1254,7 +1264,7 @@ export default function Topology() {
       simulation.stop();
       setSimulationReady(false);
     };
-  }, [filteredTopology, dimensions, groupingMode, groups, groupColors, handleNodeClick, clearSelection, collapsedGroups, setCollapsedGroups]);
+  }, [filteredTopology, dimensions, groupingMode, groups, groupColors, collapsedGroups, setCollapsedGroups]);
 
   // Center and zoom to a specific node
   const centerOnNode = useCallback((nodeId: string) => {
