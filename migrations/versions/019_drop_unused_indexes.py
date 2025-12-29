@@ -22,31 +22,34 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ==========================================================================
-    # flow_records_default: Drop 6 unused indexes (~91 MB savings)
+    # flow_records: Drop unused indexes on the PARENT partitioned table (~91 MB savings)
     # These indexes were designed for ad-hoc queries that don't occur.
     # The application uses PK lookups and partial timestamp indexes instead.
+    #
+    # NOTE: For partitioned tables, we must drop the PARENT index, which
+    # automatically drops the corresponding partition indexes.
     # ==========================================================================
 
     # Composite index for src+dst+time queries - never used (25 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_src_ip_dst_ip_timestamp_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_src_dst_time")
 
     # Composite index for dst+port+time queries - never used (23 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_dst_ip_dst_port_timestamp_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_dst_port_time")
 
     # Single-column dst_ip index - never used (12 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_dst_ip_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_dst_ip")
 
     # Single-column dst_port index - never used (11 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_dst_port_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_dst_port")
 
     # Single-column protocol index - never used, low selectivity (10 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_protocol_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_protocol")
 
     # Single-column exporter_ip index - never used (9.7 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_exporter_ip_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_exporter_ip")
 
     # Single-column src_ip index - 1 scan total, redundant with composite (11 MB)
-    op.execute("DROP INDEX IF EXISTS flow_records_default_src_ip_idx")
+    op.execute("DROP INDEX IF EXISTS ix_flows_src_ip")
 
     # ==========================================================================
     # flow_aggregates: Drop unused indexes (~9.5 MB savings)
@@ -98,42 +101,42 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # ==========================================================================
-    # Recreate flow_records_default indexes
+    # Recreate flow_records indexes on the PARENT partitioned table
     # ==========================================================================
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_src_ip_dst_ip_timestamp_idx
-        ON flow_records_default (src_ip, dst_ip, timestamp)
+        CREATE INDEX IF NOT EXISTS ix_flows_src_dst_time
+        ON flow_records (src_ip, dst_ip, timestamp)
     """)
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_dst_ip_dst_port_timestamp_idx
-        ON flow_records_default (dst_ip, dst_port, timestamp)
+        CREATE INDEX IF NOT EXISTS ix_flows_dst_port_time
+        ON flow_records (dst_ip, dst_port, timestamp)
     """)
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_dst_ip_idx
-        ON flow_records_default (dst_ip)
+        CREATE INDEX IF NOT EXISTS ix_flows_dst_ip
+        ON flow_records (dst_ip)
     """)
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_dst_port_idx
-        ON flow_records_default (dst_port)
+        CREATE INDEX IF NOT EXISTS ix_flows_dst_port
+        ON flow_records (dst_port)
     """)
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_protocol_idx
-        ON flow_records_default (protocol)
+        CREATE INDEX IF NOT EXISTS ix_flows_protocol
+        ON flow_records (protocol)
     """)
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_exporter_ip_idx
-        ON flow_records_default (exporter_ip)
+        CREATE INDEX IF NOT EXISTS ix_flows_exporter_ip
+        ON flow_records (exporter_ip)
     """)
 
     op.execute("""
-        CREATE INDEX IF NOT EXISTS flow_records_default_src_ip_idx
-        ON flow_records_default (src_ip)
+        CREATE INDEX IF NOT EXISTS ix_flows_src_ip
+        ON flow_records (src_ip)
     """)
 
     # ==========================================================================
