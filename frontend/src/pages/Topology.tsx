@@ -1279,12 +1279,12 @@ export default function Topology() {
 
   // Apply search highlight from URL params
   useEffect(() => {
-    if (!hasSearchHighlight || searchHighlightApplied || !topology || !filteredTopology) return;
+    if (!hasSearchHighlight || searchHighlightApplied || !filteredTopology) return;
 
     // Wait for simulation to settle (nodes need positions)
     const timer = setTimeout(() => {
-      // Find the source node
-      const sourceNode = topology.nodes.find(n => n.id === highlightSourceId);
+      // Find the source node in filtered topology (what's displayed)
+      const sourceNode = filteredTopology.nodes.find(n => n.id === highlightSourceId);
       if (sourceNode) {
         // Select the source node to highlight the path
         handleNodeClick(sourceNode);
@@ -1294,21 +1294,26 @@ export default function Topology() {
 
         // Mark as applied
         setSearchHighlightApplied(true);
-
-        // Clear the URL params after applying (optional - keeps URL clean)
-        // setSearchParams({});
+      } else {
+        // Node not in filtered view - try finding in full topology
+        const nodeInFull = topology?.nodes.find(n => n.id === highlightSourceId);
+        if (nodeInFull) {
+          // Node exists but is filtered out - clear filters and retry
+          resetFilters();
+        }
+        // Still mark as applied to avoid infinite retries
+        setSearchHighlightApplied(true);
       }
     }, 1000); // Wait for D3 simulation to stabilize
 
     return () => clearTimeout(timer);
-  }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode]);
+  }, [hasSearchHighlight, searchHighlightApplied, topology, filteredTopology, highlightSourceId, handleNodeClick, centerOnNode, resetFilters]);
 
-  // Reset search highlight state when URL params change
+  // Reset search highlight state when URL params change to new values
   useEffect(() => {
-    if (!hasSearchHighlight) {
-      setSearchHighlightApplied(false);
-    }
-  }, [hasSearchHighlight]);
+    // Reset when params change so the highlight effect can re-run
+    setSearchHighlightApplied(false);
+  }, [highlightSourceId, highlightTargetId]);
 
   // Update highlighting when selection changes
   useEffect(() => {
