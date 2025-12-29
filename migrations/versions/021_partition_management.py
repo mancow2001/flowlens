@@ -80,13 +80,13 @@ def upgrade() -> None:
             p_days_ahead INTEGER DEFAULT 7
         ) RETURNS TABLE (partition_name TEXT, status TEXT) AS $$
         DECLARE
-            current_date DATE;
+            loop_date DATE;
             result TEXT;
         BEGIN
             FOR i IN 0..p_days_ahead LOOP
-                current_date := p_start_date + i;
-                result := create_flow_partition(current_date);
-                partition_name := 'flow_records_' || to_char(current_date, 'YYYY_MM_DD');
+                loop_date := p_start_date + i;
+                result := create_flow_partition(loop_date);
+                partition_name := 'flow_records_' || to_char(loop_date, 'YYYY_MM_DD');
                 status := result;
                 RETURN NEXT;
             END LOOP;
