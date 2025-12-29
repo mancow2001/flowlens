@@ -9,12 +9,12 @@ from ipaddress import IPv4Address, IPv6Address
 from uuid import UUID
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.common.logging import get_logger
 from flowlens.common.metrics import ASSETS_DISCOVERED
-from flowlens.enrichment.resolvers.geoip import GeoIPResolver, GeoIPResult, PrivateIPClassifier
+from flowlens.enrichment.resolvers.geoip import GeoIPResolver, PrivateIPClassifier
 from flowlens.models.asset import Asset, AssetType
 
 logger = get_logger(__name__)
@@ -50,7 +50,8 @@ class AssetCorrelator:
     ) -> UUID:
         """Correlate IP address to asset.
 
-        Creates new asset if not found.
+        Creates new asset if not found using INSERT ... ON CONFLICT DO NOTHING
+        to handle race conditions cleanly.
 
         Args:
             db: Database session.
@@ -66,7 +67,7 @@ class AssetCorrelator:
         if ip_str in self._ip_cache:
             return self._ip_cache[ip_str]
 
-        # Query database
+        # Query database for existing asset
         result = await db.execute(
             select(Asset.id).where(
                 Asset.ip_address == ip_str,
@@ -79,37 +80,21 @@ class AssetCorrelator:
             self._ip_cache[ip_str] = asset_id
             return asset_id
 
-        # Create new asset (handle race condition with other workers)
-        # Use a nested savepoint so we can handle IntegrityError without
-        # aborting the parent transaction
-        try:
-            async with db.begin_nested():
-                asset = await self._create_asset(db, ip_str, hostname)
-            self._ip_cache[ip_str] = asset.id
-            return asset.id
-        except IntegrityError:
-            # Another worker created the asset - the nested savepoint is automatically
-            # rolled back on exception, so we just need to re-query
-            result = await db.execute(
-                select(Asset.id).where(
-                    Asset.ip_address == ip_str,
-                    Asset.deleted_at.is_(None),
-                )
-            )
-            asset_id = result.scalar_one_or_none()
-            if asset_id:
-                self._ip_cache[ip_str] = asset_id
-                return asset_id
-            # If still not found, re-raise
-            raise
+        # Asset doesn't exist - create it using INSERT ... ON CONFLICT DO NOTHING
+        # This handles race conditions without generating errors
+        asset_id = await self._upsert_asset(db, ip_str, hostname)
+        self._ip_cache[ip_str] = asset_id
+        return asset_id
 
-    async def _create_asset(
+    async def _upsert_asset(
         self,
         db: AsyncSession,
         ip_str: str,
         hostname: str | None,
-    ) -> Asset:
-        """Create a new asset for an IP address.
+    ) -> UUID:
+        """Create a new asset or return existing one using INSERT ... ON CONFLICT.
+
+        This handles race conditions cleanly without generating database errors.
 
         Args:
             db: Database session.
@@ -117,8 +102,10 @@ class AssetCorrelator:
             hostname: Optional hostname.
 
         Returns:
-            Created asset.
+            Asset ID (either newly created or existing).
         """
+        import uuid
+
         # Determine if internal or external
         is_internal = self._classifier.is_private(ip_str)
 
@@ -129,8 +116,7 @@ class AssetCorrelator:
             name = ip_str.replace(".", "-").replace(":", "-")
 
         # Default asset type - use UNKNOWN for all auto-discovered assets
-        # The is_internal field tracks internal vs external location
-        asset_type = AssetType.UNKNOWN
+        asset_type = AssetType.UNKNOWN.value
 
         # Get GeoIP info for external IPs
         country_code = None
@@ -142,8 +128,13 @@ class AssetCorrelator:
                 country_code = geo_result.country_code
                 city = geo_result.city
 
-        # Create asset
-        asset = Asset(
+        # Generate a new UUID for potential insert
+        new_id = uuid.uuid4()
+
+        # Use INSERT ... ON CONFLICT DO NOTHING
+        # This won't insert if the ip_address already exists
+        stmt = pg_insert(Asset).values(
+            id=new_id,
             name=name,
             ip_address=ip_str,
             hostname=hostname,
@@ -153,24 +144,33 @@ class AssetCorrelator:
             is_critical=False,
             country_code=country_code,
             city=city,
+        ).on_conflict_do_nothing(index_elements=['ip_address'])
+
+        result = await db.execute(stmt)
+
+        # Check if we inserted a new row
+        if result.rowcount > 0:
+            logger.info(
+                "Discovered new asset",
+                asset_id=str(new_id),
+                ip=ip_str,
+                hostname=hostname,
+                is_internal=is_internal,
+            )
+            ASSETS_DISCOVERED.labels(
+                asset_type="internal" if is_internal else "external"
+            ).inc()
+            return new_id
+
+        # Row already existed - query to get the existing ID
+        query_result = await db.execute(
+            select(Asset.id).where(
+                Asset.ip_address == ip_str,
+                Asset.deleted_at.is_(None),
+            )
         )
-
-        db.add(asset)
-        await db.flush()
-
-        logger.info(
-            "Discovered new asset",
-            asset_id=str(asset.id),
-            ip=ip_str,
-            hostname=hostname,
-            is_internal=is_internal,
-        )
-
-        ASSETS_DISCOVERED.labels(
-            asset_type="internal" if is_internal else "external"
-        ).inc()
-
-        return asset
+        existing_id = query_result.scalar_one()
+        return existing_id
 
     async def correlate_batch(
         self,

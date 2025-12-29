@@ -4,11 +4,13 @@ Maps IP addresses to assets from flow aggregates,
 creating or updating assets as needed.
 """
 
+import uuid as uuid_module
 from datetime import datetime
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from uuid import UUID
 
 from sqlalchemy import select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.common.logging import get_logger
@@ -52,6 +54,9 @@ class AssetMapper:
     ) -> UUID:
         """Get existing asset or create new one for IP.
 
+        Uses INSERT ... ON CONFLICT DO NOTHING to handle race conditions
+        cleanly without generating database errors.
+
         Args:
             db: Database session.
             ip_str: IP address string.
@@ -77,11 +82,11 @@ class AssetMapper:
             self._ip_cache[ip_str] = asset_id
             return asset_id
 
-        # Create new asset
-        asset = await self._create_asset(db, ip_str, hostname)
-        self._ip_cache[ip_str] = asset.id
+        # Create new asset using upsert
+        asset_id = await self._upsert_asset(db, ip_str, hostname)
+        self._ip_cache[ip_str] = asset_id
 
-        return asset.id
+        return asset_id
 
     async def _get_cidr_classification(
         self,
@@ -126,13 +131,15 @@ class AssetMapper:
 
         return None
 
-    async def _create_asset(
+    async def _upsert_asset(
         self,
         db: AsyncSession,
         ip_str: str,
         hostname: str | None,
-    ) -> Asset:
-        """Create a new asset for an IP address.
+    ) -> UUID:
+        """Create a new asset or return existing one using INSERT ... ON CONFLICT.
+
+        This handles race conditions cleanly without generating database errors.
 
         Args:
             db: Database session.
@@ -140,7 +147,7 @@ class AssetMapper:
             hostname: Optional hostname.
 
         Returns:
-            Created asset.
+            Asset ID (either newly created or existing).
         """
         # First check CIDR classification rules
         cidr_class = await self._get_cidr_classification(db, ip_str)
@@ -159,8 +166,7 @@ class AssetMapper:
             name = ip_str.replace(".", "-").replace(":", "-")
 
         # Default asset type - use UNKNOWN for all auto-discovered assets
-        # The is_internal field tracks internal vs external location
-        asset_type = AssetType.UNKNOWN
+        asset_type = AssetType.UNKNOWN.value
 
         # Get GeoIP info for external IPs
         country_code = None
@@ -182,8 +188,13 @@ class AssetMapper:
         owner = cidr_class.get("default_owner") if cidr_class else None
         team = cidr_class.get("default_team") if cidr_class else None
 
-        # Create asset
-        asset = Asset(
+        # Generate a new UUID for potential insert
+        new_id = uuid_module.uuid4()
+
+        # Use INSERT ... ON CONFLICT DO NOTHING
+        # This won't insert if the ip_address already exists
+        stmt = pg_insert(Asset).values(
+            id=new_id,
             name=name,
             ip_address=ip_str,
             hostname=hostname,
@@ -197,25 +208,34 @@ class AssetMapper:
             datacenter=datacenter,
             owner=owner,
             team=team,
+        ).on_conflict_do_nothing(index_elements=['ip_address'])
+
+        result = await db.execute(stmt)
+
+        # Check if we inserted a new row
+        if result.rowcount > 0:
+            logger.info(
+                "Created new asset",
+                asset_id=str(new_id),
+                ip=ip_str,
+                hostname=hostname,
+                is_internal=is_internal,
+                cidr_rule=cidr_class.get("rule_name") if cidr_class else None,
+            )
+            ASSETS_DISCOVERED.labels(
+                asset_type="internal" if is_internal else "external"
+            ).inc()
+            return new_id
+
+        # Row already existed - query to get the existing ID
+        query_result = await db.execute(
+            select(Asset.id).where(
+                Asset.ip_address == ip_str,
+                Asset.deleted_at.is_(None),
+            )
         )
-
-        db.add(asset)
-        await db.flush()
-
-        logger.info(
-            "Created new asset",
-            asset_id=str(asset.id),
-            ip=ip_str,
-            hostname=hostname,
-            is_internal=is_internal,
-            cidr_rule=cidr_class.get("rule_name") if cidr_class else None,
-        )
-
-        ASSETS_DISCOVERED.labels(
-            asset_type="internal" if is_internal else "external"
-        ).inc()
-
-        return asset
+        existing_id = query_result.scalar_one()
+        return existing_id
 
     async def map_aggregate_to_assets(
         self,
