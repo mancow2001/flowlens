@@ -143,11 +143,11 @@ class GraphTraversal:
         nodes = []
         for row in result.fetchall():
             nodes.append(TraversalNode(
-                asset_id=UUID(row.asset_id),
+                asset_id=UUID(str(row.asset_id)),
                 asset_name=row.asset_name,
                 depth=row.depth,
-                path=[UUID(p) for p in row.path],
-                incoming_dependency_id=UUID(row.dependency_id) if row.dependency_id else None,
+                path=[UUID(str(p)) for p in row.path],
+                incoming_dependency_id=UUID(str(row.dependency_id)) if row.dependency_id else None,
                 bytes_total=row.bytes_total or 0,
                 last_seen=row.last_seen,
             ))
@@ -242,11 +242,11 @@ class GraphTraversal:
         nodes = []
         for row in result.fetchall():
             nodes.append(TraversalNode(
-                asset_id=UUID(row.asset_id),
+                asset_id=UUID(str(row.asset_id)),
                 asset_name=row.asset_name,
                 depth=row.depth,
-                path=[UUID(p) for p in row.path],
-                incoming_dependency_id=UUID(row.dependency_id) if row.dependency_id else None,
+                path=[UUID(str(p)) for p in row.path],
+                incoming_dependency_id=UUID(str(row.dependency_id)) if row.dependency_id else None,
                 bytes_total=row.bytes_total or 0,
                 last_seen=row.last_seen,
             ))
