@@ -390,16 +390,27 @@ export default function Topology() {
   const groupPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   // Fetch topology data with filters
+  // Use getSubgraph when a focused endpoint is set, otherwise use getGraph for full topology
   const { data: topology, isLoading } = useQuery({
     queryKey: ['topology', 'graph', filters],
-    queryFn: () => topologyApi.getGraph({
-      as_of: filters.asOf || undefined,
-      environments: filters.environments.length > 0 ? filters.environments : undefined,
-      datacenters: filters.datacenters.length > 0 ? filters.datacenters : undefined,
-      asset_types: filters.assetTypes.length > 0 ? filters.assetTypes : undefined,
-      include_external: filters.includeExternal,
-      min_bytes_24h: filters.minBytes24h > 0 ? filters.minBytes24h : undefined,
-    }),
+    queryFn: () => {
+      // When a focused endpoint is set, use the subgraph endpoint for proper depth-based traversal
+      if (filters.focusedEndpoint) {
+        return topologyApi.getSubgraph(
+          filters.focusedEndpoint,
+          filters.hopLevel
+        );
+      }
+      // Otherwise, use the full topology graph endpoint
+      return topologyApi.getGraph({
+        as_of: filters.asOf || undefined,
+        environments: filters.environments.length > 0 ? filters.environments : undefined,
+        datacenters: filters.datacenters.length > 0 ? filters.datacenters : undefined,
+        asset_types: filters.assetTypes.length > 0 ? filters.assetTypes : undefined,
+        include_external: filters.includeExternal,
+        min_bytes_24h: filters.minBytes24h > 0 ? filters.minBytes24h : undefined,
+      });
+    },
   });
 
   // Fetch gateway topology data (only when showGateways is enabled)
