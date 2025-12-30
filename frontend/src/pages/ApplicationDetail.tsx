@@ -88,7 +88,7 @@ export default function ApplicationDetail() {
     position: { x: number; y: number };
   } | null>(null);
   const [showExternal, setShowExternal] = useState(false);
-  const [maxDepth, setMaxDepth] = useState(3);
+  const [maxDepth, setMaxDepth] = useState(1);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
   // Fetch application topology
@@ -187,9 +187,19 @@ export default function ApplicationDetail() {
     }
 
     // Create edges from topology.edges
+    // Filter out edges between nodes at the max visible hop level
+    // (only show edges going INTO the max level, not between nodes at that level)
     const nodeMap = new Map(simNodes.map(n => [n.id, n]));
     topology.edges.forEach((edge, i) => {
       if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) return;
+
+      const sourceNode = nodeMap.get(edge.source)!;
+      const targetNode = nodeMap.get(edge.target)!;
+      const sourceHop = sourceNode.hop_distance ?? 0;
+      const targetHop = targetNode.hop_distance ?? 0;
+
+      // Skip edges where both nodes are at the max visible hop level
+      if (sourceHop === maxDepth && targetHop === maxDepth) return;
 
       simLinks.push({
         id: `${edge.source}-${edge.target}-${i}`,
@@ -206,7 +216,7 @@ export default function ApplicationDetail() {
     });
 
     return { nodes: simNodes, links: simLinks };
-  }, [topology, dimensions]);
+  }, [topology, dimensions, maxDepth]);
 
   // Handle container resize
   useEffect(() => {
