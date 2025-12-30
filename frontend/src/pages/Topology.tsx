@@ -716,6 +716,41 @@ export default function Topology() {
     setHighlightedPaths(null);
   }, []);
 
+  // Handle Canvas edge hover - convert RenderEdge format to SimLink format for EdgeTooltip
+  const handleCanvasEdgeHover = useCallback((edge: {
+    id: string;
+    source: TopologyNode;
+    target: TopologyNode;
+    targetPort: number;
+    targetPorts?: number[];
+    protocol: number;
+    bytesTotal: number;
+    isCritical: boolean;
+  } | null, position: { x: number; y: number }) => {
+    if (edge) {
+      // Convert to SimLink-compatible format for the tooltip
+      setHoveredEdge({
+        edge: {
+          id: edge.id,
+          source: edge.source as SimNode,
+          target: edge.target as SimNode,
+          target_port: edge.targetPort,
+          target_ports: edge.targetPorts,
+          protocol: edge.protocol,
+          protocol_name: null,
+          service_type: null,
+          bytes_total: edge.bytesTotal,
+          bytes_last_24h: edge.bytesTotal, // Use total as fallback
+          is_critical: edge.isCritical,
+          last_seen: new Date().toISOString(),
+        },
+        position,
+      });
+    } else {
+      setHoveredEdge(null);
+    }
+  }, []);
+
   // Keep refs updated with latest callbacks and state (for D3 to use without causing re-renders)
   useEffect(() => {
     handleNodeClickRef.current = handleNodeClick;
@@ -2065,6 +2100,7 @@ export default function Topology() {
               groupColors={groupColors}
               onNodeClick={handleNodeClick}
               onBackgroundClick={clearSelection}
+              onEdgeHover={handleCanvasEdgeHover}
               performanceMode={topologySettings.performanceMode}
             />
           ) : (
