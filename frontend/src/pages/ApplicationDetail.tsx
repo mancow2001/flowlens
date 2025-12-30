@@ -626,7 +626,6 @@ export default function ApplicationDetail() {
                 links={links}
                 width={dimensions.width}
                 height={dimensions.height}
-                maxDepth={maxDepth}
                 onNodeHover={setHoveredNode}
                 onEdgeHover={(edge, position) => {
                   if (edge) {

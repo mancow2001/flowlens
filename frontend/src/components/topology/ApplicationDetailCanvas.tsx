@@ -67,7 +67,6 @@ interface ApplicationDetailCanvasProps {
   links: SimLink[];
   width: number;
   height: number;
-  maxDepth: number;
   onNodeHover?: (node: SimNode | null) => void;
   onEdgeHover?: (edge: SimLink | null, position: { x: number; y: number }) => void;
 }
@@ -147,7 +146,6 @@ export default function ApplicationDetailCanvas({
   links,
   width,
   height,
-  maxDepth,
   onNodeHover,
   onEdgeHover,
 }: ApplicationDetailCanvasProps) {
@@ -348,8 +346,7 @@ export default function ApplicationDetailCanvas({
           ctx.moveTo(sx, sy);
           ctx.lineTo(tx, ty);
         } else {
-          const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2) * 1.5;
-          // Use arc for curves
+          // Use quadratic curve for curved edges
           ctx.moveTo(sx, sy);
           const mx = (sx + tx) / 2;
           const my = (sy + ty) / 2 - 20;
