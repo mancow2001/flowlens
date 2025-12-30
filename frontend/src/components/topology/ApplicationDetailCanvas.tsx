@@ -882,8 +882,8 @@ export default function ApplicationDetailCanvas({
       height={height * dpr}
       style={{
         display: 'block',
-        width: width,
-        height: height,
+        width: '100%',
+        height: '100%',
         background: '#0f172a',
       }}
     />
