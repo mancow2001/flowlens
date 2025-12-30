@@ -577,13 +577,11 @@ export default function ApplicationDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
         {/* Topology Visualization */}
-        <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative h-full min-h-[500px]">
-          <div ref={containerRef} className="w-full h-full">
+        <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative min-h-[500px]">
+          <div ref={containerRef} className="absolute inset-0">
             <svg
               ref={svgRef}
-              width={dimensions.width}
-              height={dimensions.height}
-              className="bg-slate-900"
+              className="w-full h-full bg-slate-900"
             />
           </div>
 
