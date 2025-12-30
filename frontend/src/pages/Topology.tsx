@@ -16,7 +16,8 @@ import TopologySettingsDialog, {
 import { useTopologyFilters } from '../hooks/useTopologyFilters';
 import { topologyApi, savedViewsApi, gatewayApi } from '../services/api';
 import { getServiceName } from '../utils/network';
-import { applyLayout, type LayoutType } from '../utils/graphLayouts';
+// Static layout algorithms - will be used when layout settings are implemented
+// import { applyLayout, type LayoutType } from '../utils/graphLayouts';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
 
 // Get edge label text showing port/service info
@@ -2077,7 +2078,7 @@ export default function Topology() {
           )}
 
           {/* Render mode indicator */}
-          {isLargeGraph && (
+          {isLargeGraph && filteredTopology && (
             <div className="absolute bottom-4 left-4 bg-slate-900/80 rounded-lg px-3 py-1.5 text-xs text-slate-300 flex items-center gap-2">
               <span className={effectiveRenderMode === 'canvas' ? 'text-green-400' : 'text-amber-400'}>
                 {effectiveRenderMode === 'canvas' ? 'Canvas' : 'SVG'}
