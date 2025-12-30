@@ -244,18 +244,39 @@ export default function ApplicationDetail() {
 
     const updateDimensions = () => {
       if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
+        const rect = containerRef.current.getBoundingClientRect();
+        const newWidth = Math.floor(rect.width);
+        const newHeight = Math.floor(rect.height);
+        // Only update if dimensions actually changed and are valid
+        if (newWidth > 0 && newHeight > 0) {
+          setDimensions(prev => {
+            if (prev.width !== newWidth || prev.height !== newHeight) {
+              return { width: newWidth, height: newHeight };
+            }
+            return prev;
+          });
+        }
       }
     };
 
+    // Initial update with a slight delay to ensure layout is complete
     updateDimensions();
-    const resizeObserver = new ResizeObserver(updateDimensions);
+    const initialTimeout = setTimeout(updateDimensions, 100);
+
+    // ResizeObserver for container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(updateDimensions);
+    });
     resizeObserver.observe(containerRef.current);
 
-    return () => resizeObserver.disconnect();
+    // Window resize listener as fallback
+    window.addEventListener('resize', updateDimensions);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateDimensions);
+    };
   }, []);
 
   // D3 force simulation with hierarchical layout (only for SVG mode)
@@ -617,10 +638,10 @@ export default function ApplicationDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0 h-full">
         {/* Topology Visualization */}
-        <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative min-h-[500px]">
-          <div ref={containerRef} className="absolute inset-0">
+        <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative min-h-[500px] h-full">
+          <div ref={containerRef} className="absolute inset-0 w-full h-full">
             {effectiveRenderMode === 'canvas' ? (
               <ApplicationDetailCanvas
                 nodes={nodes}
