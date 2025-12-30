@@ -853,6 +853,105 @@ export default function Topology() {
       target_ports: ports.sort((a, b) => a - b), // Sort ports for consistent display
     }));
 
+    // Calculate edge indices for curved paths (to avoid overlapping edges between same nodes)
+    const edgePairCount = new Map<string, number>();
+    const edgeIndices = new Map<string, { index: number; total: number }>();
+
+    // First pass: count edges between each pair of nodes (both directions)
+    links.forEach(link => {
+      const sourceId = (link.source as SimNode).id;
+      const targetId = (link.target as SimNode).id;
+      // Use sorted IDs to group edges in both directions
+      const pairKey = [sourceId, targetId].sort().join('|');
+      edgePairCount.set(pairKey, (edgePairCount.get(pairKey) || 0) + 1);
+    });
+
+    // Second pass: assign index to each edge
+    const edgePairIndex = new Map<string, number>();
+    links.forEach(link => {
+      const sourceId = (link.source as SimNode).id;
+      const targetId = (link.target as SimNode).id;
+      const pairKey = [sourceId, targetId].sort().join('|');
+      const total = edgePairCount.get(pairKey) || 1;
+      const currentIndex = edgePairIndex.get(pairKey) || 0;
+      edgeIndices.set(link.id, { index: currentIndex, total });
+      edgePairIndex.set(pairKey, currentIndex + 1);
+    });
+
+    // Function to calculate curved path between two points
+    const getCurvedPath = (
+      sx: number, sy: number, tx: number, ty: number,
+      edgeIndex: number, totalEdges: number, isReversed: boolean
+    ): string => {
+      // If only one edge, use a straight line
+      if (totalEdges === 1) {
+        return `M ${sx} ${sy} L ${tx} ${ty}`;
+      }
+
+      // Calculate midpoint
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2;
+
+      // Calculate perpendicular offset direction
+      const dx = tx - sx;
+      const dy = ty - sy;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len === 0) return `M ${sx} ${sy} L ${tx} ${ty}`;
+
+      // Perpendicular unit vector
+      const px = -dy / len;
+      const py = dx / len;
+
+      // Calculate offset amount - spread edges evenly
+      const spacing = 25; // pixels between parallel edges
+      const offsetIndex = edgeIndex - (totalEdges - 1) / 2;
+      let offset = offsetIndex * spacing;
+
+      // Reverse offset direction for edges going the opposite way
+      if (isReversed) {
+        offset = -offset;
+      }
+
+      // Control point for quadratic bezier
+      const cx = mx + px * offset;
+      const cy = my + py * offset;
+
+      return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
+    };
+
+    // Function to get curve midpoint for label positioning
+    const getCurveMidpoint = (
+      sx: number, sy: number, tx: number, ty: number,
+      edgeIndex: number, totalEdges: number, isReversed: boolean
+    ): { x: number; y: number } => {
+      if (totalEdges === 1) {
+        return { x: (sx + tx) / 2, y: (sy + ty) / 2 };
+      }
+
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2;
+      const dx = tx - sx;
+      const dy = ty - sy;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len === 0) return { x: mx, y: my };
+
+      const px = -dy / len;
+      const py = dx / len;
+      const spacing = 25;
+      const offsetIndex = edgeIndex - (totalEdges - 1) / 2;
+      let offset = offsetIndex * spacing;
+      if (isReversed) offset = -offset;
+
+      // For quadratic bezier, the midpoint of the curve is at t=0.5
+      // B(0.5) = 0.25*P0 + 0.5*C + 0.25*P1
+      const cx = mx + px * offset;
+      const cy = my + py * offset;
+      return {
+        x: 0.25 * sx + 0.5 * cx + 0.25 * tx,
+        y: 0.25 * sy + 0.5 * cy + 0.25 * ty,
+      };
+    };
+
     // Create zoom behavior
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
@@ -1032,10 +1131,11 @@ export default function Topology() {
     };
 
     const link = linksGroup
-      .selectAll('line')
+      .selectAll('path')
       .data(links)
-      .join('line')
+      .join('path')
       .attr('class', (d) => d.isGatewayEdge ? 'edge gateway-edge' : 'edge')
+      .attr('fill', 'none')
       .attr('stroke', (d) => {
         if (d.isGatewayEdge) return '#a855f7';
         return getEdgeColor(d.source as SimNode, d.target as SimNode, d.is_critical);
@@ -1283,38 +1383,67 @@ export default function Topology() {
 
     // Update positions on tick
     simulation.on('tick', () => {
-      link
-        .attr('x1', (d) => (d.source as SimNode).x!)
-        .attr('y1', (d) => (d.source as SimNode).y!)
-        .attr('x2', (d) => (d.target as SimNode).x!)
-        .attr('y2', (d) => (d.target as SimNode).y!);
+      // Update curved paths for edges
+      link.attr('d', (d) => {
+        const sourceNode = d.source as SimNode;
+        const targetNode = d.target as SimNode;
+        const sx = sourceNode.x!;
+        const sy = sourceNode.y!;
+        const tx = targetNode.x!;
+        const ty = targetNode.y!;
 
-      // Position edge labels at midpoint of each edge
+        const edgeInfo = edgeIndices.get(d.id) || { index: 0, total: 1 };
+        // Check if this edge goes from lower to higher sorted ID (for consistent curve direction)
+        const isReversed = sourceNode.id > targetNode.id;
+
+        return getCurvedPath(sx, sy, tx, ty, edgeInfo.index, edgeInfo.total, isReversed);
+      });
+
+      // Position edge labels at curve midpoint
       edgeLabel
         .attr('x', (d) => {
-          const sx = (d.source as SimNode).x!;
-          const tx = (d.target as SimNode).x!;
-          return (sx + tx) / 2;
+          const sourceNode = d.source as SimNode;
+          const targetNode = d.target as SimNode;
+          const edgeInfo = edgeIndices.get(d.id) || { index: 0, total: 1 };
+          const isReversed = sourceNode.id > targetNode.id;
+          const midpoint = getCurveMidpoint(
+            sourceNode.x!, sourceNode.y!,
+            targetNode.x!, targetNode.y!,
+            edgeInfo.index, edgeInfo.total, isReversed
+          );
+          return midpoint.x;
         })
         .attr('y', (d) => {
-          const sy = (d.source as SimNode).y!;
-          const ty = (d.target as SimNode).y!;
-          return (sy + ty) / 2;
+          const sourceNode = d.source as SimNode;
+          const targetNode = d.target as SimNode;
+          const edgeInfo = edgeIndices.get(d.id) || { index: 0, total: 1 };
+          const isReversed = sourceNode.id > targetNode.id;
+          const midpoint = getCurveMidpoint(
+            sourceNode.x!, sourceNode.y!,
+            targetNode.x!, targetNode.y!,
+            edgeInfo.index, edgeInfo.total, isReversed
+          );
+          return midpoint.y;
         })
         .attr('transform', (d) => {
-          // Rotate label to follow edge angle
-          const sx = (d.source as SimNode).x!;
-          const sy = (d.source as SimNode).y!;
-          const tx = (d.target as SimNode).x!;
-          const ty = (d.target as SimNode).y!;
-          const mx = (sx + tx) / 2;
-          const my = (sy + ty) / 2;
-          let angle = Math.atan2(ty - sy, tx - sx) * (180 / Math.PI);
+          // Rotate label to follow edge angle at the midpoint
+          const sourceNode = d.source as SimNode;
+          const targetNode = d.target as SimNode;
+          const edgeInfo = edgeIndices.get(d.id) || { index: 0, total: 1 };
+          const isReversed = sourceNode.id > targetNode.id;
+          const midpoint = getCurveMidpoint(
+            sourceNode.x!, sourceNode.y!,
+            targetNode.x!, targetNode.y!,
+            edgeInfo.index, edgeInfo.total, isReversed
+          );
+
+          // Calculate tangent angle at midpoint (for quadratic bezier, use line from source to target as approximation)
+          let angle = Math.atan2(targetNode.y! - sourceNode.y!, targetNode.x! - sourceNode.x!) * (180 / Math.PI);
           // Keep text readable (not upside down)
           if (angle > 90 || angle < -90) {
             angle += 180;
           }
-          return `rotate(${angle}, ${mx}, ${my})`;
+          return `rotate(${angle}, ${midpoint.x}, ${midpoint.y})`;
         });
 
       node.attr('transform', (d) => `translate(${d.x},${d.y})`);
@@ -1561,7 +1690,7 @@ export default function Topology() {
     });
 
     // Update edge highlighting
-    svg.selectAll<SVGLineElement, SimLink>('.edge').each(function (d) {
+    svg.selectAll<SVGPathElement, SimLink>('.edge').each(function (d) {
       const edge = d3.select(this);
       const sourceId = typeof d.source === 'object' ? (d.source as SimNode).id : d.source;
       const targetId = typeof d.target === 'object' ? (d.target as SimNode).id : d.target;
