@@ -2115,7 +2115,7 @@ export default function Topology() {
 
           {/* Render mode indicator */}
           {isLargeGraph && filteredTopology && (
-            <div className="absolute bottom-4 left-4 bg-slate-900/80 rounded-lg px-3 py-1.5 text-xs text-slate-300 flex items-center gap-2">
+            <div className="absolute bottom-4 left-4 bg-slate-900/80 rounded-lg px-3 py-1.5 text-xs text-slate-300 flex items-center gap-2 pointer-events-none">
               <span className={effectiveRenderMode === 'canvas' ? 'text-green-400' : 'text-amber-400'}>
                 {effectiveRenderMode === 'canvas' ? 'Canvas' : 'SVG'}
               </span>
