@@ -9,7 +9,47 @@ import FilterPanel from '../components/topology/FilterPanel';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import { useTopologyFilters } from '../hooks/useTopologyFilters';
 import { topologyApi, savedViewsApi, gatewayApi } from '../services/api';
+import { getServiceName } from '../utils/network';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
+
+// Get edge label text showing port/service info
+function getEdgeLabel(ports: number[] | undefined, targetPort: number): string {
+  const portsToShow = ports && ports.length > 0 ? ports : [targetPort];
+  if (portsToShow.length === 0 || (portsToShow.length === 1 && portsToShow[0] === 0)) {
+    return '';
+  }
+
+  // For single port, show service name if available
+  if (portsToShow.length === 1) {
+    const port = portsToShow[0];
+    const service = getServiceName(port);
+    return service ? `${service.toLowerCase()} (${port})` : `${port}`;
+  }
+
+  // For multiple ports, show count or abbreviated list
+  if (portsToShow.length <= 3) {
+    return portsToShow.map(p => {
+      const service = getServiceName(p);
+      return service ? `${service.toLowerCase()} (${p})` : `${p}`;
+    }).join(', ');
+  }
+
+  return `${portsToShow.length} ports`;
+}
+
+// Determine edge color based on properties
+function getEdgeColor(sourceNode: SimNode, targetNode: SimNode, isCritical: boolean): string {
+  // Critical edges are red
+  if (isCritical) {
+    return '#ef4444'; // red
+  }
+  // Edges to/from external nodes are amber/orange
+  if (!sourceNode.is_internal || !targetNode.is_internal) {
+    return '#f97316'; // orange
+  }
+  // Default internal edges are green
+  return '#22c55e'; // green
+}
 
 interface SimNode extends TopologyNode, d3.SimulationNodeDatum {
   isGroupNode?: boolean;
@@ -937,17 +977,69 @@ export default function Topology() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#a855f7');
 
+    // Green arrow (internal edges)
+    defs.append('marker')
+      .attr('id', 'arrowhead-green')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#22c55e');
+
+    // Orange arrow (external edges)
+    defs.append('marker')
+      .attr('id', 'arrowhead-orange')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#f97316');
+
+    // Red arrow (critical edges)
+    defs.append('marker')
+      .attr('id', 'arrowhead-red')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
+      .attr('fill', '#ef4444');
+
     // Create links - with support for aggregated edges and gateway edges
     const linksGroup = container
       .append('g')
       .attr('class', 'links');
+
+    // Helper to get marker URL based on edge color
+    const getMarkerUrl = (d: SimLink): string => {
+      if (d.isGatewayEdge) return 'url(#arrowhead-gateway)';
+      const sourceNode = d.source as SimNode;
+      const targetNode = d.target as SimNode;
+      if (d.is_critical) return 'url(#arrowhead-red)';
+      if (!sourceNode.is_internal || !targetNode.is_internal) return 'url(#arrowhead-orange)';
+      return 'url(#arrowhead-green)';
+    };
 
     const link = linksGroup
       .selectAll('line')
       .data(links)
       .join('line')
       .attr('class', (d) => d.isGatewayEdge ? 'edge gateway-edge' : 'edge')
-      .attr('stroke', (d) => d.isGatewayEdge ? '#a855f7' : '#475569')
+      .attr('stroke', (d) => {
+        if (d.isGatewayEdge) return '#a855f7';
+        return getEdgeColor(d.source as SimNode, d.target as SimNode, d.is_critical);
+      })
       .attr('stroke-width', (d) => {
         if (d.isGatewayEdge) return 2;
         if (d.isAggregated && d.aggregatedCount && d.aggregatedCount > 1) {
@@ -955,9 +1047,9 @@ export default function Topology() {
         }
         return 2;
       })
-      .attr('stroke-opacity', (d) => d.isGatewayEdge ? 0.8 : 0.6)
+      .attr('stroke-opacity', (d) => d.isGatewayEdge ? 0.8 : 0.7)
       .attr('stroke-dasharray', (d) => d.isGatewayEdge ? '6,3' : 'none')
-      .attr('marker-end', (d) => d.isGatewayEdge ? 'url(#arrowhead-gateway)' : 'url(#arrowhead)')
+      .attr('marker-end', getMarkerUrl)
       .style('cursor', 'pointer')
       .on('mouseenter', function (event, d) {
         // Highlight the edge
@@ -988,11 +1080,35 @@ export default function Topology() {
             }
             return 2;
           })
-          .attr('stroke-opacity', (d as SimLink).isGatewayEdge ? 0.8 : 0.6);
+          .attr('stroke-opacity', (d as SimLink).isGatewayEdge ? 0.8 : 0.7);
 
         // Hide tooltip
         setHoveredEdge(null);
       });
+
+    // Create edge labels group
+    const edgeLabelsGroup = container
+      .append('g')
+      .attr('class', 'edge-labels');
+
+    // Create edge labels showing port/service info
+    const edgeLabel = edgeLabelsGroup
+      .selectAll('text')
+      .data(links.filter(d => !d.isGatewayEdge))
+      .join('text')
+      .attr('class', 'edge-label')
+      .attr('text-anchor', 'middle')
+      .attr('dominant-baseline', 'middle')
+      .attr('fill', '#e2e8f0')
+      .attr('font-size', 10)
+      .attr('font-weight', 500)
+      .attr('paint-order', 'stroke')
+      .attr('stroke', '#1e293b')
+      .attr('stroke-width', 3)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+      .style('pointer-events', 'none')
+      .text((d) => getEdgeLabel(d.target_ports, d.target_port));
 
     // Create drag behavior for individual nodes
     const dragBehavior = d3
@@ -1172,6 +1288,34 @@ export default function Topology() {
         .attr('y1', (d) => (d.source as SimNode).y!)
         .attr('x2', (d) => (d.target as SimNode).x!)
         .attr('y2', (d) => (d.target as SimNode).y!);
+
+      // Position edge labels at midpoint of each edge
+      edgeLabel
+        .attr('x', (d) => {
+          const sx = (d.source as SimNode).x!;
+          const tx = (d.target as SimNode).x!;
+          return (sx + tx) / 2;
+        })
+        .attr('y', (d) => {
+          const sy = (d.source as SimNode).y!;
+          const ty = (d.target as SimNode).y!;
+          return (sy + ty) / 2;
+        })
+        .attr('transform', (d) => {
+          // Rotate label to follow edge angle
+          const sx = (d.source as SimNode).x!;
+          const sy = (d.source as SimNode).y!;
+          const tx = (d.target as SimNode).x!;
+          const ty = (d.target as SimNode).y!;
+          const mx = (sx + tx) / 2;
+          const my = (sy + ty) / 2;
+          let angle = Math.atan2(ty - sy, tx - sx) * (180 / Math.PI);
+          // Keep text readable (not upside down)
+          if (angle > 90 || angle < -90) {
+            angle += 180;
+          }
+          return `rotate(${angle}, ${mx}, ${my})`;
+        });
 
       node.attr('transform', (d) => `translate(${d.x},${d.y})`);
 
@@ -1421,6 +1565,8 @@ export default function Topology() {
       const edge = d3.select(this);
       const sourceId = typeof d.source === 'object' ? (d.source as SimNode).id : d.source;
       const targetId = typeof d.target === 'object' ? (d.target as SimNode).id : d.target;
+      const sourceNode = d.source as SimNode;
+      const targetNode = d.target as SimNode;
 
       if (highlightedPaths?.edges.has(d.id)) {
         // Check if this is an upstream or downstream edge
@@ -1456,12 +1602,40 @@ export default function Topology() {
           .attr('stroke-opacity', 0.06)
           .attr('marker-end', null);
       } else {
-        // Default state
-        edge
-          .attr('stroke', '#475569')
-          .attr('stroke-width', 2)
-          .attr('stroke-opacity', 0.6)
-          .attr('marker-end', 'url(#arrowhead)');
+        // Default state - use dynamic colors based on edge type
+        if (d.isGatewayEdge) {
+          edge
+            .attr('stroke', '#a855f7')
+            .attr('stroke-width', 2)
+            .attr('stroke-opacity', 0.8)
+            .attr('marker-end', 'url(#arrowhead-gateway)');
+        } else {
+          const color = getEdgeColor(sourceNode, targetNode, d.is_critical);
+          const markerUrl = d.is_critical ? 'url(#arrowhead-red)' :
+            (!sourceNode.is_internal || !targetNode.is_internal) ? 'url(#arrowhead-orange)' :
+            'url(#arrowhead-green)';
+          edge
+            .attr('stroke', color)
+            .attr('stroke-width', 2)
+            .attr('stroke-opacity', 0.7)
+            .attr('marker-end', markerUrl);
+        }
+      }
+    });
+
+    // Update edge labels opacity
+    svg.selectAll<SVGTextElement, SimLink>('.edge-label').each(function (d) {
+      const label = d3.select(this);
+      const sourceId = typeof d.source === 'object' ? (d.source as SimNode).id : d.source;
+      const targetId = typeof d.target === 'object' ? (d.target as SimNode).id : d.target;
+      const isConnected = highlightedPaths?.edges.has(d.id) ||
+                         highlightedPaths?.upstream.has(sourceId as string) ||
+                         highlightedPaths?.downstream.has(targetId as string);
+
+      if (highlightedPaths && !isConnected) {
+        label.attr('opacity', 0.1);
+      } else {
+        label.attr('opacity', 1);
       }
     });
 
@@ -1761,6 +1935,22 @@ export default function Topology() {
                     ({topology?.nodes.filter(n => !n.is_internal).length || 0})
                   </span>
                 </label>
+              </div>
+
+              <div className="text-xs text-slate-400 uppercase tracking-wider mt-4 mb-2">Edge Colors</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 border-t-2 border-green-500" />
+                  <span className="text-sm text-slate-300">Internal</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-8 border-t-2 border-orange-500" />
+                  <span className="text-sm text-slate-300">External</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-8 border-t-2 border-red-500" />
+                  <span className="text-sm text-slate-300">Critical</span>
+                </div>
               </div>
 
               {showGateways && (
