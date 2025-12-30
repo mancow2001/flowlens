@@ -192,8 +192,8 @@ export default function ApplicationDetail() {
     }
 
     // Create edges from topology.edges
-    // Filter out edges between nodes at the max visible hop level
-    // (only show edges going INTO the max level, not between nodes at that level)
+    // Only show edges that progress from one hop level to the next
+    // (hop 0 -> hop 1 -> hop 2 -> ... -> hop N)
     const nodeMap = new Map(simNodes.map(n => [n.id, n]));
     topology.edges.forEach((edge, i) => {
       if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) return;
@@ -203,8 +203,9 @@ export default function ApplicationDetail() {
       const sourceHop = sourceNode.hop_distance ?? 0;
       const targetHop = targetNode.hop_distance ?? 0;
 
-      // Skip edges where both nodes are at the max visible hop level
-      if (sourceHop === maxDepth && targetHop === maxDepth) return;
+      // Only show edges where target is exactly one hop further than source
+      // This creates the progression: entry point (0) -> hop 1 -> hop 2 -> etc.
+      if (targetHop !== sourceHop + 1) return;
 
       simLinks.push({
         id: `${edge.source}-${edge.target}-${i}`,
