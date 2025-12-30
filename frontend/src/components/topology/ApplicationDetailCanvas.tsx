@@ -85,13 +85,13 @@ const EDGE_COLORS = {
   client_summary: '#10b981',
 };
 
-// LOD thresholds
+// LOD thresholds - set low for high quality rendering
 const LOD = {
-  showLabels: 0.4,
-  showEdgeLabels: 0.6,
-  showIcons: 0.3,
-  simplifyEdges: 0.2,
-  showArrows: 0.35,
+  showLabels: 0.25,       // Always show labels unless very zoomed out
+  showEdgeLabels: 0.35,   // Show edge labels at reasonable zoom
+  showIcons: 0.2,         // Always show icons
+  simplifyEdges: 0.1,     // Only simplify when extremely zoomed out
+  showArrows: 0.2,        // Always show arrows
 };
 
 // Calculate distance from point to line segment
@@ -165,6 +165,9 @@ export default function ApplicationDetailCanvas({
   // Refs for callbacks
   const renderFnRef = useRef<() => void>(() => {});
   const updateQuadtreeFnRef = useRef<() => void>(() => {});
+
+  // Get device pixel ratio for crisp rendering
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
   // Determine if we should use performance optimizations
   const usePerformanceOptimizations = useMemo(() => {
@@ -286,11 +289,14 @@ export default function ApplicationDetailCanvas({
     const renderNodes = nodesRef.current;
     const renderLinks = linksRef.current;
 
-    // Clear canvas
+    // Clear canvas with high-DPI scaling
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, width, height);
 
-    // Apply transform
+    // Apply transform with high quality rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.save();
     ctx.translate(transform.x, transform.y);
     ctx.scale(transform.k, transform.k);
@@ -609,7 +615,7 @@ export default function ApplicationDetailCanvas({
 
     ctx.restore();
     rafRef.current = null;
-  }, [width, height, usePerformanceOptimizations, isInViewport]);
+  }, [width, height, dpr, usePerformanceOptimizations, isInViewport]);
 
   // Request animation frame for rendering
   const requestRender = useCallback(() => {
@@ -872,12 +878,12 @@ export default function ApplicationDetailCanvas({
   return (
     <canvas
       ref={canvasRef}
-      width={width}
-      height={height}
+      width={width * dpr}
+      height={height * dpr}
       style={{
         display: 'block',
-        width: '100%',
-        height: '100%',
+        width: width,
+        height: height,
         background: '#0f172a',
       }}
     />
