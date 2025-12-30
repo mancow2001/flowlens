@@ -7,9 +7,16 @@ import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import FilterPanel from '../components/topology/FilterPanel';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
+import CanvasTopologyRenderer from '../components/topology/CanvasTopologyRenderer';
+import TopologySettingsDialog, {
+  type TopologySettings,
+  type RenderMode,
+  DEFAULT_SETTINGS,
+} from '../components/topology/TopologySettings';
 import { useTopologyFilters } from '../hooks/useTopologyFilters';
 import { topologyApi, savedViewsApi, gatewayApi } from '../services/api';
 import { getServiceName } from '../utils/network';
+import { applyLayout, type LayoutType } from '../utils/graphLayouts';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
 
 // Get edge label text showing port/service info
@@ -357,6 +364,10 @@ export default function Topology() {
   // Export dropdown
   const [showExportMenu, setShowExportMenu] = useState(false);
 
+  // Topology performance settings
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [topologySettings, setTopologySettings] = useState<TopologySettings>(DEFAULT_SETTINGS);
+
   // Legend visibility filters
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set());
   const [showInternal, setShowInternal] = useState(true);
@@ -660,6 +671,24 @@ export default function Topology() {
 
     return { nodes: resultNodes, edges: resultEdges };
   }, [topology, showInternal, showExternal, hiddenGroups, groupingMode, collapsedGroups, nodeToGroupMap, showGateways, gatewayTopology]);
+
+  // Determine render mode based on settings and graph size
+  const effectiveRenderMode = useMemo((): RenderMode => {
+    if (topologySettings.renderMode !== 'auto') {
+      return topologySettings.renderMode;
+    }
+    // Auto mode: use Canvas for large graphs
+    const nodeCount = filteredTopology?.nodes.length ?? 0;
+    const edgeCount = filteredTopology?.edges.length ?? 0;
+    return nodeCount > 200 || edgeCount > 500 ? 'canvas' : 'svg';
+  }, [topologySettings.renderMode, filteredTopology?.nodes.length, filteredTopology?.edges.length]);
+
+  // Check if we have a large graph
+  const isLargeGraph = useMemo(() => {
+    const nodeCount = filteredTopology?.nodes.length ?? 0;
+    const edgeCount = filteredTopology?.edges.length ?? 0;
+    return nodeCount > 200 || edgeCount > 500;
+  }, [filteredTopology?.nodes.length, filteredTopology?.edges.length]);
 
   // Handle node selection and path highlighting
   const handleNodeClick = useCallback((node: TopologyNode) => {
@@ -1897,6 +1926,17 @@ export default function Topology() {
               Clear Selection
             </Button>
           )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowSettingsDialog(true)}
+            title="Performance & Layout Settings"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </Button>
           <Button variant="secondary" size="sm" onClick={resetView}>
             Reset View
           </Button>
@@ -2012,6 +2052,20 @@ export default function Topology() {
                 ? 'All nodes are hidden. Adjust legend filters to show nodes.'
                 : 'No topology data available'}
             </div>
+          ) : effectiveRenderMode === 'canvas' ? (
+            <CanvasTopologyRenderer
+              nodes={filteredTopology.nodes}
+              edges={filteredTopology.edges}
+              width={dimensions.width}
+              height={dimensions.height}
+              selectedNodeId={selectedNode?.id ?? null}
+              highlightedPaths={highlightedPaths}
+              groupingMode={groupingMode}
+              groupColors={groupColors}
+              onNodeClick={handleNodeClick}
+              onBackgroundClick={clearSelection}
+              performanceMode={topologySettings.performanceMode}
+            />
           ) : (
             <svg
               ref={svgRef}
@@ -2020,6 +2074,19 @@ export default function Topology() {
               viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
               preserveAspectRatio="xMidYMid meet"
             />
+          )}
+
+          {/* Render mode indicator */}
+          {isLargeGraph && (
+            <div className="absolute bottom-4 left-4 bg-slate-900/80 rounded-lg px-3 py-1.5 text-xs text-slate-300 flex items-center gap-2">
+              <span className={effectiveRenderMode === 'canvas' ? 'text-green-400' : 'text-amber-400'}>
+                {effectiveRenderMode === 'canvas' ? 'Canvas' : 'SVG'}
+              </span>
+              <span className="text-slate-500">|</span>
+              <span>{filteredTopology.nodes.length} nodes</span>
+              <span className="text-slate-500">|</span>
+              <span>{filteredTopology.edges.length} edges</span>
+            </div>
           )}
 
           {/* Locating node indicator */}
@@ -2331,6 +2398,16 @@ export default function Topology() {
           containerBounds={containerRef.current?.getBoundingClientRect()}
         />
       )}
+
+      {/* Topology Settings Dialog */}
+      <TopologySettingsDialog
+        isOpen={showSettingsDialog}
+        onClose={() => setShowSettingsDialog(false)}
+        settings={topologySettings}
+        onSettingsChange={setTopologySettings}
+        nodeCount={filteredTopology?.nodes.length ?? 0}
+        edgeCount={filteredTopology?.edges.length ?? 0}
+      />
     </div>
   );
 }
