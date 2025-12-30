@@ -724,6 +724,54 @@ export default function ApplicationDetail() {
             </Card>
           )}
 
+          {/* Dependencies by Hop Level */}
+          {nodes.filter(n => !n.is_client_summary && (n.hop_distance ?? 0) > 0).length > 0 && (
+            <Card title="Dependencies by Hop">
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {Array.from(
+                  nodes
+                    .filter(n => !n.is_client_summary && (n.hop_distance ?? 0) > 0)
+                    .reduce((acc, node) => {
+                      const hop = node.hop_distance ?? 1;
+                      if (!acc.has(hop)) acc.set(hop, []);
+                      acc.get(hop)!.push(node);
+                      return acc;
+                    }, new Map<number, SimNode[]>())
+                )
+                  .sort(([a], [b]) => a - b)
+                  .map(([hopLevel, nodesAtHop]) => (
+                    <div key={hopLevel}>
+                      <div className="text-xs font-medium text-slate-400 mb-1">
+                        Hop {hopLevel} ({nodesAtHop.length})
+                      </div>
+                      <div className="space-y-1">
+                        {nodesAtHop.map((node) => (
+                          <div
+                            key={node.id}
+                            className="flex items-center gap-2 p-1.5 rounded bg-slate-700/50 text-sm"
+                          >
+                            <div
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{
+                                backgroundColor: node.is_external
+                                  ? NODE_COLORS.external
+                                  : node.is_critical
+                                  ? NODE_COLORS.critical
+                                  : NODE_COLORS.internal,
+                              }}
+                            />
+                            <span className="text-white truncate">
+                              {node.display_name || node.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </Card>
+          )}
+
           <Card title="Entry Points">
             {topology.entry_points.length === 0 ? (
               <p className="text-slate-500 text-sm">No entry points defined</p>
