@@ -11,7 +11,7 @@
  * 6. Double buffering for smooth updates
  */
 
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import type { TopologyNode, TopologyEdge } from '../../types';
 
