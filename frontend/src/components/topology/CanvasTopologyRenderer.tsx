@@ -737,6 +737,23 @@ export default function CanvasTopologyRenderer({
 
     const zoom = d3.zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.1, 4])
+      .filter((event: Event) => {
+        // Allow zoom on wheel events
+        if (event.type === 'wheel') return true;
+        // Allow zoom on double-click for zoom in
+        if (event.type === 'dblclick') return true;
+        // For mouse events, only allow if not clicking on a node
+        if (event.type === 'mousedown') {
+          const mouseEvent = event as MouseEvent;
+          const rect = canvas.getBoundingClientRect();
+          const x = mouseEvent.clientX - rect.left;
+          const y = mouseEvent.clientY - rect.top;
+          const node = findNodeAt(x, y);
+          // Block zoom/pan if clicking on a node
+          if (node) return false;
+        }
+        return true;
+      })
       .on('zoom', (event: d3.D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         transformRef.current = event.transform;
         requestRender();
@@ -747,7 +764,7 @@ export default function CanvasTopologyRenderer({
     return () => {
       d3.select(canvas).on('.zoom', null);
     };
-  }, [requestRender]);
+  }, [requestRender, findNodeAt]);
 
   // Handle mouse events
   useEffect(() => {
