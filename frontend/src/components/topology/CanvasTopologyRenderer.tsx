@@ -15,6 +15,7 @@ import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import type { TopologyNode, TopologyEdge } from '../../types';
 import { getServiceName } from '../../utils/network';
+import { applyLayout, type LayoutType } from '../../utils/graphLayouts';
 
 // Calculate distance from point to line segment
 function pointToLineDistance(
@@ -153,6 +154,7 @@ interface CanvasTopologyRendererProps {
     collisionRadius?: number;
   };
   performanceMode?: 'auto' | 'quality' | 'performance';
+  layoutType?: LayoutType | 'force';
 }
 
 // Colors
@@ -192,7 +194,7 @@ export default function CanvasTopologyRenderer({
   height,
   selectedNodeId,
   highlightedPaths,
-  groupingMode: _groupingMode = 'none',
+  groupingMode = 'none',
   groupColors = new Map(),
   onNodeClick,
   onNodeDoubleClick,
@@ -200,9 +202,8 @@ export default function CanvasTopologyRenderer({
   onEdgeHover,
   simulationConfig,
   performanceMode = 'auto',
+  layoutType = 'force',
 }: CanvasTopologyRendererProps) {
-  // Mark unused params as intentionally unused
-  void _groupingMode; // Will be used for group hulls in future
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef<Transform>({ x: 0, y: 0, k: 1 });
@@ -291,12 +292,58 @@ export default function CanvasTopologyRenderer({
     nodesRef.current = renderNodes;
     edgesRef.current = renderEdges;
 
-    // Initialize simulation
+    // Stop any existing simulation
     if (simulationRef.current) {
       simulationRef.current.stop();
+      simulationRef.current = null;
     }
 
-    // Calculate adaptive parameters based on graph size
+    // Apply static layout or use force simulation
+    if (layoutType !== 'force') {
+      // Apply static layout
+      const layoutNodes = renderNodes.map(n => ({
+        id: n.id,
+        groupKey: groupingMode !== 'none' ? (n as TopologyNode & { environment?: string; datacenter?: string; location?: string; asset_type?: string })[
+          groupingMode === 'environment' ? 'environment' :
+          groupingMode === 'datacenter' ? 'datacenter' :
+          groupingMode === 'location' ? 'location' :
+          'asset_type'
+        ] ?? 'default' : undefined,
+        is_internal: n.is_internal,
+        connections_in: edges.filter(e => e.target === n.id).length,
+        connections_out: edges.filter(e => e.source === n.id).length,
+      }));
+
+      const layoutEdges = edges.map(e => ({
+        source: e.source,
+        target: e.target,
+      }));
+
+      const layoutResult = applyLayout(
+        layoutType as LayoutType,
+        layoutNodes,
+        layoutEdges,
+        width,
+        height
+      );
+
+      // Apply layout positions to render nodes
+      renderNodes.forEach(node => {
+        const pos = layoutResult.nodes.get(node.id);
+        if (pos) {
+          node.x = pos.x;
+          node.y = pos.y;
+        }
+      });
+
+      // Update quadtree and render
+      updateQuadtreeFnRef.current();
+      renderFnRef.current();
+
+      return;
+    }
+
+    // Use force simulation for 'force' layout
     const nodeCount = renderNodes.length;
     const baseDistance = Math.max(100, Math.min(200, 800 / Math.sqrt(nodeCount)));
     const baseStrength = Math.max(-800, Math.min(-200, -300 - nodeCount * 0.5));
@@ -305,29 +352,27 @@ export default function CanvasTopologyRenderer({
       .force('link', d3.forceLink<RenderNode, RenderEdge>(renderEdges)
         .id((d: RenderNode) => d.id)
         .distance(simulationConfig?.linkDistance ?? baseDistance)
-        .strength(0.5)) // Slightly weaker link force for better spreading
+        .strength(0.5))
       .force('charge', d3.forceManyBody<RenderNode>()
         .strength(simulationConfig?.chargeStrength ?? baseStrength)
-        .distanceMax(500) // Limit charge distance for performance
-        .theta(usePerformanceOptimizations ? 0.9 : 0.5)) // Barnes-Hut approximation
+        .distanceMax(500)
+        .theta(usePerformanceOptimizations ? 0.9 : 0.5))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide<RenderNode>()
         .radius(simulationConfig?.collisionRadius ?? 50)
-        .strength(0.8)) // Strong collision avoidance
-      .force('x', d3.forceX(width / 2).strength(0.02)) // Gentle centering
+        .strength(0.8))
+      .force('x', d3.forceX(width / 2).strength(0.02))
       .force('y', d3.forceY(height / 2).strength(0.02));
 
-    // Adjust alpha decay based on graph size
     if (usePerformanceOptimizations) {
-      simulation.alphaDecay(0.03); // Slightly slower for better layout
-      simulation.velocityDecay(0.3); // Less damping for better spreading
+      simulation.alphaDecay(0.03);
+      simulation.velocityDecay(0.3);
     } else {
       simulation.alphaDecay(0.02);
       simulation.velocityDecay(0.4);
     }
 
     simulation.on('tick', () => {
-      // Use refs to always call the latest versions of these callbacks
       updateQuadtreeFnRef.current();
       renderFnRef.current();
     });
@@ -337,7 +382,7 @@ export default function CanvasTopologyRenderer({
     return () => {
       simulation.stop();
     };
-  }, [nodes, edges, width, height, simulationConfig, usePerformanceOptimizations]);
+  }, [nodes, edges, width, height, simulationConfig, usePerformanceOptimizations, layoutType, groupingMode]);
 
   // Update quadtree for spatial queries
   const updateQuadtree = useCallback(() => {

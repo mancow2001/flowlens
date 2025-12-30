@@ -2102,6 +2102,7 @@ export default function Topology() {
               onBackgroundClick={clearSelection}
               onEdgeHover={handleCanvasEdgeHover}
               performanceMode={topologySettings.performanceMode}
+              layoutType={topologySettings.layoutType}
             />
           ) : (
             <svg
