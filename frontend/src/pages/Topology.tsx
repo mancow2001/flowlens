@@ -399,9 +399,6 @@ export default function Topology() {
       asset_types: filters.assetTypes.length > 0 ? filters.assetTypes : undefined,
       include_external: filters.includeExternal,
       min_bytes_24h: filters.minBytes24h > 0 ? filters.minBytes24h : undefined,
-      // Focused endpoint filter - show only this asset and its connections
-      asset_id: filters.focusedEndpoint || undefined,
-      depth: filters.focusedEndpoint ? filters.hopLevel : undefined,
     }),
   });
 

@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Card from '../common/Card';
 import Button from '../common/Button';
-import { classificationApi, assetApi } from '../../services/api';
+import { classificationApi } from '../../services/api';
 import type { TopologyFilters } from '../../hooks/useTopologyFilters';
-import type { Asset } from '../../types';
 
 // Standard asset types - must match backend AssetType enum in models/asset.py
 const ASSET_TYPES = [
@@ -38,34 +37,10 @@ export default function FilterPanel({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [localFilters, setLocalFilters] = useState(filters);
 
-  // Focused endpoint search state
-  const [endpointSearchQuery, setEndpointSearchQuery] = useState('');
-  const [showEndpointDropdown, setShowEndpointDropdown] = useState(false);
-  const endpointSearchRef = useRef<HTMLDivElement>(null);
-
   // Sync local filters when external filters change
   useEffect(() => {
     setLocalFilters(filters);
   }, [filters]);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (endpointSearchRef.current && !endpointSearchRef.current.contains(event.target as Node)) {
-        setShowEndpointDropdown(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Search for assets
-  const { data: assetSearchResults, isLoading: isSearchingAssets } = useQuery({
-    queryKey: ['asset-search', endpointSearchQuery],
-    queryFn: () => assetApi.list({ search: endpointSearchQuery, page_size: 10 }),
-    enabled: endpointSearchQuery.length >= 2,
-    staleTime: 30 * 1000, // 30 seconds
-  });
 
   // Fetch available environments and datacenters
   const { data: environments = [] } = useQuery({
@@ -85,28 +60,7 @@ export default function FilterPanel({
   };
 
   const handleReset = () => {
-    setEndpointSearchQuery('');
     onReset();
-  };
-
-  const handleSelectEndpoint = (asset: Asset) => {
-    setLocalFilters(prev => ({
-      ...prev,
-      focusedEndpoint: asset.id,
-      focusedEndpointName: asset.name || asset.ip_address || asset.id,
-    }));
-    setEndpointSearchQuery('');
-    setShowEndpointDropdown(false);
-  };
-
-  const handleClearEndpoint = () => {
-    setLocalFilters(prev => ({
-      ...prev,
-      focusedEndpoint: null,
-      focusedEndpointName: null,
-      hopLevel: 1,
-    }));
-    setEndpointSearchQuery('');
   };
 
   const toggleArrayValue = (
@@ -168,121 +122,6 @@ export default function FilterPanel({
         </div>
 
         <div className="space-y-5">
-          {/* Focused Endpoint */}
-          <div>
-            <label className="block text-xs text-slate-400 uppercase tracking-wider mb-2">
-              Focused Endpoint
-            </label>
-            {localFilters.focusedEndpoint ? (
-              <div className="flex items-center gap-2 bg-primary-500/20 border border-primary-500/30 rounded-lg px-3 py-2">
-                <svg className="w-4 h-4 text-primary-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm text-primary-300 truncate flex-1" title={localFilters.focusedEndpointName || localFilters.focusedEndpoint}>
-                  {localFilters.focusedEndpointName || localFilters.focusedEndpoint}
-                </span>
-                <button
-                  onClick={handleClearEndpoint}
-                  className="p-0.5 rounded hover:bg-primary-500/30 text-primary-400 hover:text-primary-200 transition-colors"
-                  title="Clear focused endpoint"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <div ref={endpointSearchRef} className="relative">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={endpointSearchQuery}
-                    onChange={(e) => {
-                      setEndpointSearchQuery(e.target.value);
-                      setShowEndpointDropdown(e.target.value.length >= 2);
-                    }}
-                    onFocus={() => endpointSearchQuery.length >= 2 && setShowEndpointDropdown(true)}
-                    placeholder="Search by name or IP..."
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                  {isSearchingAssets && (
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                      <svg className="w-4 h-4 text-slate-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-                {showEndpointDropdown && assetSearchResults && (
-                  <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                    {assetSearchResults.items.length > 0 ? (
-                      assetSearchResults.items.map((asset) => (
-                        <button
-                          key={asset.id}
-                          onClick={() => handleSelectEndpoint(asset)}
-                          className="w-full px-3 py-2 text-left hover:bg-slate-700 transition-colors first:rounded-t-lg last:rounded-b-lg"
-                        >
-                          <div className="text-sm text-slate-200 truncate">
-                            {asset.name || asset.ip_address || asset.id}
-                          </div>
-                          <div className="text-xs text-slate-500 flex items-center gap-2">
-                            <span>{asset.ip_address}</span>
-                            {asset.asset_type && (
-                              <>
-                                <span>•</span>
-                                <span className="capitalize">{asset.asset_type.replace('_', ' ')}</span>
-                              </>
-                            )}
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="px-3 py-2 text-sm text-slate-500 italic">
-                        No assets found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-            <p className="mt-1 text-xs text-slate-500">
-              Focus on a specific endpoint and its connections
-            </p>
-          </div>
-
-          {/* Hop Level (only shown when endpoint is focused) */}
-          {localFilters.focusedEndpoint && (
-            <div>
-              <label className="block text-xs text-slate-400 uppercase tracking-wider mb-2">
-                Connection Depth (Hops)
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="1"
-                  max="5"
-                  value={localFilters.hopLevel}
-                  onChange={(e) => setLocalFilters(prev => ({
-                    ...prev,
-                    hopLevel: parseInt(e.target.value, 10),
-                  }))}
-                  className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                />
-                <span className="text-sm text-slate-300 w-6 text-center font-medium">
-                  {localFilters.hopLevel}
-                </span>
-              </div>
-              <div className="flex justify-between text-xs text-slate-500 mt-1">
-                <span>1 hop</span>
-                <span>5 hops</span>
-              </div>
-              <p className="mt-1 text-xs text-slate-500">
-                How many connection levels to show from the focused endpoint
-              </p>
-            </div>
-          )}
-
           {/* Environments */}
           <div>
             <label className="block text-xs text-slate-400 uppercase tracking-wider mb-2">
@@ -477,22 +316,6 @@ export default function FilterPanel({
                 {localFilters.minBytes24h > 0 && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-500/20 text-yellow-300 text-xs rounded">
                     &gt;{formatBytes(localFilters.minBytes24h)}
-                  </span>
-                )}
-                {localFilters.focusedEndpoint && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-500/20 text-primary-300 text-xs rounded">
-                    Focus: {localFilters.focusedEndpointName || localFilters.focusedEndpoint}
-                    <button
-                      onClick={handleClearEndpoint}
-                      className="hover:text-primary-100"
-                    >
-                      x
-                    </button>
-                  </span>
-                )}
-                {localFilters.focusedEndpoint && localFilters.hopLevel > 1 && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-cyan-500/20 text-cyan-300 text-xs rounded">
-                    {localFilters.hopLevel} hops
                   </span>
                 )}
               </div>
