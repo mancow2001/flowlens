@@ -14,6 +14,30 @@
 import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import type { TopologyNode, TopologyEdge } from '../../types';
+import { getServiceName } from '../../utils/network';
+
+// Get edge label text showing port/service info
+function getEdgeLabel(ports: number[] | undefined, targetPort: number): string {
+  const portsToShow = ports && ports.length > 0 ? ports : [targetPort];
+  if (portsToShow.length === 0 || (portsToShow.length === 1 && portsToShow[0] === 0)) {
+    return '';
+  }
+
+  if (portsToShow.length === 1) {
+    const port = portsToShow[0];
+    const service = getServiceName(port);
+    return service ? `${service.toLowerCase()}` : `${port}`;
+  }
+
+  if (portsToShow.length <= 2) {
+    return portsToShow.map(p => {
+      const service = getServiceName(p);
+      return service ? service.toLowerCase() : `${p}`;
+    }).join(', ');
+  }
+
+  return `${portsToShow.length} ports`;
+}
 
 // Quadtree for efficient spatial queries
 interface QuadtreeNode {
@@ -141,6 +165,8 @@ export default function CanvasTopologyRenderer({
   const isDraggingRef = useRef(false);
   const dragNodeRef = useRef<RenderNode | null>(null);
   const hoveredNodeRef = useRef<RenderNode | null>(null);
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const mouseDownTimeRef = useRef<number>(0);
 
   // Determine if we should use performance optimizations
   const usePerformanceOptimizations = useMemo(() => {
@@ -216,20 +242,34 @@ export default function CanvasTopologyRenderer({
       simulationRef.current.stop();
     }
 
+    // Calculate adaptive parameters based on graph size
+    const nodeCount = renderNodes.length;
+    const baseDistance = Math.max(100, Math.min(200, 800 / Math.sqrt(nodeCount)));
+    const baseStrength = Math.max(-800, Math.min(-200, -300 - nodeCount * 0.5));
+
     const simulation = d3.forceSimulation<RenderNode>(renderNodes)
       .force('link', d3.forceLink<RenderNode, RenderEdge>(renderEdges)
         .id((d: RenderNode) => d.id)
-        .distance(simulationConfig?.linkDistance ?? 150))
+        .distance(simulationConfig?.linkDistance ?? baseDistance)
+        .strength(0.5)) // Slightly weaker link force for better spreading
       .force('charge', d3.forceManyBody<RenderNode>()
-        .strength(simulationConfig?.chargeStrength ?? -400)
+        .strength(simulationConfig?.chargeStrength ?? baseStrength)
+        .distanceMax(500) // Limit charge distance for performance
         .theta(usePerformanceOptimizations ? 0.9 : 0.5)) // Barnes-Hut approximation
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide<RenderNode>()
-        .radius(simulationConfig?.collisionRadius ?? 40));
+        .radius(simulationConfig?.collisionRadius ?? 50)
+        .strength(0.8)) // Strong collision avoidance
+      .force('x', d3.forceX(width / 2).strength(0.02)) // Gentle centering
+      .force('y', d3.forceY(height / 2).strength(0.02));
 
     // Adjust alpha decay based on graph size
     if (usePerformanceOptimizations) {
-      simulation.alphaDecay(0.05); // Faster settling
+      simulation.alphaDecay(0.03); // Slightly slower for better layout
+      simulation.velocityDecay(0.3); // Less damping for better spreading
+    } else {
+      simulation.alphaDecay(0.02);
+      simulation.velocityDecay(0.4);
     }
 
     simulation.on('tick', () => {
@@ -332,7 +372,7 @@ export default function CanvasTopologyRenderer({
 
     // Determine LOD levels
     const showLabels = transform.k >= LOD.showLabels;
-    // const showEdgeLabels = transform.k >= LOD.showEdgeLabels; // TODO: implement edge labels
+    const showEdgeLabels = transform.k >= LOD.showEdgeLabels;
     const showIcons = transform.k >= LOD.showIcons;
     const simplifyEdges = transform.k < LOD.simplifyEdges;
     const showArrows = transform.k >= LOD.showArrows;
@@ -419,6 +459,45 @@ export default function CanvasTopologyRenderer({
           ctx.closePath();
           ctx.fill();
           ctx.restore();
+        });
+      }
+
+      // Draw edge labels if zoomed in enough
+      if (showEdgeLabels && !simplifyEdges) {
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        colorEdges.forEach(edge => {
+          const label = getEdgeLabel(edge.targetPorts, edge.targetPort);
+          if (!label) return;
+
+          // Calculate midpoint of edge
+          const mx = (edge.source.x + edge.target.x) / 2;
+          const my = (edge.source.y + edge.target.y) / 2;
+
+          // Calculate angle for text orientation
+          const dx = edge.target.x - edge.source.x;
+          const dy = edge.target.y - edge.source.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len < 80) return; // Skip labels for very short edges
+
+          // Offset label perpendicular to edge direction
+          const offsetDist = 12;
+          const perpX = -dy / len * offsetDist;
+          const perpY = dx / len * offsetDist;
+
+          const labelX = mx + perpX;
+          const labelY = my + perpY;
+
+          // Draw background for readability
+          const textWidth = ctx.measureText(label).width;
+          ctx.fillStyle = 'rgba(30, 41, 59, 0.85)';
+          ctx.fillRect(labelX - textWidth / 2 - 3, labelY - 7, textWidth + 6, 14);
+
+          // Draw label text
+          ctx.fillStyle = COLORS.textSecondary;
+          ctx.fillText(label, labelX, labelY);
         });
       }
     });
@@ -576,6 +655,8 @@ export default function CanvasTopologyRenderer({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const CLICK_THRESHOLD = 5; // Max pixels moved to count as click
+    const DOUBLE_CLICK_TIME = 300; // ms
     let lastClickTime = 0;
 
     const handleMouseMove = (event: MouseEvent) => {
@@ -583,17 +664,30 @@ export default function CanvasTopologyRenderer({
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
 
-      if (isDraggingRef.current && dragNodeRef.current) {
-        const transform = transformRef.current;
-        dragNodeRef.current.fx = (x - transform.x) / transform.k;
-        dragNodeRef.current.fy = (y - transform.y) / transform.k;
-        dragNodeRef.current.x = dragNodeRef.current.fx;
-        dragNodeRef.current.y = dragNodeRef.current.fy;
-        simulationRef.current?.alpha(0.3).restart();
-        requestRender();
+      // Check if we're dragging a node
+      if (mouseDownPosRef.current && dragNodeRef.current) {
+        const dx = x - mouseDownPosRef.current.x;
+        const dy = y - mouseDownPosRef.current.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Start actual dragging if moved past threshold
+        if (dist > CLICK_THRESHOLD) {
+          isDraggingRef.current = true;
+        }
+
+        if (isDraggingRef.current) {
+          const transform = transformRef.current;
+          dragNodeRef.current.fx = (x - transform.x) / transform.k;
+          dragNodeRef.current.fy = (y - transform.y) / transform.k;
+          dragNodeRef.current.x = dragNodeRef.current.fx;
+          dragNodeRef.current.y = dragNodeRef.current.fy;
+          simulationRef.current?.alpha(0.3).restart();
+          requestRender();
+        }
         return;
       }
 
+      // Hover detection
       const node = findNodeAt(x, y);
       if (node !== hoveredNodeRef.current) {
         hoveredNodeRef.current = node;
@@ -607,14 +701,17 @@ export default function CanvasTopologyRenderer({
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
 
+      // Store mouse down position and time
+      mouseDownPosRef.current = { x, y };
+      mouseDownTimeRef.current = Date.now();
+      isDraggingRef.current = false;
+
       const node = findNodeAt(x, y);
       if (node) {
-        isDraggingRef.current = true;
         dragNodeRef.current = node;
         const transform = transformRef.current;
         node.fx = (x - transform.x) / transform.k;
         node.fy = (y - transform.y) / transform.k;
-        simulationRef.current?.alphaTarget(0.3).restart();
       }
     };
 
@@ -623,42 +720,64 @@ export default function CanvasTopologyRenderer({
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
 
-      const wasClick = !isDraggingRef.current ||
-        (dragNodeRef.current && Math.abs(dragNodeRef.current.x - dragNodeRef.current.fx!) < 5);
+      const clickedNode = dragNodeRef.current;
+      const wasActualDrag = isDraggingRef.current;
 
+      // Release any fixed node
       if (dragNodeRef.current) {
         dragNodeRef.current.fx = null;
         dragNodeRef.current.fy = null;
         simulationRef.current?.alphaTarget(0);
       }
 
+      // Reset state
+      const mouseDownPos = mouseDownPosRef.current;
+      mouseDownPosRef.current = null;
       isDraggingRef.current = false;
       dragNodeRef.current = null;
 
-      if (wasClick) {
-        const now = Date.now();
-        const isDoubleClick = now - lastClickTime < 300;
-        lastClickTime = now;
+      // Determine if this was a click (not a drag)
+      if (mouseDownPos && !wasActualDrag) {
+        const dx = x - mouseDownPos.x;
+        const dy = y - mouseDownPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-        const node = findNodeAt(x, y);
-        if (node) {
-          if (isDoubleClick && onNodeDoubleClick) {
-            onNodeDoubleClick(node);
-          } else if (onNodeClick) {
-            onNodeClick(node);
+        if (dist <= CLICK_THRESHOLD) {
+          const now = Date.now();
+          const isDoubleClick = now - lastClickTime < DOUBLE_CLICK_TIME;
+          lastClickTime = now;
+
+          // Use the node we originally clicked on
+          if (clickedNode) {
+            if (isDoubleClick && onNodeDoubleClick) {
+              onNodeDoubleClick(clickedNode);
+            } else if (onNodeClick) {
+              onNodeClick(clickedNode);
+            }
+          } else {
+            // Clicked on background
+            const nodeAtRelease = findNodeAt(x, y);
+            if (nodeAtRelease) {
+              if (isDoubleClick && onNodeDoubleClick) {
+                onNodeDoubleClick(nodeAtRelease);
+              } else if (onNodeClick) {
+                onNodeClick(nodeAtRelease);
+              }
+            } else if (onBackgroundClick) {
+              onBackgroundClick();
+            }
           }
-        } else if (onBackgroundClick) {
-          onBackgroundClick();
         }
       }
     };
 
     const handleMouseLeave = () => {
-      if (isDraggingRef.current && dragNodeRef.current) {
+      if (dragNodeRef.current) {
         dragNodeRef.current.fx = null;
         dragNodeRef.current.fy = null;
         simulationRef.current?.alphaTarget(0);
       }
+      mouseDownPosRef.current = null;
       isDraggingRef.current = false;
       dragNodeRef.current = null;
       hoveredNodeRef.current = null;
