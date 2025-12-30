@@ -16,6 +16,56 @@ import * as d3 from 'd3';
 import type { TopologyNode, TopologyEdge } from '../../types';
 import { getServiceName } from '../../utils/network';
 
+// Calculate distance from point to line segment
+function pointToLineDistance(
+  px: number, py: number,
+  x1: number, y1: number,
+  x2: number, y2: number
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    // Line segment is a point
+    return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+  }
+
+  // Project point onto line, clamped to segment
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared));
+  const projX = x1 + t * dx;
+  const projY = y1 + t * dy;
+
+  return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+}
+
+// Calculate distance from point to quadratic bezier curve (sampled)
+function pointToCurveDistance(
+  px: number, py: number,
+  x1: number, y1: number,
+  cx: number, cy: number,
+  x2: number, y2: number,
+  samples: number = 10
+): number {
+  let minDist = Infinity;
+
+  for (let i = 0; i < samples; i++) {
+    const t1 = i / samples;
+    const t2 = (i + 1) / samples;
+
+    // Quadratic bezier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+    const bx1 = (1 - t1) ** 2 * x1 + 2 * (1 - t1) * t1 * cx + t1 ** 2 * x2;
+    const by1 = (1 - t1) ** 2 * y1 + 2 * (1 - t1) * t1 * cy + t1 ** 2 * y2;
+    const bx2 = (1 - t2) ** 2 * x1 + 2 * (1 - t2) * t2 * cx + t2 ** 2 * x2;
+    const by2 = (1 - t2) ** 2 * y1 + 2 * (1 - t2) * t2 * cy + t2 ** 2 * y2;
+
+    const dist = pointToLineDistance(px, py, bx1, by1, bx2, by2);
+    minDist = Math.min(minDist, dist);
+  }
+
+  return minDist;
+}
+
 // Get edge label text showing port/service info
 function getEdgeLabel(ports: number[] | undefined, targetPort: number): string {
   const portsToShow = ports && ports.length > 0 ? ports : [targetPort];
@@ -147,13 +197,12 @@ export default function CanvasTopologyRenderer({
   onNodeClick,
   onNodeDoubleClick,
   onBackgroundClick,
-  onEdgeHover: _onEdgeHover,
+  onEdgeHover,
   simulationConfig,
   performanceMode = 'auto',
 }: CanvasTopologyRendererProps) {
   // Mark unused params as intentionally unused
   void _groupingMode; // Will be used for group hulls in future
-  void _onEdgeHover; // Will be used for edge tooltips in future
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef<Transform>({ x: 0, y: 0, k: 1 });
@@ -165,6 +214,7 @@ export default function CanvasTopologyRenderer({
   const isDraggingRef = useRef(false);
   const dragNodeRef = useRef<RenderNode | null>(null);
   const hoveredNodeRef = useRef<RenderNode | null>(null);
+  const hoveredEdgeRef = useRef<RenderEdge | null>(null);
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const mouseDownTimeRef = useRef<number>(0);
 
@@ -349,6 +399,39 @@ export default function CanvasTopologyRenderer({
     return closest;
   }, []);
 
+  // Find edge at screen coordinates
+  const findEdgeAt = useCallback((screenX: number, screenY: number, threshold: number = 8): RenderEdge | null => {
+    const transform = transformRef.current;
+    const x = (screenX - transform.x) / transform.k;
+    const y = (screenY - transform.y) / transform.k;
+    const edges = edgesRef.current;
+
+    // Adjust threshold for zoom level
+    const adjustedThreshold = threshold / transform.k;
+
+    let closestEdge: RenderEdge | null = null;
+    let closestDist = adjustedThreshold;
+
+    for (const edge of edges) {
+      const sx = edge.source.x;
+      const sy = edge.source.y;
+      const tx = edge.target.x;
+      const ty = edge.target.y;
+
+      // Use curve distance for better accuracy
+      const mx = (sx + tx) / 2;
+      const my = (sy + ty) / 2;
+      const dist = pointToCurveDistance(x, y, sx, sy, mx, my, tx, ty);
+
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestEdge = edge;
+      }
+    }
+
+    return closestEdge;
+  }, []);
+
   // Render function
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -501,6 +584,22 @@ export default function CanvasTopologyRenderer({
         });
       }
     });
+
+    // Draw hovered edge highlight
+    const hoveredEdge = hoveredEdgeRef.current;
+    if (hoveredEdge) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#3b82f6'; // Blue highlight
+      ctx.lineWidth = 4 / transform.k;
+
+      ctx.beginPath();
+      const mx = (hoveredEdge.source.x + hoveredEdge.target.x) / 2;
+      const my = (hoveredEdge.source.y + hoveredEdge.target.y) / 2;
+      ctx.moveTo(hoveredEdge.source.x, hoveredEdge.source.y);
+      ctx.quadraticCurveTo(mx, my, hoveredEdge.target.x, hoveredEdge.target.y);
+      ctx.stroke();
+      ctx.lineWidth = 2 / transform.k;
+    }
 
     // Reset alpha for highlighted edges
     if (highlightedPaths) {
@@ -687,11 +786,47 @@ export default function CanvasTopologyRenderer({
         return;
       }
 
-      // Hover detection
+      // Hover detection - nodes take priority over edges
       const node = findNodeAt(x, y);
+      let needsRender = false;
+
       if (node !== hoveredNodeRef.current) {
         hoveredNodeRef.current = node;
-        canvas.style.cursor = node ? 'pointer' : 'default';
+        needsRender = true;
+      }
+
+      // Edge hover detection (only if not hovering a node)
+      if (!node) {
+        const edge = findEdgeAt(x, y);
+        if (edge !== hoveredEdgeRef.current) {
+          hoveredEdgeRef.current = edge;
+          needsRender = true;
+
+          // Call edge hover callback with edge data
+          if (onEdgeHover) {
+            if (edge) {
+              onEdgeHover(edge, { x: event.clientX, y: event.clientY });
+            } else {
+              onEdgeHover(null, { x: 0, y: 0 });
+            }
+          }
+        } else if (edge && onEdgeHover) {
+          // Update position while still hovering same edge
+          onEdgeHover(edge, { x: event.clientX, y: event.clientY });
+        }
+      } else if (hoveredEdgeRef.current) {
+        // Clear edge hover when hovering a node
+        hoveredEdgeRef.current = null;
+        if (onEdgeHover) {
+          onEdgeHover(null, { x: 0, y: 0 });
+        }
+        needsRender = true;
+      }
+
+      // Update cursor
+      canvas.style.cursor = node ? 'pointer' : (hoveredEdgeRef.current ? 'pointer' : 'default');
+
+      if (needsRender) {
         requestRender();
       }
     };
@@ -781,6 +916,15 @@ export default function CanvasTopologyRenderer({
       isDraggingRef.current = false;
       dragNodeRef.current = null;
       hoveredNodeRef.current = null;
+
+      // Clear edge hover
+      if (hoveredEdgeRef.current) {
+        hoveredEdgeRef.current = null;
+        if (onEdgeHover) {
+          onEdgeHover(null, { x: 0, y: 0 });
+        }
+      }
+
       requestRender();
     };
 
@@ -795,7 +939,7 @@ export default function CanvasTopologyRenderer({
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
     };
-  }, [findNodeAt, onNodeClick, onNodeDoubleClick, onBackgroundClick, requestRender]);
+  }, [findNodeAt, findEdgeAt, onNodeClick, onNodeDoubleClick, onBackgroundClick, onEdgeHover, requestRender]);
 
   return (
     <canvas
