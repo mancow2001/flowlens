@@ -218,6 +218,10 @@ export default function CanvasTopologyRenderer({
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const mouseDownTimeRef = useRef<number>(0);
 
+  // Refs for callbacks to avoid stale closures in simulation tick handler
+  const renderFnRef = useRef<() => void>(() => {});
+  const updateQuadtreeFnRef = useRef<() => void>(() => {});
+
   // Determine if we should use performance optimizations
   const usePerformanceOptimizations = useMemo(() => {
     if (performanceMode === 'quality') return false;
@@ -323,8 +327,9 @@ export default function CanvasTopologyRenderer({
     }
 
     simulation.on('tick', () => {
-      updateQuadtree();
-      requestRender();
+      // Use refs to always call the latest versions of these callbacks
+      updateQuadtreeFnRef.current();
+      renderFnRef.current();
     });
 
     simulationRef.current = simulation;
@@ -714,6 +719,12 @@ export default function CanvasTopologyRenderer({
       rafRef.current = requestAnimationFrame(render);
     }
   }, [render]);
+
+  // Keep refs updated with latest callbacks (for simulation tick handler)
+  useEffect(() => {
+    renderFnRef.current = requestRender;
+    updateQuadtreeFnRef.current = updateQuadtree;
+  }, [requestRender, updateQuadtree]);
 
   // Initial render and cleanup
   useEffect(() => {
