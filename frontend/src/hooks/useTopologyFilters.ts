@@ -8,6 +8,9 @@ export interface TopologyFilters {
   includeExternal: boolean;
   minBytes24h: number;
   asOf: string | null;
+  focusedEndpoint: string | null;  // Asset ID to focus on
+  focusedEndpointName: string | null;  // Display name for the focused endpoint
+  hopLevel: number;  // Number of hops for outbound connections (1-5)
 }
 
 const DEFAULT_FILTERS: TopologyFilters = {
@@ -17,6 +20,9 @@ const DEFAULT_FILTERS: TopologyFilters = {
   includeExternal: true,
   minBytes24h: 0,
   asOf: null,
+  focusedEndpoint: null,
+  focusedEndpointName: null,
+  hopLevel: 1,
 };
 
 const STORAGE_KEY = 'flowlens-topology-filters';
@@ -31,8 +37,11 @@ export function useTopologyFilters() {
     const externalParam = searchParams.get('includeExternal');
     const bytesParam = searchParams.get('minBytes24h');
     const asOfParam = searchParams.get('asOf');
+    const focusedEndpointParam = searchParams.get('focusedEndpoint');
+    const focusedEndpointNameParam = searchParams.get('focusedEndpointName');
+    const hopLevelParam = searchParams.get('hopLevel');
 
-    if (envParam || dcParam || typesParam || externalParam || bytesParam || asOfParam) {
+    if (envParam || dcParam || typesParam || externalParam || bytesParam || asOfParam || focusedEndpointParam) {
       return {
         environments: envParam ? envParam.split(',').filter(Boolean) : [],
         datacenters: dcParam ? dcParam.split(',').filter(Boolean) : [],
@@ -40,6 +49,9 @@ export function useTopologyFilters() {
         includeExternal: externalParam !== 'false',
         minBytes24h: bytesParam ? parseInt(bytesParam, 10) : 0,
         asOf: asOfParam || null,
+        focusedEndpoint: focusedEndpointParam || null,
+        focusedEndpointName: focusedEndpointNameParam || null,
+        hopLevel: hopLevelParam ? parseInt(hopLevelParam, 10) : 1,
       };
     }
 
@@ -70,6 +82,9 @@ export function useTopologyFilters() {
       params.delete('includeExternal');
       params.delete('minBytes24h');
       params.delete('asOf');
+      params.delete('focusedEndpoint');
+      params.delete('focusedEndpointName');
+      params.delete('hopLevel');
 
       if (filters.environments.length > 0) {
         params.set('environments', filters.environments.join(','));
@@ -88,6 +103,15 @@ export function useTopologyFilters() {
       }
       if (filters.asOf) {
         params.set('asOf', filters.asOf);
+      }
+      if (filters.focusedEndpoint) {
+        params.set('focusedEndpoint', filters.focusedEndpoint);
+      }
+      if (filters.focusedEndpointName) {
+        params.set('focusedEndpointName', filters.focusedEndpointName);
+      }
+      if (filters.focusedEndpoint && filters.hopLevel !== 1) {
+        params.set('hopLevel', filters.hopLevel.toString());
       }
 
       return params;
@@ -116,7 +140,8 @@ export function useTopologyFilters() {
       filters.assetTypes.length > 0 ||
       !filters.includeExternal ||
       filters.minBytes24h > 0 ||
-      filters.asOf !== null
+      filters.asOf !== null ||
+      filters.focusedEndpoint !== null
     );
   }, [filters]);
 
