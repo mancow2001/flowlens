@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Card from '../common/Card';
 import Button from '../common/Button';
-import { classificationApi, assetApi } from '../../services/api';
+import { classificationApi, assetApi, topologyApi } from '../../services/api';
 import type { TopologyFilters } from '../../hooks/useTopologyFilters';
 import type { Asset } from '../../types';
 
@@ -79,6 +79,16 @@ export default function FilterPanel({
     queryFn: () => classificationApi.listDatacenters(),
     staleTime: 5 * 60 * 1000,
   });
+
+  // Fetch topology config to check if external flows are discarded
+  const { data: topologyConfig } = useQuery({
+    queryKey: ['topology-config'],
+    queryFn: () => topologyApi.getConfig(),
+    staleTime: 5 * 60 * 1000, // 5 minutes - this rarely changes
+  });
+
+  // When external flows are discarded, external assets don't exist in the system
+  const externalFlowsDiscarded = topologyConfig?.discard_external_flows ?? false;
 
   const handleApply = () => {
     onFiltersChange(localFilters);
@@ -360,21 +370,23 @@ export default function FilterPanel({
             </div>
           </div>
 
-          {/* Include External */}
-          <div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={localFilters.includeExternal}
-                onChange={(e) => setLocalFilters(prev => ({
-                  ...prev,
-                  includeExternal: e.target.checked,
-                }))}
-                className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
-              />
-              <span className="text-sm text-slate-300">Include External Assets</span>
-            </label>
-          </div>
+          {/* Include External - hidden when external flows are discarded */}
+          {!externalFlowsDiscarded && (
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localFilters.includeExternal}
+                  onChange={(e) => setLocalFilters(prev => ({
+                    ...prev,
+                    includeExternal: e.target.checked,
+                  }))}
+                  className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
+                />
+                <span className="text-sm text-slate-300">Include External Assets</span>
+              </label>
+            </div>
+          )}
 
           {/* Min Bytes 24h */}
           <div>
@@ -469,7 +481,7 @@ export default function FilterPanel({
                     </button>
                   </span>
                 ))}
-                {!localFilters.includeExternal && (
+                {!localFilters.includeExternal && !externalFlowsDiscarded && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-300 text-xs rounded">
                     Internal Only
                   </span>

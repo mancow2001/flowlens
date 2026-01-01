@@ -698,9 +698,17 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
                 min_value=5,
             ),
             FieldMetadata(
+                name="discard_external_flows",
+                label="Discard External Flows",
+                description="Discard all flows involving external (non-RFC1918/non-private IPv6) IPs. External flows will not be mapped as dependencies. When enabled, the options below are hidden.",
+                field_type=FieldType.BOOLEAN,
+                env_var="RESOLUTION_DISCARD_EXTERNAL_FLOWS",
+                default=False,
+            ),
+            FieldMetadata(
                 name="exclude_external_ips",
                 label="Exclude External IPs",
-                description="Exclude non-private IPs from dependencies",
+                description="Exclude non-private IPs from dependencies (only applies when 'Discard External Flows' is disabled)",
                 field_type=FieldType.BOOLEAN,
                 env_var="RESOLUTION_EXCLUDE_EXTERNAL_IPS",
                 default=False,
@@ -708,7 +716,7 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
             FieldMetadata(
                 name="exclude_external_sources",
                 label="Exclude External Sources",
-                description="Exclude dependencies with external sources",
+                description="Exclude dependencies with external sources (only applies when 'Discard External Flows' is disabled)",
                 field_type=FieldType.BOOLEAN,
                 env_var="RESOLUTION_EXCLUDE_EXTERNAL_SOURCES",
                 default=False,
@@ -716,7 +724,7 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
             FieldMetadata(
                 name="exclude_external_targets",
                 label="Exclude External Targets",
-                description="Exclude dependencies with external targets",
+                description="Exclude dependencies with external targets (only applies when 'Discard External Flows' is disabled)",
                 field_type=FieldType.BOOLEAN,
                 env_var="RESOLUTION_EXCLUDE_EXTERNAL_TARGETS",
                 default=False,
