@@ -115,8 +115,8 @@ export default function Applications() {
   });
 
   const addMemberMutation = useMutation({
-    mutationFn: ({ appId, assetId, isEntryPoint }: { appId: string; assetId: string; isEntryPoint: boolean }) =>
-      applicationsApi.addMember(appId, { asset_id: assetId, is_entry_point: isEntryPoint }),
+    mutationFn: ({ appId, assetId }: { appId: string; assetId: string }) =>
+      applicationsApi.addMember(appId, { asset_id: assetId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['application', selectedApp?.id] });
       setShowAddMemberModal(false);
@@ -697,7 +697,6 @@ export default function Applications() {
                           addMemberMutation.mutate({
                             appId: selectedApp.id,
                             assetId: asset.id,
-                            isEntryPoint: false,
                           });
                         }
                       }}
