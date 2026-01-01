@@ -9,6 +9,7 @@ import {
   ClassificationRule,
   ClassificationRuleSummary,
   ClassificationRuleImportPreview,
+  downloadWithAuth,
 } from '../services/api';
 import { ENVIRONMENT_OPTIONS } from '../types';
 
@@ -175,8 +176,8 @@ export default function ClassificationRules() {
     }
   };
 
-  const handleExport = (format: 'csv' | 'json') => {
-    window.open(classificationApi.exportUrl(format), '_blank');
+  const handleExport = async (format: 'csv' | 'json') => {
+    await downloadWithAuth(classificationApi.exportUrl(format), `classification-rules.${format}`);
   };
 
   const closeImportModal = () => {

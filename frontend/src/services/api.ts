@@ -1495,4 +1495,32 @@ export const samlProviderApi = {
   },
 };
 
+// Helper function to download files with authentication
+export const downloadWithAuth = async (url: string, filename: string): Promise<void> => {
+  const response = await api.get(url, {
+    responseType: 'blob',
+  });
+
+  // Get filename from Content-Disposition header if available
+  const contentDisposition = response.headers['content-disposition'];
+  let downloadFilename = filename;
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename="?(.+?)"?(?:;|$)/);
+    if (filenameMatch) {
+      downloadFilename = filenameMatch[1];
+    }
+  }
+
+  // Create blob URL and trigger download
+  const blob = new Blob([response.data]);
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = downloadFilename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(downloadUrl);
+};
+
 export default api;
