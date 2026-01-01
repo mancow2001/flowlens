@@ -703,7 +703,7 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
                 description="Discard all flows involving external (non-RFC1918/non-private IPv6) IPs. External flows will not be mapped as dependencies. When enabled, the options below are hidden.",
                 field_type=FieldType.BOOLEAN,
                 env_var="RESOLUTION_DISCARD_EXTERNAL_FLOWS",
-                default=False,
+                default=True,
             ),
             FieldMetadata(
                 name="exclude_external_ips",

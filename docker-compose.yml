@@ -13,6 +13,11 @@ x-logging-env: &logging-env
   LOG_LEVEL: DEBUG
   LOG_FORMAT: json
 
+x-resolution-env: &resolution-env
+  # Discard all flows involving external (non-RFC1918/non-private IPv6) IPs
+  # When true, external flows are never mapped as dependencies
+  RESOLUTION_DISCARD_EXTERNAL_FLOWS: "true"
+
 x-classification-env: &classification-env
   CLASSIFICATION_WORKER_COUNT: "1"
   CLASSIFICATION_POLL_INTERVAL_MS: "30000"
@@ -94,6 +99,7 @@ services:
       ENVIRONMENT: development
       DEBUG: "true"
       <<: *db-env
+      <<: *resolution-env
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       API_WORKERS: "2"
@@ -177,6 +183,7 @@ services:
     environment:
       ENVIRONMENT: development
       <<: *db-logging-env
+      <<: *resolution-env
       RESOLUTION_WORKER_COUNT: "1"
       RESOLUTION_WINDOW_SIZE_MINUTES: "5"
     depends_on:

@@ -164,7 +164,7 @@ class ResolutionSettings(BaseSettings):
 
     # External IP filtering - master switch
     discard_external_flows: bool = Field(
-        default=False,
+        default=True,
         description="Discard all flows involving external (non-RFC1918) IPs before dependency mapping. When enabled, external flows are never stored or processed."
     )
 
