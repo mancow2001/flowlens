@@ -228,8 +228,18 @@ export const dependencyApi = {
   },
 };
 
+// Topology config response type
+export interface TopologyConfig {
+  discard_external_flows: boolean;
+}
+
 // Topology endpoints
 export const topologyApi = {
+  getConfig: async (): Promise<TopologyConfig> => {
+    const { data } = await api.get('/topology/config');
+    return data;
+  },
+
   getGraph: async (params?: {
     asset_id?: string;
     depth?: number;

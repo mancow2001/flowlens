@@ -15,6 +15,7 @@ from flowlens.models.dependency import Dependency
 from flowlens.schemas.topology import (
     PathResult,
     SubgraphRequest,
+    TopologyConfig,
     TopologyEdge,
     TopologyFilter,
     TopologyGraph,
@@ -26,6 +27,23 @@ from flowlens.schemas.topology import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/topology", tags=["topology"])
+
+
+@router.get("/config", response_model=TopologyConfig)
+async def get_topology_config(
+    _user: ViewerUser,
+) -> TopologyConfig:
+    """Get topology configuration settings.
+
+    Returns configuration that affects how the topology should be displayed,
+    including whether external flows are discarded. This helps the frontend
+    know which UI elements to show or hide.
+    """
+    settings = get_settings()
+
+    return TopologyConfig(
+        discard_external_flows=settings.resolution.discard_external_flows,
+    )
 
 
 async def get_cidr_classifications(db: DbSession, ip_addresses: list[str]) -> dict[str, dict]:

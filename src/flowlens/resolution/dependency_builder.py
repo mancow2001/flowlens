@@ -63,16 +63,22 @@ class DependencyBuilder:
         Returns:
             True if the flow should be excluded.
         """
-        # If no exclusion settings are enabled, allow all
+        src_is_external = not self._ip_classifier.is_private(src_ip)
+        dst_is_external = not self._ip_classifier.is_private(dst_ip)
+
+        # Master switch: discard ALL external flows (any flow with external IP)
+        if self._settings.discard_external_flows:
+            if src_is_external or dst_is_external:
+                return True
+            return False
+
+        # If no granular exclusion settings are enabled, allow all
         if not (
             self._settings.exclude_external_ips
             or self._settings.exclude_external_sources
             or self._settings.exclude_external_targets
         ):
             return False
-
-        src_is_external = not self._ip_classifier.is_private(src_ip)
-        dst_is_external = not self._ip_classifier.is_private(dst_ip)
 
         # Exclude if either end is external and exclude_external_ips is set
         if self._settings.exclude_external_ips and (src_is_external or dst_is_external):

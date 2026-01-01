@@ -162,7 +162,13 @@ class ResolutionSettings(BaseSettings):
     stale_threshold_hours: int = Field(default=24, ge=1)
     new_dependency_lookback_minutes: int = Field(default=30, ge=5)
 
-    # External IP filtering
+    # External IP filtering - master switch
+    discard_external_flows: bool = Field(
+        default=False,
+        description="Discard all flows involving external (non-RFC1918) IPs before dependency mapping. When enabled, external flows are never stored or processed."
+    )
+
+    # Granular external IP filtering (only applies when discard_external_flows is False)
     exclude_external_ips: bool = Field(
         default=False,
         description="Exclude external (non-private) IPs from dependency mapping"

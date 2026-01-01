@@ -113,3 +113,14 @@ class SubgraphRequest(BaseModel):
     direction: str = Field("both", pattern=r"^(upstream|downstream|both)$")
     include_external: bool = True
     as_of: datetime | None = None
+
+
+class TopologyConfig(BaseModel):
+    """Configuration settings that affect topology display and filtering.
+
+    This is exposed to the frontend to control which UI elements to show.
+    """
+
+    # When True, external flows are completely discarded at ingestion time,
+    # so the "Include External" toggle should be hidden in the UI
+    discard_external_flows: bool = False
