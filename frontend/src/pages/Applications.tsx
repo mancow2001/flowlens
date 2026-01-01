@@ -18,7 +18,7 @@ import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
-import { applicationsApi, assetApi, ApplicationImportPreview } from '../services/api';
+import { applicationsApi, assetApi, ApplicationImportPreview, downloadWithAuth } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import { getProtocolName } from '../utils/network';
 import type {
@@ -253,8 +253,8 @@ export default function Applications() {
     }
   };
 
-  const handleExport = () => {
-    window.open(applicationsApi.exportUrl(), '_blank');
+  const handleExport = async () => {
+    await downloadWithAuth(applicationsApi.exportUrl(), 'applications.json');
   };
 
   const closeImportModal = () => {
