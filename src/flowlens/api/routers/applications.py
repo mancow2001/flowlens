@@ -1,17 +1,27 @@
 """Application API endpoints."""
 
+import json
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, Sorting, ViewerUser
+from flowlens.common.logging import get_logger
 from flowlens.models.asset import Application, ApplicationMember, Asset, EntryPoint
 from flowlens.schemas.asset import (
     ApplicationCreate,
+    ApplicationEntryPointExport,
+    ApplicationExportRow,
+    ApplicationImportPreview,
+    ApplicationImportResult,
+    ApplicationImportValidation,
     ApplicationList,
     ApplicationMemberCreate,
+    ApplicationMemberExport,
     ApplicationMemberResponse,
     ApplicationMemberUpdate,
     ApplicationResponse,
@@ -22,6 +32,8 @@ from flowlens.schemas.asset import (
     EntryPointResponse,
     EntryPointUpdate,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -134,6 +146,585 @@ async def list_applications(
         page=pagination.page,
         page_size=pagination.page_size,
         pages=(total + pagination.page_size - 1) // pagination.page_size if total > 0 else 0,
+    )
+
+
+# =============================================================================
+# Export/Import Endpoints (must be before /{application_id} routes)
+# =============================================================================
+
+
+@router.get("/export", response_class=StreamingResponse)
+async def export_applications(
+    db: DbSession,
+    _user: ViewerUser,
+    environment: str | None = None,
+    team: str | None = None,
+    criticality: str | None = None,
+) -> StreamingResponse:
+    """Export applications with their members to JSON format.
+
+    Exported data includes application details, members (identified by IP address),
+    and entry points. This data can be modified and re-imported.
+
+    Note: Only JSON format is supported due to the nested structure of applications.
+    """
+    # Build query with optional filters
+    query = (
+        select(Application)
+        .options(
+            selectinload(Application.members).selectinload(ApplicationMember.asset),
+            selectinload(Application.members).selectinload(ApplicationMember.entry_points),
+        )
+    )
+
+    if environment:
+        query = query.where(Application.environment == environment)
+    if team:
+        query = query.where(Application.team == team)
+    if criticality:
+        query = query.where(Application.criticality == criticality)
+
+    query = query.order_by(Application.name.asc())
+
+    result = await db.execute(query)
+    applications = result.scalars().all()
+
+    # Build export rows
+    rows = []
+    for app in applications:
+        members_export = []
+        for member in sorted(app.members, key=lambda m: m.asset.name):
+            entry_points_export = [
+                ApplicationEntryPointExport(
+                    port=ep.port,
+                    protocol=ep.protocol,
+                    order=ep.order,
+                    label=ep.label,
+                )
+                for ep in sorted(member.entry_points, key=lambda e: e.order)
+            ]
+            members_export.append(ApplicationMemberExport(
+                asset_ip_address=str(member.asset.ip_address),
+                role=member.role,
+                entry_points=entry_points_export,
+            ))
+
+        rows.append(ApplicationExportRow(
+            name=app.name,
+            display_name=app.display_name,
+            description=app.description,
+            owner=app.owner,
+            team=app.team,
+            environment=app.environment,
+            criticality=app.criticality,
+            tags=app.tags,
+            metadata=app.extra_data,
+            members=members_export,
+        ))
+
+    content = json.dumps([r.model_dump() for r in rows], indent=2)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=applications-export.json"},
+    )
+
+
+@router.post("/import/preview", response_model=ApplicationImportPreview)
+async def preview_application_import(
+    db: DbSession,
+    _user: AnalystUser,
+    file: UploadFile = File(...),
+) -> ApplicationImportPreview:
+    """Preview what an application import will do before committing.
+
+    Accepts JSON file. Matches applications by name and members by asset IP address.
+    Returns a preview of creates, updates, and any errors.
+    """
+    content = await file.read()
+    content_str = content.decode("utf-8")
+
+    # Parse JSON
+    try:
+        rows = json.loads(content_str)
+        if not isinstance(rows, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="JSON file must contain an array of application objects",
+            )
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON: {e}",
+        )
+
+    if not rows:
+        return ApplicationImportPreview(
+            total_rows=0,
+            to_create=0,
+            to_update=0,
+            to_skip=0,
+            errors=0,
+            validations=[],
+        )
+
+    # Get existing applications by name for comparison
+    names = [r.get("name", "") for r in rows if r.get("name")]
+    existing_query = (
+        select(Application)
+        .where(Application.name.in_(names))
+        .options(
+            selectinload(Application.members).selectinload(ApplicationMember.asset),
+            selectinload(Application.members).selectinload(ApplicationMember.entry_points),
+        )
+    )
+    existing_result = await db.execute(existing_query)
+    existing_apps = {a.name: a for a in existing_result.scalars().all()}
+
+    # Get all referenced asset IPs to validate they exist
+    all_ips = set()
+    for row in rows:
+        members = row.get("members", [])
+        for m in members:
+            if m.get("asset_ip_address"):
+                all_ips.add(m["asset_ip_address"])
+
+    # Fetch all assets by IP
+    if all_ips:
+        asset_query = select(Asset).where(
+            Asset.deleted_at.is_(None),
+            cast(Asset.ip_address, String).in_(list(all_ips)),
+        )
+        asset_result = await db.execute(asset_query)
+        ip_to_asset = {str(a.ip_address): a for a in asset_result.scalars().all()}
+    else:
+        ip_to_asset = {}
+
+    # Validate each row
+    validations = []
+    to_create = 0
+    to_update = 0
+    to_skip = 0
+    errors = 0
+
+    for idx, row in enumerate(rows, start=1):
+        name = row.get("name", "").strip() if row.get("name") else ""
+
+        if not name:
+            validations.append(ApplicationImportValidation(
+                row_number=idx,
+                name="",
+                status="error",
+                message="Missing name",
+            ))
+            errors += 1
+            continue
+
+        # Validate member IPs exist
+        members = row.get("members", [])
+        member_errors = []
+        for m in members:
+            ip = m.get("asset_ip_address", "")
+            if ip and ip not in ip_to_asset:
+                member_errors.append(f"Asset with IP {ip} not found")
+
+        if member_errors:
+            validations.append(ApplicationImportValidation(
+                row_number=idx,
+                name=name,
+                status="error",
+                message=f"Member errors: {'; '.join(member_errors)}",
+            ))
+            errors += 1
+            continue
+
+        existing = existing_apps.get(name)
+
+        if existing:
+            # Check for changes
+            changes = {}
+            for field in ["display_name", "description", "owner", "team", "environment", "criticality"]:
+                new_val = row.get(field, "").strip() if row.get(field) else None
+                old_val = getattr(existing, field)
+                if new_val and new_val != old_val:
+                    changes[field] = {"old": old_val, "new": new_val}
+
+            # Check for tag changes
+            if row.get("tags"):
+                if row["tags"] != existing.tags:
+                    changes["tags"] = {"old": existing.tags, "new": row["tags"]}
+
+            # Check for metadata changes
+            if row.get("metadata"):
+                if row["metadata"] != existing.extra_data:
+                    changes["metadata"] = {"old": existing.extra_data, "new": row["metadata"]}
+
+            # Check member changes
+            existing_member_ips = {str(m.asset.ip_address): m for m in existing.members}
+            import_member_ips = {m["asset_ip_address"]: m for m in members}
+
+            member_changes = []
+
+            # Members to add
+            for ip in import_member_ips:
+                if ip not in existing_member_ips:
+                    member_changes.append({
+                        "action": "add",
+                        "asset_ip": ip,
+                        "role": import_member_ips[ip].get("role"),
+                        "entry_points": len(import_member_ips[ip].get("entry_points", [])),
+                    })
+
+            # Members to remove
+            for ip in existing_member_ips:
+                if ip not in import_member_ips:
+                    member_changes.append({
+                        "action": "remove",
+                        "asset_ip": ip,
+                        "role": existing_member_ips[ip].role,
+                    })
+
+            # Members to update
+            for ip in import_member_ips:
+                if ip in existing_member_ips:
+                    existing_m = existing_member_ips[ip]
+                    import_m = import_member_ips[ip]
+
+                    role_changed = import_m.get("role") != existing_m.role
+                    existing_eps = {(ep.port, ep.protocol) for ep in existing_m.entry_points}
+                    import_eps = {(ep["port"], ep.get("protocol", 6)) for ep in import_m.get("entry_points", [])}
+                    eps_changed = existing_eps != import_eps
+
+                    if role_changed or eps_changed:
+                        member_changes.append({
+                            "action": "update",
+                            "asset_ip": ip,
+                            "role_changed": role_changed,
+                            "entry_points_changed": eps_changed,
+                        })
+
+            if changes or member_changes:
+                validations.append(ApplicationImportValidation(
+                    row_number=idx,
+                    name=name,
+                    status="update",
+                    message=f"Will update {len(changes)} field(s), {len(member_changes)} member change(s)",
+                    changes=changes if changes else None,
+                    member_changes=member_changes if member_changes else None,
+                ))
+                to_update += 1
+            else:
+                validations.append(ApplicationImportValidation(
+                    row_number=idx,
+                    name=name,
+                    status="skip",
+                    message="No changes detected",
+                ))
+                to_skip += 1
+        else:
+            # New application
+            validations.append(ApplicationImportValidation(
+                row_number=idx,
+                name=name,
+                status="create",
+                message=f"Will create new application with {len(members)} member(s)",
+            ))
+            to_create += 1
+
+    return ApplicationImportPreview(
+        total_rows=len(rows),
+        to_create=to_create,
+        to_update=to_update,
+        to_skip=to_skip,
+        errors=errors,
+        validations=validations,
+    )
+
+
+@router.post("/import", response_model=ApplicationImportResult)
+async def import_applications(
+    db: DbSession,
+    _user: AnalystUser,
+    file: UploadFile = File(...),
+    skip_errors: bool = Query(False, alias="skipErrors"),
+    sync_members: bool = Query(True, alias="syncMembers", description="Remove members not in import file"),
+) -> ApplicationImportResult:
+    """Import applications from JSON file.
+
+    Matches applications by name. Updates existing applications or creates new ones.
+    Members are matched by asset IP address.
+
+    Options:
+    - skipErrors: Continue processing if errors occur (default: false)
+    - syncMembers: Remove members not in import file (default: true)
+    """
+    content = await file.read()
+    content_str = content.decode("utf-8")
+
+    # Parse JSON
+    try:
+        rows = json.loads(content_str)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON: {e}",
+        )
+
+    if not rows:
+        return ApplicationImportResult(
+            created=0,
+            updated=0,
+            skipped=0,
+            errors=0,
+            members_added=0,
+            members_updated=0,
+            members_removed=0,
+        )
+
+    # Get existing applications
+    names = [r.get("name", "") for r in rows if r.get("name")]
+    existing_query = (
+        select(Application)
+        .where(Application.name.in_(names))
+        .options(
+            selectinload(Application.members).selectinload(ApplicationMember.asset),
+            selectinload(Application.members).selectinload(ApplicationMember.entry_points),
+        )
+    )
+    existing_result = await db.execute(existing_query)
+    existing_apps = {a.name: a for a in existing_result.scalars().all()}
+
+    # Get all referenced assets
+    all_ips = set()
+    for row in rows:
+        members = row.get("members", [])
+        for m in members:
+            if m.get("asset_ip_address"):
+                all_ips.add(m["asset_ip_address"])
+
+    if all_ips:
+        asset_query = select(Asset).where(
+            Asset.deleted_at.is_(None),
+            cast(Asset.ip_address, String).in_(list(all_ips)),
+        )
+        asset_result = await db.execute(asset_query)
+        ip_to_asset = {str(a.ip_address): a for a in asset_result.scalars().all()}
+    else:
+        ip_to_asset = {}
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors = 0
+    error_details = []
+    members_added = 0
+    members_updated = 0
+    members_removed = 0
+
+    for idx, row in enumerate(rows, start=1):
+        name = row.get("name", "").strip() if row.get("name") else ""
+
+        if not name:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: Missing name")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: Missing name",
+            )
+
+        # Validate member IPs exist
+        members = row.get("members", [])
+        member_errors = []
+        for m in members:
+            ip = m.get("asset_ip_address", "")
+            if ip and ip not in ip_to_asset:
+                member_errors.append(f"Asset with IP {ip} not found")
+
+        if member_errors:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: {'; '.join(member_errors)}")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: {'; '.join(member_errors)}",
+            )
+
+        existing = existing_apps.get(name)
+
+        if existing:
+            # Update existing application
+            has_changes = False
+            for field in ["display_name", "description", "owner", "team", "environment", "criticality"]:
+                new_val = row.get(field, "").strip() if row.get(field) else None
+                if new_val:
+                    if new_val != getattr(existing, field):
+                        setattr(existing, field, new_val)
+                        has_changes = True
+
+            if row.get("tags") and row["tags"] != existing.tags:
+                existing.tags = row["tags"]
+                has_changes = True
+
+            if row.get("metadata") and row["metadata"] != existing.extra_data:
+                existing.extra_data = row["metadata"]
+                has_changes = True
+
+            # Handle members
+            existing_member_ips = {str(m.asset.ip_address): m for m in existing.members}
+            import_member_ips = {m["asset_ip_address"]: m for m in members}
+
+            # Add new members
+            for ip, m_data in import_member_ips.items():
+                if ip not in existing_member_ips:
+                    asset = ip_to_asset[ip]
+                    new_member = ApplicationMember(
+                        application_id=existing.id,
+                        asset_id=asset.id,
+                        role=m_data.get("role"),
+                    )
+                    db.add(new_member)
+                    await db.flush()
+
+                    # Add entry points
+                    for ep_data in m_data.get("entry_points", []):
+                        entry_point = EntryPoint(
+                            member_id=new_member.id,
+                            port=ep_data["port"],
+                            protocol=ep_data.get("protocol", 6),
+                            order=ep_data.get("order", 0),
+                            label=ep_data.get("label"),
+                        )
+                        db.add(entry_point)
+
+                    members_added += 1
+                    has_changes = True
+
+            # Update existing members
+            for ip, m_data in import_member_ips.items():
+                if ip in existing_member_ips:
+                    existing_m = existing_member_ips[ip]
+                    member_changed = False
+
+                    # Update role
+                    if m_data.get("role") != existing_m.role:
+                        existing_m.role = m_data.get("role")
+                        member_changed = True
+
+                    # Sync entry points
+                    import_eps = {(ep["port"], ep.get("protocol", 6)): ep for ep in m_data.get("entry_points", [])}
+                    existing_eps = {(ep.port, ep.protocol): ep for ep in existing_m.entry_points}
+
+                    # Add new entry points
+                    for key, ep_data in import_eps.items():
+                        if key not in existing_eps:
+                            entry_point = EntryPoint(
+                                member_id=existing_m.id,
+                                port=ep_data["port"],
+                                protocol=ep_data.get("protocol", 6),
+                                order=ep_data.get("order", 0),
+                                label=ep_data.get("label"),
+                            )
+                            db.add(entry_point)
+                            member_changed = True
+
+                    # Update or remove existing entry points
+                    for key, ep in existing_eps.items():
+                        if key in import_eps:
+                            ep_data = import_eps[key]
+                            if ep.order != ep_data.get("order", 0) or ep.label != ep_data.get("label"):
+                                ep.order = ep_data.get("order", 0)
+                                ep.label = ep_data.get("label")
+                                member_changed = True
+                        else:
+                            # Remove entry point not in import
+                            await db.delete(ep)
+                            member_changed = True
+
+                    if member_changed:
+                        members_updated += 1
+                        has_changes = True
+
+            # Remove members not in import
+            if sync_members:
+                for ip, existing_m in existing_member_ips.items():
+                    if ip not in import_member_ips:
+                        await db.delete(existing_m)
+                        members_removed += 1
+                        has_changes = True
+
+            if has_changes:
+                updated += 1
+            else:
+                skipped += 1
+        else:
+            # Create new application
+            new_app = Application(
+                name=name,
+                display_name=row.get("display_name", "").strip() if row.get("display_name") else None,
+                description=row.get("description", "").strip() if row.get("description") else None,
+                owner=row.get("owner", "").strip() if row.get("owner") else None,
+                team=row.get("team", "").strip() if row.get("team") else None,
+                environment=row.get("environment", "").strip() if row.get("environment") else None,
+                criticality=row.get("criticality", "").strip() if row.get("criticality") else None,
+                tags=row.get("tags"),
+                extra_data=row.get("metadata"),
+            )
+            db.add(new_app)
+            await db.flush()
+
+            # Add members
+            for m_data in members:
+                ip = m_data["asset_ip_address"]
+                asset = ip_to_asset[ip]
+                new_member = ApplicationMember(
+                    application_id=new_app.id,
+                    asset_id=asset.id,
+                    role=m_data.get("role"),
+                )
+                db.add(new_member)
+                await db.flush()
+
+                # Add entry points
+                for ep_data in m_data.get("entry_points", []):
+                    entry_point = EntryPoint(
+                        member_id=new_member.id,
+                        port=ep_data["port"],
+                        protocol=ep_data.get("protocol", 6),
+                        order=ep_data.get("order", 0),
+                        label=ep_data.get("label"),
+                    )
+                    db.add(entry_point)
+
+                members_added += 1
+
+            created += 1
+
+    await db.flush()
+
+    logger.info(
+        "Application import completed",
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+        members_added=members_added,
+        members_updated=members_updated,
+        members_removed=members_removed,
+    )
+
+    return ApplicationImportResult(
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+        members_added=members_added,
+        members_updated=members_updated,
+        members_removed=members_removed,
+        error_details=error_details if error_details else None,
     )
 
 

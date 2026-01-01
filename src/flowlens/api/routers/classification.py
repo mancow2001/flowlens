@@ -1,18 +1,28 @@
 """Classification Rules API endpoints."""
 
+import csv
+import io
+import ipaddress
+import json
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import String, cast, func, select, text
 
-from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination
+from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, ViewerUser
 from flowlens.common.logging import get_logger
 from flowlens.models.asset import Asset
 from flowlens.models.classification import ClassificationRule
 from flowlens.models.task import TaskType
 from flowlens.schemas.classification import (
     ClassificationRuleCreate,
+    ClassificationRuleExportRow,
+    ClassificationRuleImportPreview,
+    ClassificationRuleImportResult,
+    ClassificationRuleImportValidation,
     ClassificationRuleList,
     ClassificationRuleResponse,
     ClassificationRuleSummary,
@@ -140,6 +150,490 @@ async def list_classification_rules(
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
+    )
+
+
+# =============================================================================
+# Export/Import Endpoints (must be before /{rule_id} routes)
+# =============================================================================
+
+
+@router.get("/export", response_class=StreamingResponse)
+async def export_classification_rules(
+    db: DbSession,
+    _user: ViewerUser,
+    format: Literal["csv", "json"] = Query("json"),
+    is_active: bool | None = Query(None, alias="isActive"),
+    environment: str | None = None,
+    datacenter: str | None = None,
+) -> StreamingResponse:
+    """Export classification rules to CSV or JSON format.
+
+    Exported data can be modified and re-imported to update or create rules.
+    """
+    # Build query with optional filters
+    query = select(ClassificationRule)
+
+    if is_active is not None:
+        query = query.where(ClassificationRule.is_active == is_active)
+    if environment:
+        query = query.where(ClassificationRule.environment == environment)
+    if datacenter:
+        query = query.where(ClassificationRule.datacenter == datacenter)
+
+    # Order by priority then name for consistent exports
+    query = query.order_by(ClassificationRule.priority.asc(), ClassificationRule.name.asc())
+
+    result = await db.execute(query)
+    rules = result.scalars().all()
+
+    # Build export rows
+    rows = []
+    for r in rules:
+        rows.append(ClassificationRuleExportRow(
+            name=r.name,
+            description=r.description,
+            cidr=str(r.cidr),
+            priority=r.priority,
+            environment=r.environment,
+            datacenter=r.datacenter,
+            location=r.location,
+            asset_type=r.asset_type,
+            is_internal=r.is_internal,
+            default_owner=r.default_owner,
+            default_team=r.default_team,
+            is_active=r.is_active,
+        ))
+
+    if format == "json":
+        content = json.dumps([r.model_dump() for r in rows], indent=2)
+        return StreamingResponse(
+            iter([content]),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=classification-rules-export.json"},
+        )
+    else:
+        # CSV export
+        output = io.StringIO()
+        fieldnames = [
+            "name", "description", "cidr", "priority", "environment", "datacenter",
+            "location", "asset_type", "is_internal", "default_owner", "default_team", "is_active"
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row.model_dump())
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=classification-rules-export.csv"},
+        )
+
+
+@router.post("/import/preview", response_model=ClassificationRuleImportPreview)
+async def preview_classification_rule_import(
+    db: DbSession,
+    _user: AnalystUser,
+    file: UploadFile = File(...),
+) -> ClassificationRuleImportPreview:
+    """Preview what a classification rule import will do before committing.
+
+    Accepts CSV or JSON file. Matches rules by name.
+    Returns a preview of creates, updates, and any errors.
+    """
+    content = await file.read()
+    content_str = content.decode("utf-8")
+
+    # Parse file based on content type or extension
+    rows: list[dict] = []
+    filename = file.filename or ""
+
+    if filename.endswith(".json") or file.content_type == "application/json":
+        try:
+            rows = json.loads(content_str)
+            if not isinstance(rows, list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="JSON file must contain an array of objects",
+                )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON: {e}",
+            )
+    else:
+        # Assume CSV
+        try:
+            reader = csv.DictReader(io.StringIO(content_str))
+            rows = list(reader)
+        except csv.Error as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid CSV: {e}",
+            )
+
+    if not rows:
+        return ClassificationRuleImportPreview(
+            total_rows=0,
+            to_create=0,
+            to_update=0,
+            to_skip=0,
+            errors=0,
+            validations=[],
+        )
+
+    # Get existing rules by name for comparison
+    names = [r.get("name", "") for r in rows if r.get("name")]
+    existing_query = select(ClassificationRule).where(ClassificationRule.name.in_(names))
+    existing_result = await db.execute(existing_query)
+    existing_rules = {r.name: r for r in existing_result.scalars().all()}
+
+    # Validate each row
+    validations = []
+    to_create = 0
+    to_update = 0
+    to_skip = 0
+    errors = 0
+
+    for idx, row in enumerate(rows, start=1):
+        name = row.get("name", "").strip() if row.get("name") else ""
+
+        if not name:
+            validations.append(ClassificationRuleImportValidation(
+                row_number=idx,
+                name="",
+                status="error",
+                message="Missing name",
+            ))
+            errors += 1
+            continue
+
+        # Validate CIDR
+        cidr = row.get("cidr", "").strip() if row.get("cidr") else ""
+        if not cidr:
+            validations.append(ClassificationRuleImportValidation(
+                row_number=idx,
+                name=name,
+                status="error",
+                message="Missing CIDR",
+            ))
+            errors += 1
+            continue
+
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError as e:
+            validations.append(ClassificationRuleImportValidation(
+                row_number=idx,
+                name=name,
+                status="error",
+                message=f"Invalid CIDR: {e}",
+            ))
+            errors += 1
+            continue
+
+        existing = existing_rules.get(name)
+
+        if existing:
+            # Check for changes
+            changes = {}
+            for field in ["description", "cidr", "environment", "datacenter", "location",
+                         "asset_type", "default_owner", "default_team"]:
+                new_val = row.get(field, "").strip() if row.get(field) else None
+                old_val = getattr(existing, field)
+                if field == "cidr":
+                    old_val = str(old_val) if old_val else None
+                if new_val and new_val != old_val:
+                    changes[field] = {"old": old_val, "new": new_val}
+
+            # Handle priority (int)
+            if "priority" in row and row["priority"] != "":
+                try:
+                    new_priority = int(row["priority"])
+                    if new_priority != existing.priority:
+                        changes["priority"] = {"old": existing.priority, "new": new_priority}
+                except ValueError:
+                    validations.append(ClassificationRuleImportValidation(
+                        row_number=idx,
+                        name=name,
+                        status="error",
+                        message=f"Invalid priority value: {row['priority']}",
+                    ))
+                    errors += 1
+                    continue
+
+            # Handle is_internal (bool)
+            if "is_internal" in row and row["is_internal"] != "":
+                new_internal = str(row["is_internal"]).lower() in ("true", "1", "yes")
+                if new_internal != existing.is_internal:
+                    changes["is_internal"] = {"old": existing.is_internal, "new": new_internal}
+
+            # Handle is_active (bool)
+            if "is_active" in row and row["is_active"] != "":
+                new_active = str(row["is_active"]).lower() in ("true", "1", "yes")
+                if new_active != existing.is_active:
+                    changes["is_active"] = {"old": existing.is_active, "new": new_active}
+
+            if changes:
+                validations.append(ClassificationRuleImportValidation(
+                    row_number=idx,
+                    name=name,
+                    status="update",
+                    message=f"Will update {len(changes)} field(s)",
+                    changes=changes,
+                ))
+                to_update += 1
+            else:
+                validations.append(ClassificationRuleImportValidation(
+                    row_number=idx,
+                    name=name,
+                    status="skip",
+                    message="No changes detected",
+                ))
+                to_skip += 1
+        else:
+            # New rule
+            validations.append(ClassificationRuleImportValidation(
+                row_number=idx,
+                name=name,
+                status="create",
+                message=f"Will create new rule: {name}",
+            ))
+            to_create += 1
+
+    return ClassificationRuleImportPreview(
+        total_rows=len(rows),
+        to_create=to_create,
+        to_update=to_update,
+        to_skip=to_skip,
+        errors=errors,
+        validations=validations,
+    )
+
+
+@router.post("/import", response_model=ClassificationRuleImportResult)
+async def import_classification_rules(
+    db: DbSession,
+    _user: AnalystUser,
+    file: UploadFile = File(...),
+    skip_errors: bool = Query(False, alias="skipErrors"),
+    auto_apply: bool = Query(True, alias="autoApply", description="Automatically apply rules to matching assets after import"),
+) -> ClassificationRuleImportResult:
+    """Import classification rules from CSV or JSON file.
+
+    Matches rules by name. Updates existing rules or creates new ones.
+    Blank values in the import file are ignored (won't overwrite existing data).
+    """
+    content = await file.read()
+    content_str = content.decode("utf-8")
+
+    # Parse file
+    rows: list[dict] = []
+    filename = file.filename or ""
+
+    if filename.endswith(".json") or file.content_type == "application/json":
+        try:
+            rows = json.loads(content_str)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON: {e}",
+            )
+    else:
+        try:
+            reader = csv.DictReader(io.StringIO(content_str))
+            rows = list(reader)
+        except csv.Error as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid CSV: {e}",
+            )
+
+    if not rows:
+        return ClassificationRuleImportResult(
+            created=0,
+            updated=0,
+            skipped=0,
+            errors=0,
+        )
+
+    # Get existing rules
+    names = [r.get("name", "") for r in rows if r.get("name")]
+    existing_query = select(ClassificationRule).where(ClassificationRule.name.in_(names))
+    existing_result = await db.execute(existing_query)
+    existing_rules = {r.name: r for r in existing_result.scalars().all()}
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors = 0
+    error_details = []
+    created_rule_ids = []
+    updated_rule_ids = []
+
+    for idx, row in enumerate(rows, start=1):
+        name = row.get("name", "").strip() if row.get("name") else ""
+
+        if not name:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: Missing name")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: Missing name",
+            )
+
+        # Validate CIDR
+        cidr = row.get("cidr", "").strip() if row.get("cidr") else ""
+        if not cidr:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: Missing CIDR")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: Missing CIDR",
+            )
+
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError as e:
+            if skip_errors:
+                errors += 1
+                error_details.append(f"Row {idx}: Invalid CIDR: {e}")
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row {idx}: Invalid CIDR: {e}",
+            )
+
+        existing = existing_rules.get(name)
+
+        if existing:
+            # Update existing rule
+            has_changes = False
+            for field in ["description", "cidr", "environment", "datacenter", "location",
+                         "asset_type", "default_owner", "default_team"]:
+                new_val = row.get(field, "").strip() if row.get(field) else None
+                if new_val:  # Only update if value provided
+                    current_val = getattr(existing, field)
+                    if field == "cidr":
+                        current_val = str(current_val) if current_val else None
+                    if new_val != current_val:
+                        setattr(existing, field, new_val)
+                        has_changes = True
+
+            # Handle priority
+            if "priority" in row and row["priority"] != "":
+                try:
+                    new_priority = int(row["priority"])
+                    if new_priority != existing.priority:
+                        existing.priority = new_priority
+                        has_changes = True
+                except ValueError:
+                    if skip_errors:
+                        errors += 1
+                        error_details.append(f"Row {idx}: Invalid priority: {row['priority']}")
+                        continue
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Row {idx}: Invalid priority: {row['priority']}",
+                    )
+
+            # Handle is_internal
+            if "is_internal" in row and row["is_internal"] != "":
+                new_internal = str(row["is_internal"]).lower() in ("true", "1", "yes")
+                if new_internal != existing.is_internal:
+                    existing.is_internal = new_internal
+                    has_changes = True
+
+            # Handle is_active
+            if "is_active" in row and row["is_active"] != "":
+                new_active = str(row["is_active"]).lower() in ("true", "1", "yes")
+                if new_active != existing.is_active:
+                    existing.is_active = new_active
+                    has_changes = True
+
+            if has_changes:
+                updated += 1
+                updated_rule_ids.append(existing.id)
+            else:
+                skipped += 1
+        else:
+            # Create new rule
+            priority = 100
+            if "priority" in row and row["priority"] != "":
+                try:
+                    priority = int(row["priority"])
+                except ValueError:
+                    priority = 100
+
+            is_internal = None
+            if "is_internal" in row and row["is_internal"] != "":
+                is_internal = str(row["is_internal"]).lower() in ("true", "1", "yes")
+
+            is_active = True
+            if "is_active" in row and row["is_active"] != "":
+                is_active = str(row["is_active"]).lower() in ("true", "1", "yes")
+
+            new_rule = ClassificationRule(
+                name=name,
+                description=row.get("description", "").strip() if row.get("description") else None,
+                cidr=cidr,
+                priority=priority,
+                environment=row.get("environment", "").strip() if row.get("environment") else None,
+                datacenter=row.get("datacenter", "").strip() if row.get("datacenter") else None,
+                location=row.get("location", "").strip() if row.get("location") else None,
+                asset_type=row.get("asset_type", "").strip() if row.get("asset_type") else None,
+                is_internal=is_internal,
+                default_owner=row.get("default_owner", "").strip() if row.get("default_owner") else None,
+                default_team=row.get("default_team", "").strip() if row.get("default_team") else None,
+                is_active=is_active,
+            )
+            db.add(new_rule)
+            await db.flush()
+            created += 1
+            created_rule_ids.append(new_rule.id)
+
+    await db.flush()
+
+    # Trigger classification task if auto_apply and we made changes
+    if auto_apply and (created_rule_ids or updated_rule_ids):
+        try:
+            executor = TaskExecutor(db)
+            task = await executor.create_task(
+                task_type=TaskType.APPLY_CLASSIFICATION_RULES.value,
+                name="Apply Classification Rules (bulk import)",
+                description=f"Automatically triggered after importing {created} new and {updated} updated rules",
+                parameters={"force": updated > 0},  # Force update if we updated existing rules
+                triggered_by="import",
+                related_entity_type="classification_rule",
+            )
+            await db.commit()
+
+            run_task_in_background(
+                task.id,
+                run_classification_task_with_new_session(task.id, force=updated > 0),
+            )
+
+            logger.info(
+                "Auto-triggered classification task after import",
+                task_id=str(task.id),
+                created=created,
+                updated=updated,
+            )
+        except Exception as e:
+            logger.error("Failed to trigger classification task after import", error=str(e))
+
+    return ClassificationRuleImportResult(
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+        error_details=error_details if error_details else None,
     )
 
 
