@@ -2,7 +2,7 @@
 
 from flowlens.models.base import Base
 from flowlens.models.alert_rule import AlertRule
-from flowlens.models.asset import Asset, AssetType, Service
+from flowlens.models.asset import Application, ApplicationMember, Asset, AssetType, EntryPoint, Service
 from flowlens.models.auth import (
     AuthAuditLog,
     AuthEventType,
@@ -22,8 +22,11 @@ from flowlens.models.saved_view import SavedView
 
 __all__ = [
     "Base",
+    "Application",
+    "ApplicationMember",
     "Asset",
     "AssetType",
+    "EntryPoint",
     "Service",
     "AlertRule",
     "AuthAuditLog",

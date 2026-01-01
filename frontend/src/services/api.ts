@@ -29,6 +29,9 @@ import type {
   ApplicationMemberUpdate,
   ApplicationListResponse,
   ApplicationTopology,
+  EntryPoint,
+  EntryPointCreate,
+  EntryPointUpdate,
   SearchResponse,
   User,
   TokenResponse,
@@ -1150,21 +1153,45 @@ export const applicationsApi = {
     await api.delete(`/applications/${applicationId}/members/${assetId}`);
   },
 
-  // Entry point convenience methods
-  setEntryPoint: async (
-    applicationId: string,
-    assetId: string,
-    options?: { order?: number; port?: number; protocol?: number }
-  ): Promise<ApplicationMember> => {
-    const { data } = await api.post(`/applications/${applicationId}/entry-points/${assetId}`, null, {
-      params: options,
-    });
+  // Entry point CRUD methods
+  listEntryPoints: async (applicationId: string, assetId: string): Promise<EntryPoint[]> => {
+    const { data } = await api.get(`/applications/${applicationId}/members/${assetId}/entry-points`);
     return data;
   },
 
-  unsetEntryPoint: async (applicationId: string, assetId: string): Promise<ApplicationMember> => {
-    const { data } = await api.delete(`/applications/${applicationId}/entry-points/${assetId}`);
+  addEntryPoint: async (
+    applicationId: string,
+    assetId: string,
+    entryPoint: EntryPointCreate
+  ): Promise<EntryPoint> => {
+    const { data } = await api.post(
+      `/applications/${applicationId}/members/${assetId}/entry-points`,
+      entryPoint
+    );
     return data;
+  },
+
+  updateEntryPoint: async (
+    applicationId: string,
+    assetId: string,
+    entryPointId: string,
+    updates: EntryPointUpdate
+  ): Promise<EntryPoint> => {
+    const { data } = await api.patch(
+      `/applications/${applicationId}/members/${assetId}/entry-points/${entryPointId}`,
+      updates
+    );
+    return data;
+  },
+
+  deleteEntryPoint: async (
+    applicationId: string,
+    assetId: string,
+    entryPointId: string
+  ): Promise<void> => {
+    await api.delete(
+      `/applications/${applicationId}/members/${assetId}/entry-points/${entryPointId}`
+    );
   },
 
   // Topology endpoint

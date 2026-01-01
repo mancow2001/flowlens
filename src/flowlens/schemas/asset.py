@@ -190,25 +190,51 @@ class ApplicationBase(BaseModel):
     metadata: dict | None = None
 
 
+class EntryPointCreate(BaseModel):
+    """Schema for creating an entry point on an application member."""
+
+    port: int = Field(..., ge=1, le=65535)
+    protocol: int = Field(6, ge=0, le=255)  # IANA protocol number, default TCP
+    order: int = Field(0, ge=0)
+    label: str | None = Field(None, max_length=50)
+
+
+class EntryPointUpdate(BaseModel):
+    """Schema for updating an entry point."""
+
+    port: int | None = Field(None, ge=1, le=65535)
+    protocol: int | None = Field(None, ge=0, le=255)
+    order: int | None = Field(None, ge=0)
+    label: str | None = Field(None, max_length=50)
+
+
+class EntryPointResponse(BaseModel):
+    """Schema for entry point response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    member_id: UUID
+    port: int
+    protocol: int
+    order: int
+    label: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ApplicationMemberCreate(BaseModel):
     """Schema for adding an asset to an application."""
 
     asset_id: UUID
     role: str | None = Field(None, max_length=50)
-    is_entry_point: bool = False
-    entry_point_order: int | None = None
-    entry_point_port: int | None = Field(None, ge=1, le=65535)
-    entry_point_protocol: int | None = Field(None, ge=0, le=255)  # IANA protocol number
+    entry_points: list[EntryPointCreate] | None = None
 
 
 class ApplicationMemberUpdate(BaseModel):
     """Schema for updating an application member."""
 
     role: str | None = Field(None, max_length=50)
-    is_entry_point: bool | None = None
-    entry_point_order: int | None = None
-    entry_point_port: int | None = Field(None, ge=1, le=65535)
-    entry_point_protocol: int | None = Field(None, ge=0, le=255)
 
 
 class ApplicationMemberResponse(BaseModel):
@@ -220,12 +246,14 @@ class ApplicationMemberResponse(BaseModel):
     asset_id: UUID
     asset: AssetSummary
     role: str | None
-    is_entry_point: bool
-    entry_point_order: int | None
-    entry_point_port: int | None
-    entry_point_protocol: int | None
+    entry_points: list[EntryPointResponse]
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def is_entry_point(self) -> bool:
+        """Convenience property to check if member has any entry points."""
+        return len(self.entry_points) > 0
 
 
 class ApplicationCreate(ApplicationBase):

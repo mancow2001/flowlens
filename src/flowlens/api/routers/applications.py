@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, Sorting, ViewerUser
-from flowlens.models.asset import Application, ApplicationMember, Asset
+from flowlens.models.asset import Application, ApplicationMember, Asset, EntryPoint
 from flowlens.schemas.asset import (
     ApplicationCreate,
     ApplicationList,
@@ -18,13 +18,16 @@ from flowlens.schemas.asset import (
     ApplicationUpdate,
     ApplicationWithMembers,
     AssetSummary,
+    EntryPointCreate,
+    EntryPointResponse,
+    EntryPointUpdate,
 )
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
 
 def _build_member_response(member: ApplicationMember) -> ApplicationMemberResponse:
-    """Build an ApplicationMemberResponse from a member with loaded asset."""
+    """Build an ApplicationMemberResponse from a member with loaded asset and entry points."""
     return ApplicationMemberResponse(
         id=member.id,
         asset_id=member.asset_id,
@@ -40,10 +43,19 @@ def _build_member_response(member: ApplicationMember) -> ApplicationMemberRespon
             last_seen=member.asset.last_seen,
         ),
         role=member.role,
-        is_entry_point=member.is_entry_point,
-        entry_point_order=member.entry_point_order,
-        entry_point_port=member.entry_point_port,
-        entry_point_protocol=member.entry_point_protocol,
+        entry_points=[
+            EntryPointResponse(
+                id=ep.id,
+                member_id=ep.member_id,
+                port=ep.port,
+                protocol=ep.protocol,
+                order=ep.order,
+                label=ep.label,
+                created_at=ep.created_at,
+                updated_at=ep.updated_at,
+            )
+            for ep in sorted(member.entry_points, key=lambda e: e.order)
+        ],
         created_at=member.created_at,
         updated_at=member.updated_at,
     )
@@ -136,7 +148,10 @@ async def get_application(
         select(Application)
         .where(Application.id == application_id)
         .options(
-            selectinload(Application.members).selectinload(ApplicationMember.asset)
+            selectinload(Application.members)
+            .selectinload(ApplicationMember.asset),
+            selectinload(Application.members)
+            .selectinload(ApplicationMember.entry_points),
         )
     )
     result = await db.execute(query)
@@ -148,11 +163,14 @@ async def get_application(
             detail=f"Application {application_id} not found",
         )
 
-    # Build member list with entry points first
-    members = sorted(
-        application.members,
-        key=lambda m: (not m.is_entry_point, m.entry_point_order or 9999, m.asset.name),
-    )
+    # Build member list with entry points first (members with entry points come first)
+    # For ordering, use the minimum entry point order if any, otherwise 9999
+    def get_sort_key(m: ApplicationMember) -> tuple:
+        has_entry_points = len(m.entry_points) > 0
+        min_order = min((ep.order for ep in m.entry_points), default=9999)
+        return (not has_entry_points, min_order, m.asset.name)
+
+    members = sorted(application.members, key=get_sort_key)
 
     return ApplicationWithMembers(
         id=application.id,
@@ -225,12 +243,23 @@ async def create_application(
                 application_id=application.id,
                 asset_id=member_data.asset_id,
                 role=member_data.role,
-                is_entry_point=member_data.is_entry_point,
-                entry_point_order=member_data.entry_point_order,
-                entry_point_port=member_data.entry_point_port,
-                entry_point_protocol=member_data.entry_point_protocol,
             )
             db.add(member)
+            await db.flush()  # Get member.id for entry points
+
+            # Create entry points if provided
+            if member_data.entry_points:
+                for ep_data in member_data.entry_points:
+                    entry_point = EntryPoint(
+                        member_id=member.id,
+                        port=ep_data.port,
+                        protocol=ep_data.protocol,
+                        order=ep_data.order,
+                        label=ep_data.label,
+                    )
+                    db.add(entry_point)
+                    member.entry_points.append(entry_point)
+
             members.append((member, assets_map[member_data.asset_id]))
 
         await db.flush()
@@ -254,10 +283,19 @@ async def create_application(
                 last_seen=asset.last_seen,
             ),
             role=member.role,
-            is_entry_point=member.is_entry_point,
-            entry_point_order=member.entry_point_order,
-            entry_point_port=member.entry_point_port,
-            entry_point_protocol=member.entry_point_protocol,
+            entry_points=[
+                EntryPointResponse(
+                    id=ep.id,
+                    member_id=ep.member_id,
+                    port=ep.port,
+                    protocol=ep.protocol,
+                    order=ep.order,
+                    label=ep.label,
+                    created_at=ep.created_at,
+                    updated_at=ep.updated_at,
+                )
+                for ep in sorted(member.entry_points, key=lambda e: e.order)
+            ],
             created_at=member.created_at,
             updated_at=member.updated_at,
         ))
@@ -384,24 +422,30 @@ async def list_application_members(
             detail=f"Application {application_id} not found",
         )
 
-    # Get members with assets
+    # Get members with assets and entry points
     query = (
         select(ApplicationMember)
         .where(ApplicationMember.application_id == application_id)
-        .options(selectinload(ApplicationMember.asset))
+        .options(
+            selectinload(ApplicationMember.asset),
+            selectinload(ApplicationMember.entry_points),
+        )
     )
-
-    if entry_points_only:
-        query = query.where(ApplicationMember.is_entry_point == True)
 
     result = await db.execute(query)
-    members = result.scalars().all()
+    members = list(result.scalars().all())
 
-    # Sort: entry points first, then by order, then by name
-    members = sorted(
-        members,
-        key=lambda m: (not m.is_entry_point, m.entry_point_order or 9999, m.asset.name),
-    )
+    # Filter to members with entry points if requested
+    if entry_points_only:
+        members = [m for m in members if len(m.entry_points) > 0]
+
+    # Sort: members with entry points first, then by min entry point order, then by name
+    def get_sort_key(m: ApplicationMember) -> tuple:
+        has_entry_points = len(m.entry_points) > 0
+        min_order = min((ep.order for ep in m.entry_points), default=9999)
+        return (not has_entry_points, min_order, m.asset.name)
+
+    members = sorted(members, key=get_sort_key)
 
     return [_build_member_response(m) for m in members]
 
@@ -457,13 +501,25 @@ async def add_application_member(
         application_id=application_id,
         asset_id=data.asset_id,
         role=data.role,
-        is_entry_point=data.is_entry_point,
-        entry_point_order=data.entry_point_order,
-        entry_point_port=data.entry_point_port,
-        entry_point_protocol=data.entry_point_protocol,
     )
     db.add(member)
     await db.flush()
+
+    # Create entry points if provided
+    entry_points_list = []
+    if data.entry_points:
+        for ep_data in data.entry_points:
+            entry_point = EntryPoint(
+                member_id=member.id,
+                port=ep_data.port,
+                protocol=ep_data.protocol,
+                order=ep_data.order,
+                label=ep_data.label,
+            )
+            db.add(entry_point)
+            entry_points_list.append(entry_point)
+        await db.flush()
+
     await db.refresh(member)
 
     return ApplicationMemberResponse(
@@ -481,10 +537,19 @@ async def add_application_member(
             last_seen=asset.last_seen,
         ),
         role=member.role,
-        is_entry_point=member.is_entry_point,
-        entry_point_order=member.entry_point_order,
-        entry_point_port=member.entry_point_port,
-        entry_point_protocol=member.entry_point_protocol,
+        entry_points=[
+            EntryPointResponse(
+                id=ep.id,
+                member_id=ep.member_id,
+                port=ep.port,
+                protocol=ep.protocol,
+                order=ep.order,
+                label=ep.label,
+                created_at=ep.created_at,
+                updated_at=ep.updated_at,
+            )
+            for ep in sorted(entry_points_list, key=lambda e: e.order)
+        ],
         created_at=member.created_at,
         updated_at=member.updated_at,
     )
@@ -501,15 +566,18 @@ async def update_application_member(
     db: DbSession,
     _user: AnalystUser,
 ) -> ApplicationMemberResponse:
-    """Update a member's role or entry point status."""
-    # Get member with asset
+    """Update a member's role."""
+    # Get member with asset and entry points
     result = await db.execute(
         select(ApplicationMember)
         .where(
             ApplicationMember.application_id == application_id,
             ApplicationMember.asset_id == asset_id,
         )
-        .options(selectinload(ApplicationMember.asset))
+        .options(
+            selectinload(ApplicationMember.asset),
+            selectinload(ApplicationMember.entry_points),
+        )
     )
     member = result.scalar_one_or_none()
 
@@ -560,31 +628,28 @@ async def remove_application_member(
 
 
 # =============================================================================
-# Entry Point Convenience Endpoints
+# Entry Point CRUD Endpoints
 # =============================================================================
 
 
-@router.post(
-    "/{application_id}/entry-points/{asset_id}",
-    response_model=ApplicationMemberResponse,
+@router.get(
+    "/{application_id}/members/{asset_id}/entry-points",
+    response_model=list[EntryPointResponse],
 )
-async def set_entry_point(
+async def list_entry_points(
     application_id: UUID,
     asset_id: UUID,
     db: DbSession,
-    _user: AnalystUser,
-    order: int | None = Query(None, description="Entry point order (lower = first)"),
-    port: int | None = Query(None, ge=1, le=65535, description="Entry point port"),
-    protocol: int | None = Query(None, ge=0, le=255, description="Entry point protocol (IANA number)"),
-) -> ApplicationMemberResponse:
-    """Mark an existing member as an entry point with optional port/protocol."""
+    _user: ViewerUser,
+) -> list[EntryPointResponse]:
+    """List all entry points for a specific member."""
     result = await db.execute(
         select(ApplicationMember)
         .where(
             ApplicationMember.application_id == application_id,
             ApplicationMember.asset_id == asset_id,
         )
-        .options(selectinload(ApplicationMember.asset))
+        .options(selectinload(ApplicationMember.entry_points))
     )
     member = result.scalar_one_or_none()
 
@@ -594,53 +659,212 @@ async def set_entry_point(
             detail=f"Member with asset {asset_id} not found in application {application_id}",
         )
 
-    member.is_entry_point = True
-    member.entry_point_order = order
-    member.entry_point_port = port
-    member.entry_point_protocol = protocol
+    return [
+        EntryPointResponse(
+            id=ep.id,
+            member_id=ep.member_id,
+            port=ep.port,
+            protocol=ep.protocol,
+            order=ep.order,
+            label=ep.label,
+            created_at=ep.created_at,
+            updated_at=ep.updated_at,
+        )
+        for ep in sorted(member.entry_points, key=lambda e: e.order)
+    ]
+
+
+@router.post(
+    "/{application_id}/members/{asset_id}/entry-points",
+    response_model=EntryPointResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_entry_point(
+    application_id: UUID,
+    asset_id: UUID,
+    data: EntryPointCreate,
+    db: DbSession,
+    _user: AnalystUser,
+) -> EntryPointResponse:
+    """Add an entry point to a member."""
+    result = await db.execute(
+        select(ApplicationMember)
+        .where(
+            ApplicationMember.application_id == application_id,
+            ApplicationMember.asset_id == asset_id,
+        )
+        .options(selectinload(ApplicationMember.entry_points))
+    )
+    member = result.scalar_one_or_none()
+
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Member with asset {asset_id} not found in application {application_id}",
+        )
+
+    # Check for duplicate port/protocol
+    for existing_ep in member.entry_points:
+        if existing_ep.port == data.port and existing_ep.protocol == data.protocol:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Entry point with port {data.port}/{data.protocol} already exists",
+            )
+
+    entry_point = EntryPoint(
+        member_id=member.id,
+        port=data.port,
+        protocol=data.protocol,
+        order=data.order,
+        label=data.label,
+    )
+    db.add(entry_point)
+    await db.flush()
+    await db.refresh(entry_point)
+
+    return EntryPointResponse(
+        id=entry_point.id,
+        member_id=entry_point.member_id,
+        port=entry_point.port,
+        protocol=entry_point.protocol,
+        order=entry_point.order,
+        label=entry_point.label,
+        created_at=entry_point.created_at,
+        updated_at=entry_point.updated_at,
+    )
+
+
+@router.patch(
+    "/{application_id}/members/{asset_id}/entry-points/{entry_point_id}",
+    response_model=EntryPointResponse,
+)
+async def update_entry_point(
+    application_id: UUID,
+    asset_id: UUID,
+    entry_point_id: UUID,
+    data: EntryPointUpdate,
+    db: DbSession,
+    _user: AnalystUser,
+) -> EntryPointResponse:
+    """Update an entry point."""
+    # First verify the member exists for this application
+    member_result = await db.execute(
+        select(ApplicationMember.id)
+        .where(
+            ApplicationMember.application_id == application_id,
+            ApplicationMember.asset_id == asset_id,
+        )
+    )
+    member_id = member_result.scalar_one_or_none()
+
+    if not member_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Member with asset {asset_id} not found in application {application_id}",
+        )
+
+    # Get the entry point
+    result = await db.execute(
+        select(EntryPoint)
+        .where(
+            EntryPoint.id == entry_point_id,
+            EntryPoint.member_id == member_id,
+        )
+    )
+    entry_point = result.scalar_one_or_none()
+
+    if not entry_point:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Entry point {entry_point_id} not found",
+        )
+
+    # Check for duplicate port/protocol if changing port or protocol
+    if data.port is not None or data.protocol is not None:
+        new_port = data.port if data.port is not None else entry_point.port
+        new_protocol = data.protocol if data.protocol is not None else entry_point.protocol
+
+        existing = await db.execute(
+            select(EntryPoint)
+            .where(
+                EntryPoint.member_id == member_id,
+                EntryPoint.port == new_port,
+                EntryPoint.protocol == new_protocol,
+                EntryPoint.id != entry_point_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Entry point with port {new_port}/{new_protocol} already exists",
+            )
+
+    # Update fields
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(entry_point, field, value)
 
     await db.flush()
-    await db.refresh(member)
+    await db.refresh(entry_point)
 
-    return _build_member_response(member)
+    return EntryPointResponse(
+        id=entry_point.id,
+        member_id=entry_point.member_id,
+        port=entry_point.port,
+        protocol=entry_point.protocol,
+        order=entry_point.order,
+        label=entry_point.label,
+        created_at=entry_point.created_at,
+        updated_at=entry_point.updated_at,
+    )
 
 
 @router.delete(
-    "/{application_id}/entry-points/{asset_id}",
-    response_model=ApplicationMemberResponse,
+    "/{application_id}/members/{asset_id}/entry-points/{entry_point_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
 )
-async def unset_entry_point(
+async def delete_entry_point(
     application_id: UUID,
     asset_id: UUID,
+    entry_point_id: UUID,
     db: DbSession,
     _user: AnalystUser,
-) -> ApplicationMemberResponse:
-    """Remove entry point status from a member."""
-    result = await db.execute(
-        select(ApplicationMember)
+) -> None:
+    """Delete an entry point."""
+    # First verify the member exists for this application
+    member_result = await db.execute(
+        select(ApplicationMember.id)
         .where(
             ApplicationMember.application_id == application_id,
             ApplicationMember.asset_id == asset_id,
         )
-        .options(selectinload(ApplicationMember.asset))
     )
-    member = result.scalar_one_or_none()
+    member_id = member_result.scalar_one_or_none()
 
-    if not member:
+    if not member_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Member with asset {asset_id} not found in application {application_id}",
         )
 
-    member.is_entry_point = False
-    member.entry_point_order = None
-    member.entry_point_port = None
-    member.entry_point_protocol = None
+    # Get and delete the entry point
+    result = await db.execute(
+        select(EntryPoint)
+        .where(
+            EntryPoint.id == entry_point_id,
+            EntryPoint.member_id == member_id,
+        )
+    )
+    entry_point = result.scalar_one_or_none()
 
+    if not entry_point:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Entry point {entry_point_id} not found",
+        )
+
+    await db.delete(entry_point)
     await db.flush()
-    await db.refresh(member)
-
-    return _build_member_response(member)
 
 
 # =============================================================================
@@ -671,12 +895,13 @@ async def get_application_topology(
     from flowlens.models.dependency import Dependency
     from flowlens.graph.traversal import GraphTraversal
 
-    # Get application with members
+    # Get application with members and entry points
     query = (
         select(Application)
         .where(Application.id == application_id)
         .options(
-            selectinload(Application.members).selectinload(ApplicationMember.asset)
+            selectinload(Application.members).selectinload(ApplicationMember.asset),
+            selectinload(Application.members).selectinload(ApplicationMember.entry_points),
         )
     )
     result = await db.execute(query)
@@ -705,45 +930,42 @@ async def get_application_topology(
             "inbound_summary": [],
         }
 
-    # Identify entry points and their ports
-    entry_point_members = [m for m in application.members if m.is_entry_point]
+    # Identify entry point members (members with at least one entry point)
+    entry_point_members = [m for m in application.members if len(m.entry_points) > 0]
     entry_point_asset_ids = {m.asset_id for m in entry_point_members}
 
     # Query 1: Get inbound connections TO entry points from OUTSIDE the application
-    # on the specific entry point port/protocol
+    # For each entry point definition (port/protocol)
     inbound_summary = []
     for ep_member in entry_point_members:
-        if ep_member.entry_point_port is None:
-            continue
-
-        # Count unique external sources connecting to this entry point
-        inbound_query = (
-            select(
-                sql_func.count(sql_func.distinct(Dependency.source_asset_id)).label("client_count"),
-                sql_func.sum(Dependency.bytes_last_24h).label("total_bytes"),
-            )
-            .where(
-                Dependency.target_asset_id == ep_member.asset_id,
-                Dependency.target_port == ep_member.entry_point_port,
-                Dependency.source_asset_id.notin_(member_asset_ids),  # External sources only
-            )
-        )
-        if ep_member.entry_point_protocol:
-            inbound_query = inbound_query.where(
-                Dependency.protocol == ep_member.entry_point_protocol
+        for ep in ep_member.entry_points:
+            # Count unique external sources connecting to this entry point
+            inbound_query = (
+                select(
+                    sql_func.count(sql_func.distinct(Dependency.source_asset_id)).label("client_count"),
+                    sql_func.sum(Dependency.bytes_last_24h).label("total_bytes"),
+                )
+                .where(
+                    Dependency.target_asset_id == ep_member.asset_id,
+                    Dependency.target_port == ep.port,
+                    Dependency.protocol == ep.protocol,
+                    Dependency.source_asset_id.notin_(member_asset_ids),  # External sources only
+                )
             )
 
-        inbound_result = await db.execute(inbound_query)
-        row = inbound_result.one()
+            inbound_result = await db.execute(inbound_query)
+            row = inbound_result.one()
 
-        inbound_summary.append({
-            "entry_point_asset_id": str(ep_member.asset_id),
-            "entry_point_name": ep_member.asset.name,
-            "port": ep_member.entry_point_port,
-            "protocol": ep_member.entry_point_protocol,
-            "client_count": row.client_count or 0,
-            "total_bytes_24h": row.total_bytes or 0,
-        })
+            inbound_summary.append({
+                "entry_point_id": str(ep.id),
+                "entry_point_asset_id": str(ep_member.asset_id),
+                "entry_point_name": ep_member.asset.name,
+                "port": ep.port,
+                "protocol": ep.protocol,
+                "label": ep.label,
+                "client_count": row.client_count or 0,
+                "total_bytes_24h": row.total_bytes or 0,
+            })
 
     # Use GraphTraversal to get downstream dependencies from each entry point
     traversal = GraphTraversal(max_depth=max_depth)
@@ -796,8 +1018,11 @@ async def get_application_topology(
     nodes = []
 
     # Add entry point nodes (hop 0)
+    # For each member with entry points, include all their entry point definitions
     for member in entry_point_members:
         asset = member.asset
+        # Get minimum order from all entry points for this member
+        min_order = min((ep.order for ep in member.entry_points), default=0)
         nodes.append({
             "id": str(asset.id),
             "name": asset.name,
@@ -805,9 +1030,17 @@ async def get_application_topology(
             "ip_address": str(asset.ip_address),
             "asset_type": asset.asset_type,
             "is_entry_point": True,
-            "entry_point_port": member.entry_point_port,
-            "entry_point_protocol": member.entry_point_protocol,
-            "entry_point_order": member.entry_point_order,
+            "entry_points": [
+                {
+                    "id": str(ep.id),
+                    "port": ep.port,
+                    "protocol": ep.protocol,
+                    "order": ep.order,
+                    "label": ep.label,
+                }
+                for ep in sorted(member.entry_points, key=lambda e: e.order)
+            ],
+            "entry_point_order": min_order,
             "role": member.role,
             "is_critical": asset.is_critical,
             "is_external": False,
@@ -835,8 +1068,7 @@ async def get_application_topology(
             "ip_address": str(asset.ip_address),
             "asset_type": asset.asset_type,
             "is_entry_point": False,
-            "entry_point_port": None,
-            "entry_point_protocol": None,
+            "entry_points": [],
             "entry_point_order": None,
             "role": member.role if member else None,
             "is_critical": asset.is_critical,
@@ -879,19 +1111,21 @@ async def get_application_topology(
             })
 
     # Build entry points list with port/protocol info
-    entry_points = [
-        {
-            "asset_id": str(m.asset_id),
-            "asset_name": m.asset.name,
-            "port": m.entry_point_port,
-            "protocol": m.entry_point_protocol,
-            "order": m.entry_point_order,
-        }
-        for m in sorted(
-            entry_point_members,
-            key=lambda m: m.entry_point_order or 9999,
-        )
-    ]
+    # Flatten entry points from all members, with asset info
+    entry_points = []
+    for m in entry_point_members:
+        for ep in sorted(m.entry_points, key=lambda e: e.order):
+            entry_points.append({
+                "id": str(ep.id),
+                "asset_id": str(m.asset_id),
+                "asset_name": m.asset.name,
+                "port": ep.port,
+                "protocol": ep.protocol,
+                "order": ep.order,
+                "label": ep.label,
+            })
+    # Sort by order
+    entry_points.sort(key=lambda e: e["order"])
 
     return {
         "application": {

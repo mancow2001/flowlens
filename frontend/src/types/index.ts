@@ -491,18 +491,45 @@ export interface TaskListResponse extends PaginatedResponse<TaskSummary> {}
 // Application types
 export type Criticality = 'low' | 'medium' | 'high' | 'critical';
 
+export interface EntryPoint {
+  id: string;
+  member_id: string;
+  port: number;
+  protocol: number;
+  order: number;
+  label: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntryPointCreate {
+  port: number;
+  protocol?: number;
+  order?: number;
+  label?: string | null;
+}
+
+export interface EntryPointUpdate {
+  port?: number;
+  protocol?: number;
+  order?: number;
+  label?: string | null;
+}
+
 export interface ApplicationMember {
   id: string;
   asset_id: string;
   asset: AssetSummary;
   role: string | null;
-  is_entry_point: boolean;
-  entry_point_order: number | null;
-  entry_point_port: number | null;
-  entry_point_protocol: number | null;
+  entry_points: EntryPoint[];
   created_at: string;
   updated_at: string;
 }
+
+// Helper to check if a member has entry points
+export const isEntryPoint = (member: ApplicationMember): boolean => {
+  return member.entry_points.length > 0;
+};
 
 export interface Application {
   id: string;
@@ -526,10 +553,7 @@ export interface ApplicationWithMembers extends Application {
 export interface ApplicationMemberCreate {
   asset_id: string;
   role?: string | null;
-  is_entry_point?: boolean;
-  entry_point_order?: number | null;
-  entry_point_port?: number | null;
-  entry_point_protocol?: number | null;
+  entry_points?: EntryPointCreate[];
 }
 
 export interface ApplicationCreate {
@@ -559,15 +583,19 @@ export interface ApplicationUpdate {
 
 export interface ApplicationMemberUpdate {
   role?: string | null;
-  is_entry_point?: boolean;
-  entry_point_order?: number | null;
-  entry_point_port?: number | null;
-  entry_point_protocol?: number | null;
 }
 
 export interface ApplicationListResponse extends PaginatedResponse<Application> {}
 
 // Application topology types
+export interface TopologyEntryPoint {
+  id: string;
+  port: number;
+  protocol: number;
+  order: number;
+  label: string | null;
+}
+
 export interface ApplicationTopologyNode {
   id: string;
   name: string;
@@ -575,8 +603,7 @@ export interface ApplicationTopologyNode {
   ip_address: string;
   asset_type: AssetType;
   is_entry_point: boolean;
-  entry_point_port: number | null;
-  entry_point_protocol: number | null;
+  entry_points: TopologyEntryPoint[];
   entry_point_order: number | null;
   role: string | null;
   is_critical: boolean;
@@ -603,18 +630,22 @@ export interface ApplicationTopologyEdge {
 }
 
 export interface ApplicationEntryPoint {
+  id: string;
   asset_id: string;
   asset_name: string;
-  port: number | null;
-  protocol: number | null;
-  order: number | null;
+  port: number;
+  protocol: number;
+  order: number;
+  label: string | null;
 }
 
 export interface InboundSummary {
+  entry_point_id: string;
   entry_point_asset_id: string;
   entry_point_name: string;
   port: number;
-  protocol: number | null;
+  protocol: number;
+  label: string | null;
   client_count: number;
   total_bytes_24h: number;
 }

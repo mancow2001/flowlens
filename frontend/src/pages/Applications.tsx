@@ -9,6 +9,7 @@ import {
   StarIcon,
   MapIcon,
   PencilIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -25,6 +26,8 @@ import type {
   ApplicationMember,
   Criticality,
   Asset,
+  EntryPoint,
+  EntryPointCreate,
 } from '../types';
 
 const CRITICALITY_VARIANTS: Record<Criticality, 'success' | 'warning' | 'error' | 'info' | 'default'> = {
@@ -42,10 +45,13 @@ export default function Applications() {
   const [selectedApp, setSelectedApp] = useState<ApplicationWithMembers | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [assetSearch, setAssetSearch] = useState('');
-  const [editingEntryPoint, setEditingEntryPoint] = useState<ApplicationMember | null>(null);
-  const [entryPointForm, setEntryPointForm] = useState<{ port: string; protocol: string }>({
+  const [editingMember, setEditingMember] = useState<ApplicationMember | null>(null);
+  const [editingEntryPoint, setEditingEntryPoint] = useState<EntryPoint | null>(null);
+  const [showEntryPointsModal, setShowEntryPointsModal] = useState(false);
+  const [entryPointForm, setEntryPointForm] = useState<{ port: string; protocol: string; label: string }>({
     port: '',
     protocol: '6', // Default to TCP
+    label: '',
   });
 
   // Form state for create/edit
@@ -126,13 +132,34 @@ export default function Applications() {
     },
   });
 
-  const toggleEntryPointMutation = useMutation({
-    mutationFn: ({ appId, assetId, isEntryPoint }: { appId: string; assetId: string; isEntryPoint: boolean }) =>
-      isEntryPoint
-        ? applicationsApi.setEntryPoint(appId, assetId)
-        : applicationsApi.unsetEntryPoint(appId, assetId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['application', selectedApp?.id] });
+  // Helper to refresh editingMember from updated appDetails
+  const refreshEditingMember = useCallback(async () => {
+    if (selectedApp && editingMember) {
+      const updated = await queryClient.fetchQuery({
+        queryKey: ['application', selectedApp.id],
+        queryFn: () => applicationsApi.get(selectedApp.id),
+      });
+      const member = updated.members.find((m) => m.asset_id === editingMember.asset_id);
+      if (member) {
+        setEditingMember(member);
+      }
+    }
+  }, [selectedApp, editingMember, queryClient]);
+
+  const addEntryPointMutation = useMutation({
+    mutationFn: ({
+      appId,
+      assetId,
+      entryPoint,
+    }: {
+      appId: string;
+      assetId: string;
+      entryPoint: EntryPointCreate;
+    }) => applicationsApi.addEntryPoint(appId, assetId, entryPoint),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['application', selectedApp?.id] });
+      setEntryPointForm({ port: '', protocol: '6', label: '' });
+      await refreshEditingMember();
     },
   });
 
@@ -140,22 +167,44 @@ export default function Applications() {
     mutationFn: ({
       appId,
       assetId,
+      entryPointId,
       port,
       protocol,
+      label,
     }: {
       appId: string;
       assetId: string;
-      port: number | null;
-      protocol: number | null;
+      entryPointId: string;
+      port: number;
+      protocol: number;
+      label: string | null;
     }) =>
-      applicationsApi.updateMember(appId, assetId, {
-        is_entry_point: true,
-        entry_point_port: port,
-        entry_point_protocol: protocol,
+      applicationsApi.updateEntryPoint(appId, assetId, entryPointId, {
+        port,
+        protocol,
+        label: label || null,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['application', selectedApp?.id] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['application', selectedApp?.id] });
       setEditingEntryPoint(null);
+      setEntryPointForm({ port: '', protocol: '6', label: '' });
+      await refreshEditingMember();
+    },
+  });
+
+  const deleteEntryPointMutation = useMutation({
+    mutationFn: ({
+      appId,
+      assetId,
+      entryPointId,
+    }: {
+      appId: string;
+      assetId: string;
+      entryPointId: string;
+    }) => applicationsApi.deleteEntryPoint(appId, assetId, entryPointId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['application', selectedApp?.id] });
+      await refreshEditingMember();
     },
   });
 
@@ -377,103 +426,82 @@ export default function Applications() {
                     <p className="text-slate-500 text-sm">No members added yet</p>
                   )}
 
-                  {appDetails?.members?.map((member: ApplicationMember) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between p-2 rounded bg-slate-700/50 hover:bg-slate-700"
-                    >
-                      <div className="flex items-center gap-3">
-                        {/* Entry Point Star */}
-                        <button
-                          onClick={() => {
-                            if (member.is_entry_point) {
-                              // Remove entry point
-                              toggleEntryPointMutation.mutate({
-                                appId: selectedApp.id,
-                                assetId: member.asset_id,
-                                isEntryPoint: false,
-                              });
-                            } else {
-                              // Open modal to define entry point with port/protocol
-                              setEditingEntryPoint(member);
-                              setEntryPointForm({
-                                port: '',
-                                protocol: '6',
-                              });
-                            }
-                          }}
-                          className="text-slate-400 hover:text-yellow-400"
-                          title={member.is_entry_point ? 'Remove entry point' : 'Set as entry point'}
-                        >
-                          {member.is_entry_point ? (
-                            <StarIconSolid className="h-5 w-5 text-yellow-400" />
-                          ) : (
-                            <StarIcon className="h-5 w-5" />
-                          )}
-                        </button>
+                  {appDetails?.members?.map((member: ApplicationMember) => {
+                    const hasEntryPoints = member.entry_points.length > 0;
+                    return (
+                      <div
+                        key={member.id}
+                        className="p-2 rounded bg-slate-700/50 hover:bg-slate-700"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {/* Entry Point Star - opens entry points modal */}
+                            <button
+                              onClick={() => {
+                                setEditingMember(member);
+                                setShowEntryPointsModal(true);
+                                setEditingEntryPoint(null);
+                                setEntryPointForm({ port: '', protocol: '6', label: '' });
+                              }}
+                              className="text-slate-400 hover:text-yellow-400"
+                              title={hasEntryPoints ? 'Manage entry points' : 'Add entry point'}
+                            >
+                              {hasEntryPoints ? (
+                                <StarIconSolid className="h-5 w-5 text-yellow-400" />
+                              ) : (
+                                <StarIcon className="h-5 w-5" />
+                              )}
+                            </button>
 
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-white text-sm font-medium">
-                              {member.asset.name}
-                            </span>
-                            {member.is_entry_point && (
-                              <Badge variant="warning" size="sm">
-                                Entry Point
-                                {member.entry_point_port && (
-                                  <span className="ml-1">
-                                    :{member.entry_point_port}/{getProtocolName(member.entry_point_protocol ?? 6)}
-                                  </span>
-                                )}
-                              </Badge>
-                            )}
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white text-sm font-medium">
+                                  {member.asset.name}
+                                </span>
+                              </div>
+                              <span className="text-slate-400 text-xs">
+                                {member.asset.ip_address}
+                                {member.role && ` - ${member.role}`}
+                              </span>
+                            </div>
                           </div>
-                          <span className="text-slate-400 text-xs">
-                            {member.asset.ip_address}
-                            {member.role && ` - ${member.role}`}
-                          </span>
-                        </div>
-                      </div>
 
-                      <div className="flex items-center gap-2">
-                        {/* Edit entry point port/protocol */}
-                        {member.is_entry_point && (
-                          <button
-                            onClick={() => {
-                              setEditingEntryPoint(member);
-                              setEntryPointForm({
-                                port: member.entry_point_port?.toString() || '',
-                                protocol: member.entry_point_protocol?.toString() || '6',
-                              });
-                            }}
-                            className="text-slate-400 hover:text-blue-400"
-                            title="Edit entry point port/protocol"
-                          >
-                            <PencilIcon className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={`/assets/${member.asset_id}`}
+                              className="text-slate-400 hover:text-blue-400"
+                              title="View asset"
+                            >
+                              <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                            </a>
+                            <button
+                              onClick={() =>
+                                removeMemberMutation.mutate({
+                                  appId: selectedApp.id,
+                                  assetId: member.asset_id,
+                                })
+                              }
+                              className="text-slate-400 hover:text-red-400"
+                              title="Remove from application"
+                            >
+                              <XMarkIcon className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Show entry points if any */}
+                        {hasEntryPoints && (
+                          <div className="mt-2 ml-8 flex flex-wrap gap-1">
+                            {member.entry_points.map((ep) => (
+                              <Badge key={ep.id} variant="warning" size="sm">
+                                {ep.label ? `${ep.label}: ` : ''}{ep.port}/{getProtocolName(ep.protocol)}
+                              </Badge>
+                            ))}
+                          </div>
                         )}
-                        <a
-                          href={`/assets/${member.asset_id}`}
-                          className="text-slate-400 hover:text-blue-400"
-                          title="View asset"
-                        >
-                          <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                        </a>
-                        <button
-                          onClick={() =>
-                            removeMemberMutation.mutate({
-                              appId: selectedApp.id,
-                              assetId: member.asset_id,
-                            })
-                          }
-                          className="text-slate-400 hover:text-red-400"
-                          title="Remove from application"
-                        >
-                          <XMarkIcon className="h-4 w-4" />
-                        </button>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </Card>
             </>
@@ -712,16 +740,21 @@ export default function Applications() {
         </div>
       )}
 
-      {/* Set/Edit Entry Point Modal */}
-      {editingEntryPoint && selectedApp && (
+      {/* Entry Points Management Modal */}
+      {showEntryPointsModal && editingMember && selectedApp && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md shadow-xl">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-white">
-                {editingEntryPoint.is_entry_point ? 'Edit' : 'Set'} Entry Point: {editingEntryPoint.asset.name}
+                Entry Points: {editingMember.asset.name}
               </h2>
               <button
-                onClick={() => setEditingEntryPoint(null)}
+                onClick={() => {
+                  setShowEntryPointsModal(false);
+                  setEditingMember(null);
+                  setEditingEntryPoint(null);
+                  setEntryPointForm({ port: '', protocol: '6', label: '' });
+                }}
                 className="text-slate-400 hover:text-white"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -729,65 +762,201 @@ export default function Applications() {
             </div>
 
             <p className="text-sm text-slate-400 mb-4">
-              Define the port and protocol that external clients use to access this application entry point.
+              Define the ports and protocols that external clients use to access this application.
+              You can add multiple entry points (e.g., HTTP on port 80 and HTTPS on port 443).
             </p>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Port <span className="text-slate-500">(required)</span></label>
-                <input
-                  type="number"
-                  min="1"
-                  max="65535"
-                  value={entryPointForm.port}
-                  onChange={(e) =>
-                    setEntryPointForm({ ...entryPointForm, port: e.target.value })
-                  }
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., 443, 80, 8080"
-                />
+            {/* Existing Entry Points */}
+            {editingMember.entry_points.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-slate-300 mb-2">Current Entry Points</h3>
+                <div className="space-y-2">
+                  {editingMember.entry_points.map((ep) => (
+                    <div
+                      key={ep.id}
+                      className="flex items-center justify-between p-2 rounded bg-slate-700/50"
+                    >
+                      {editingEntryPoint?.id === ep.id ? (
+                        // Inline edit form
+                        <div className="flex-1 flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={entryPointForm.label}
+                            onChange={(e) =>
+                              setEntryPointForm({ ...entryPointForm, label: e.target.value })
+                            }
+                            placeholder="Label"
+                            className="w-20 px-2 py-1 text-sm bg-slate-600 border border-slate-500 rounded text-white"
+                          />
+                          <input
+                            type="number"
+                            min="1"
+                            max="65535"
+                            value={entryPointForm.port}
+                            onChange={(e) =>
+                              setEntryPointForm({ ...entryPointForm, port: e.target.value })
+                            }
+                            className="w-20 px-2 py-1 text-sm bg-slate-600 border border-slate-500 rounded text-white"
+                          />
+                          <select
+                            value={entryPointForm.protocol}
+                            onChange={(e) =>
+                              setEntryPointForm({ ...entryPointForm, protocol: e.target.value })
+                            }
+                            className="px-2 py-1 text-sm bg-slate-600 border border-slate-500 rounded text-white"
+                          >
+                            <option value="6">TCP</option>
+                            <option value="17">UDP</option>
+                          </select>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => {
+                              updateEntryPointMutation.mutate({
+                                appId: selectedApp.id,
+                                assetId: editingMember.asset_id,
+                                entryPointId: ep.id,
+                                port: parseInt(entryPointForm.port, 10),
+                                protocol: parseInt(entryPointForm.protocol, 10),
+                                label: entryPointForm.label || null,
+                              });
+                            }}
+                            disabled={!entryPointForm.port || updateEntryPointMutation.isPending}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditingEntryPoint(null);
+                              setEntryPointForm({ port: '', protocol: '6', label: '' });
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="warning" size="sm">
+                              {ep.label ? `${ep.label}: ` : ''}{ep.port}/{getProtocolName(ep.protocol)}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingEntryPoint(ep);
+                                setEntryPointForm({
+                                  port: ep.port.toString(),
+                                  protocol: ep.protocol.toString(),
+                                  label: ep.label || '',
+                                });
+                              }}
+                              className="text-slate-400 hover:text-blue-400 p-1"
+                              title="Edit"
+                            >
+                              <PencilIcon className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                deleteEntryPointMutation.mutate({
+                                  appId: selectedApp.id,
+                                  assetId: editingMember.asset_id,
+                                  entryPointId: ep.id,
+                                });
+                              }}
+                              className="text-slate-400 hover:text-red-400 p-1"
+                              title="Delete"
+                            >
+                              <TrashIcon className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
+            )}
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Protocol</label>
-                <select
-                  value={entryPointForm.protocol}
-                  onChange={(e) =>
-                    setEntryPointForm({ ...entryPointForm, protocol: e.target.value })
-                  }
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="6">TCP</option>
-                  <option value="17">UDP</option>
-                  <option value="1">ICMP</option>
-                  <option value="47">GRE</option>
-                  <option value="50">ESP</option>
-                </select>
+            {/* Add New Entry Point Form */}
+            {!editingEntryPoint && (
+              <div className="border-t border-slate-700 pt-4">
+                <h3 className="text-sm font-medium text-slate-300 mb-2">Add Entry Point</h3>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs text-slate-400 mb-1">Label (optional)</label>
+                    <input
+                      type="text"
+                      value={entryPointForm.label}
+                      onChange={(e) =>
+                        setEntryPointForm({ ...entryPointForm, label: e.target.value })
+                      }
+                      placeholder="e.g., HTTPS"
+                      className="w-full px-2 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded text-white"
+                    />
+                  </div>
+                  <div className="w-24">
+                    <label className="block text-xs text-slate-400 mb-1">Port *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={entryPointForm.port}
+                      onChange={(e) =>
+                        setEntryPointForm({ ...entryPointForm, port: e.target.value })
+                      }
+                      placeholder="443"
+                      className="w-full px-2 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded text-white"
+                    />
+                  </div>
+                  <div className="w-24">
+                    <label className="block text-xs text-slate-400 mb-1">Protocol</label>
+                    <select
+                      value={entryPointForm.protocol}
+                      onChange={(e) =>
+                        setEntryPointForm({ ...entryPointForm, protocol: e.target.value })
+                      }
+                      className="w-full px-2 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded text-white"
+                    >
+                      <option value="6">TCP</option>
+                      <option value="17">UDP</option>
+                    </select>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      addEntryPointMutation.mutate({
+                        appId: selectedApp.id,
+                        assetId: editingMember.asset_id,
+                        entryPoint: {
+                          port: parseInt(entryPointForm.port, 10),
+                          protocol: parseInt(entryPointForm.protocol, 10),
+                          label: entryPointForm.label || undefined,
+                        },
+                      });
+                    }}
+                    disabled={!entryPointForm.port || addEntryPointMutation.isPending}
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="mt-6 flex justify-end gap-3">
+            <div className="mt-6 flex justify-end">
               <Button
                 variant="ghost"
-                onClick={() => setEditingEntryPoint(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
                 onClick={() => {
-                  updateEntryPointMutation.mutate({
-                    appId: selectedApp.id,
-                    assetId: editingEntryPoint.asset_id,
-                    port: entryPointForm.port ? parseInt(entryPointForm.port, 10) : null,
-                    protocol: entryPointForm.protocol
-                      ? parseInt(entryPointForm.protocol, 10)
-                      : null,
-                  });
+                  setShowEntryPointsModal(false);
+                  setEditingMember(null);
+                  setEditingEntryPoint(null);
+                  setEntryPointForm({ port: '', protocol: '6', label: '' });
                 }}
-                disabled={updateEntryPointMutation.isPending || !entryPointForm.port}
               >
-                {updateEntryPointMutation.isPending ? 'Saving...' : (editingEntryPoint.is_entry_point ? 'Save' : 'Set Entry Point')}
+                Close
               </Button>
             </div>
           </div>

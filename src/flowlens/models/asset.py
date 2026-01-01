@@ -485,25 +485,6 @@ class ApplicationMember(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
-    # Entry point designation
-    is_entry_point: Mapped[bool] = mapped_column(
-        default=False,
-        nullable=False,
-    )
-
-    entry_point_order: Mapped[int | None] = mapped_column(
-        nullable=True,
-    )
-
-    # Entry point port/protocol (only used when is_entry_point=True)
-    entry_point_port: Mapped[int | None] = mapped_column(
-        nullable=True,
-    )
-
-    entry_point_protocol: Mapped[int | None] = mapped_column(
-        nullable=True,  # IANA protocol number (6=TCP, 17=UDP, etc.)
-    )
-
     # Relationships
     application: Mapped["Application"] = relationship(
         "Application",
@@ -512,14 +493,75 @@ class ApplicationMember(Base, UUIDMixin, TimestampMixin):
 
     asset: Mapped["Asset"] = relationship("Asset")
 
+    entry_points: Mapped[list["EntryPoint"]] = relationship(
+        "EntryPoint",
+        back_populates="member",
+        cascade="all, delete-orphan",
+        order_by="EntryPoint.order",
+    )
+
     __table_args__ = (
         Index(
             "ix_app_members_app_asset",
             "application_id", "asset_id",
             unique=True,
         ),
+    )
+
+    @property
+    def is_entry_point(self) -> bool:
+        """Check if this member has any entry points defined."""
+        return len(self.entry_points) > 0
+
+
+class EntryPoint(Base, UUIDMixin, TimestampMixin):
+    """Entry point definition for an application member.
+
+    Allows defining multiple entry points (port/protocol combinations)
+    for a single asset within an application. For example, a web server
+    might have entry points on both port 80 and 443.
+    """
+
+    __tablename__ = "entry_points"
+
+    member_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("application_members.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    port: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
+    protocol: Mapped[int] = mapped_column(
+        nullable=False,
+        default=6,  # TCP by default
+    )
+
+    order: Mapped[int] = mapped_column(
+        nullable=False,
+        default=0,
+    )
+
+    label: Mapped[str | None] = mapped_column(
+        String(50),  # e.g., "HTTP", "HTTPS", "API"
+        nullable=True,
+    )
+
+    # Relationship
+    member: Mapped["ApplicationMember"] = relationship(
+        "ApplicationMember",
+        back_populates="entry_points",
+    )
+
+    __table_args__ = (
+        CheckConstraint("port >= 1 AND port <= 65535"),
+        CheckConstraint("protocol >= 0 AND protocol <= 255"),
         Index(
-            "ix_app_members_entry_points",
-            "application_id", "is_entry_point",
+            "ix_entry_points_member_port_proto",
+            "member_id", "port", "protocol",
+            unique=True,
         ),
     )

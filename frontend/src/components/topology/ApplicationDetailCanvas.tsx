@@ -15,6 +15,15 @@ import * as d3 from 'd3';
 import { formatProtocolPort } from '../../utils/network';
 import type { AssetType } from '../../types';
 
+// Entry point in topology data
+interface TopologyEntryPointInfo {
+  id: string;
+  port: number;
+  protocol: number;
+  order: number;
+  label: string | null;
+}
+
 // Node interface for simulation
 interface SimNode extends d3.SimulationNodeDatum {
   id: string;
@@ -23,8 +32,7 @@ interface SimNode extends d3.SimulationNodeDatum {
   ip_address: string;
   asset_type: AssetType | 'client_summary';
   is_entry_point: boolean;
-  entry_point_port: number | null;
-  entry_point_protocol: number | null;
+  entry_points: TopologyEntryPointInfo[];
   entry_point_order: number | null;
   role: string | null;
   is_critical: boolean;
@@ -35,6 +43,9 @@ interface SimNode extends d3.SimulationNodeDatum {
   client_count?: number;
   total_bytes_24h?: number;
   target_entry_point_id?: string;
+  // Legacy fields for client summary nodes
+  entry_point_port?: number | null;
+  entry_point_protocol?: number | null;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
