@@ -1,6 +1,7 @@
 """Pydantic schemas for CIDR classification rules API endpoints."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -164,3 +165,56 @@ class IPClassificationDebug(BaseModel):
     ip_address: str
     matches: list[IPClassificationMatch]
     winning_rule_id: UUID | None = None
+
+
+# =============================================================================
+# Import/Export Schemas
+# =============================================================================
+
+
+class ClassificationRuleExportRow(BaseModel):
+    """Single row in classification rule export (CSV/JSON)."""
+
+    name: str
+    description: str | None = None
+    cidr: str
+    priority: int = 100
+    environment: str | None = None
+    datacenter: str | None = None
+    location: str | None = None
+    asset_type: str | None = None
+    is_internal: bool | None = None
+    default_owner: str | None = None
+    default_team: str | None = None
+    is_active: bool = True
+
+
+class ClassificationRuleImportValidation(BaseModel):
+    """Validation result for a single import row."""
+
+    row_number: int
+    name: str
+    status: str  # "create", "update", "skip", "error"
+    message: str | None = None
+    changes: dict[str, dict[str, Any]] | None = None  # field -> {old, new}
+
+
+class ClassificationRuleImportPreview(BaseModel):
+    """Preview of what an import will do before committing."""
+
+    total_rows: int
+    to_create: int
+    to_update: int
+    to_skip: int
+    errors: int
+    validations: list[ClassificationRuleImportValidation]
+
+
+class ClassificationRuleImportResult(BaseModel):
+    """Result of committing a classification rule import."""
+
+    created: int
+    updated: int
+    skipped: int
+    errors: int
+    error_details: list[str] | None = None

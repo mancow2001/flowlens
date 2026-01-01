@@ -362,3 +362,75 @@ class AssetImportResult(BaseModel):
     skipped: int
     errors: int
     error_details: list[str] | None = None
+
+
+# =============================================================================
+# Application Import/Export Schemas
+# =============================================================================
+
+
+class ApplicationEntryPointExport(BaseModel):
+    """Entry point data for export."""
+
+    port: int
+    protocol: int = 6
+    order: int = 0
+    label: str | None = None
+
+
+class ApplicationMemberExport(BaseModel):
+    """Application member data for export - uses IP address for asset reference."""
+
+    asset_ip_address: str
+    role: str | None = None
+    entry_points: list[ApplicationEntryPointExport] = []
+
+
+class ApplicationExportRow(BaseModel):
+    """Single application in export (JSON format)."""
+
+    name: str
+    display_name: str | None = None
+    description: str | None = None
+    owner: str | None = None
+    team: str | None = None
+    environment: str | None = None
+    criticality: str | None = None
+    tags: dict[str, str] | None = None
+    metadata: dict | None = None
+    members: list[ApplicationMemberExport] = []
+
+
+class ApplicationImportValidation(BaseModel):
+    """Validation result for a single application import."""
+
+    row_number: int
+    name: str
+    status: str  # "create", "update", "skip", "error"
+    message: str | None = None
+    changes: dict[str, dict[str, Any]] | None = None
+    member_changes: list[dict[str, Any]] | None = None
+
+
+class ApplicationImportPreview(BaseModel):
+    """Preview of what an application import will do before committing."""
+
+    total_rows: int
+    to_create: int
+    to_update: int
+    to_skip: int
+    errors: int
+    validations: list[ApplicationImportValidation]
+
+
+class ApplicationImportResult(BaseModel):
+    """Result of committing an application import."""
+
+    created: int
+    updated: int
+    skipped: int
+    errors: int
+    members_added: int
+    members_updated: int
+    members_removed: int
+    error_details: list[str] | None = None
