@@ -296,10 +296,23 @@ class AssetMapper:
         src_asset_id = aggregate.src_asset_id
         dst_asset_id = aggregate.dst_asset_id
 
-        if not src_asset_id:
-            src_asset_id = await self.get_or_create_asset(db, src_ip, src_hostname)
+        # IMPORTANT: Always acquire locks in sorted order to prevent deadlocks
+        # If two workers process flows A→B and B→A simultaneously, they could
+        # deadlock if locks are acquired in different orders.
+        need_src = src_asset_id is None
+        need_dst = dst_asset_id is None
 
-        if not dst_asset_id:
+        if need_src and need_dst:
+            # Need to create both - acquire locks in sorted order
+            if src_ip <= dst_ip:
+                src_asset_id = await self.get_or_create_asset(db, src_ip, src_hostname)
+                dst_asset_id = await self.get_or_create_asset(db, dst_ip, dst_hostname)
+            else:
+                dst_asset_id = await self.get_or_create_asset(db, dst_ip, dst_hostname)
+                src_asset_id = await self.get_or_create_asset(db, src_ip, src_hostname)
+        elif need_src:
+            src_asset_id = await self.get_or_create_asset(db, src_ip, src_hostname)
+        elif need_dst:
             dst_asset_id = await self.get_or_create_asset(db, dst_ip, dst_hostname)
 
         return src_asset_id, dst_asset_id
