@@ -572,11 +572,11 @@ export default function ApplicationDetailCanvas({
           ctx.fillText(`${node.client_count} clients`, x, y + rectHeight / 2 + 5);
 
           // Port label
-          if (node.entry_point_port !== null) {
+          if (node.entry_point_port != null) {
             ctx.fillStyle = '#94a3b8';
             ctx.font = `${9 / transform.k}px sans-serif`;
             ctx.fillText(
-              formatProtocolPort(node.entry_point_protocol ?? 6, node.entry_point_port),
+              formatProtocolPort(node.entry_point_protocol ?? 6, node.entry_point_port!),
               x,
               y + rectHeight / 2 + 20
             );
