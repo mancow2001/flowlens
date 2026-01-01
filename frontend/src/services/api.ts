@@ -687,7 +687,7 @@ export const classificationApi = {
     if (params?.isActive !== undefined) queryParams.set('isActive', String(params.isActive));
     if (params?.environment) queryParams.set('environment', params.environment);
     if (params?.datacenter) queryParams.set('datacenter', params.datacenter);
-    return `/api/v1/classification-rules/export?${queryParams.toString()}`;
+    return `/classification-rules/export?${queryParams.toString()}`;
   },
 
   previewImport: async (file: File): Promise<ClassificationRuleImportPreview> => {
@@ -736,7 +736,7 @@ export const assetBulkApi = {
     if (params?.environment) queryParams.set('environment', params.environment);
     if (params?.datacenter) queryParams.set('datacenter', params.datacenter);
     if (params?.isInternal !== undefined) queryParams.set('isInternal', String(params.isInternal));
-    return `/api/v1/assets/export?${queryParams.toString()}`;
+    return `/assets/export?${queryParams.toString()}`;
   },
 
   previewImport: async (file: File): Promise<AssetImportPreview> => {
@@ -1307,7 +1307,7 @@ export const applicationsApi = {
     if (params?.team) queryParams.set('team', params.team);
     if (params?.criticality) queryParams.set('criticality', params.criticality);
     const query = queryParams.toString();
-    return `/api/v1/applications/export${query ? `?${query}` : ''}`;
+    return `/applications/export${query ? `?${query}` : ''}`;
   },
 
   previewImport: async (file: File): Promise<ApplicationImportPreview> => {
