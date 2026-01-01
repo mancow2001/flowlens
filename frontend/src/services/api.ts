@@ -579,6 +579,29 @@ export interface IPClassificationResult {
   is_internal: boolean | null;
 }
 
+export interface ClassificationRuleImportPreview {
+  total_rows: number;
+  to_create: number;
+  to_update: number;
+  to_skip: number;
+  errors: number;
+  validations: Array<{
+    row_number: number;
+    name: string;
+    status: 'create' | 'update' | 'skip' | 'error';
+    message: string | null;
+    changes: Record<string, { old: unknown; new: unknown }> | null;
+  }>;
+}
+
+export interface ClassificationRuleImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  error_details: string[] | null;
+}
+
 export interface AssetImportPreview {
   total_rows: number;
   to_create: number;
@@ -650,6 +673,39 @@ export const classificationApi = {
 
   listLocations: async (): Promise<string[]> => {
     const { data } = await api.get('/classification-rules/locations/list');
+    return data;
+  },
+
+  // Import/Export
+  exportUrl: (format: 'csv' | 'json' = 'json', params?: {
+    isActive?: boolean;
+    environment?: string;
+    datacenter?: string;
+  }): string => {
+    const queryParams = new URLSearchParams();
+    queryParams.set('format', format);
+    if (params?.isActive !== undefined) queryParams.set('isActive', String(params.isActive));
+    if (params?.environment) queryParams.set('environment', params.environment);
+    if (params?.datacenter) queryParams.set('datacenter', params.datacenter);
+    return `/api/v1/classification-rules/export?${queryParams.toString()}`;
+  },
+
+  previewImport: async (file: File): Promise<ClassificationRuleImportPreview> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/classification-rules/import/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  import: async (file: File, skipErrors: boolean = false, autoApply: boolean = true): Promise<ClassificationRuleImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/classification-rules/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { skipErrors, autoApply },
+    });
     return data;
   },
 };
@@ -1094,6 +1150,41 @@ export const tasksApi = {
   },
 };
 
+// Application Import/Export types
+export interface ApplicationImportPreview {
+  total_rows: number;
+  to_create: number;
+  to_update: number;
+  to_skip: number;
+  errors: number;
+  validations: Array<{
+    row_number: number;
+    name: string;
+    status: 'create' | 'update' | 'skip' | 'error';
+    message: string | null;
+    changes: Record<string, { old: unknown; new: unknown }> | null;
+    member_changes: Array<{
+      action: 'add' | 'remove' | 'update';
+      asset_ip: string;
+      role?: string | null;
+      entry_points?: number;
+      role_changed?: boolean;
+      entry_points_changed?: boolean;
+    }> | null;
+  }>;
+}
+
+export interface ApplicationImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  members_added: number;
+  members_updated: number;
+  members_removed: number;
+  error_details: string[] | null;
+}
+
 // Applications endpoints
 export const applicationsApi = {
   list: async (params?: {
@@ -1201,6 +1292,39 @@ export const applicationsApi = {
         include_external: includeExternal,
         max_depth: maxDepth,
       },
+    });
+    return data;
+  },
+
+  // Import/Export
+  exportUrl: (params?: {
+    environment?: string;
+    team?: string;
+    criticality?: string;
+  }): string => {
+    const queryParams = new URLSearchParams();
+    if (params?.environment) queryParams.set('environment', params.environment);
+    if (params?.team) queryParams.set('team', params.team);
+    if (params?.criticality) queryParams.set('criticality', params.criticality);
+    const query = queryParams.toString();
+    return `/api/v1/applications/export${query ? `?${query}` : ''}`;
+  },
+
+  previewImport: async (file: File): Promise<ApplicationImportPreview> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/applications/import/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  import: async (file: File, skipErrors: boolean = false, syncMembers: boolean = true): Promise<ApplicationImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post('/applications/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { skipErrors, syncMembers },
     });
     return data;
   },
