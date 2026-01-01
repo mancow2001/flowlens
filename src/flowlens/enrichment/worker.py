@@ -229,8 +229,16 @@ class EnrichmentWorker:
                 src_asset_id = None
                 dst_asset_id = None
                 if not skip_assets:
-                    src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
-                    dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
+                    # IMPORTANT: Always acquire locks in sorted order to prevent deadlocks
+                    # If two workers process flows A→B and B→A simultaneously, they could
+                    # deadlock if locks are acquired in different orders. By always sorting,
+                    # both workers will acquire locks in the same order (A then B).
+                    if src_ip <= dst_ip:
+                        src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
+                        dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
+                    else:
+                        dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
+                        src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
 
                 # Get service info
                 service_info = self._protocol_resolver.resolve(flow.dst_port, flow.protocol)
