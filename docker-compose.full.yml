@@ -244,6 +244,8 @@ services:
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # Discard all flows involving external (non-RFC1918/non-private IPv6) IPs
+      RESOLUTION_DISCARD_EXTERNAL_FLOWS: "true"
       ENRICHMENT_BATCH_SIZE: "500"
       ENRICHMENT_WORKER_COUNT: "4"
       LOG_LEVEL: INFO

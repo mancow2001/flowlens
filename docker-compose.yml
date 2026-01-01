@@ -159,6 +159,7 @@ services:
     environment:
       ENVIRONMENT: development
       <<: *db-logging-env
+      <<: *resolution-env
       ENRICHMENT_WORKER_COUNT: "2"
       ENRICHMENT_BATCH_SIZE: "500"
     depends_on:

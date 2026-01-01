@@ -18,7 +18,7 @@ from flowlens.common.logging import get_logger
 from flowlens.common.metrics import ENRICHMENT_ERRORS, ENRICHMENT_PROCESSED
 from flowlens.enrichment.correlator import AssetCorrelator
 from flowlens.enrichment.resolvers.dns import DNSResolver
-from flowlens.enrichment.resolvers.geoip import GeoIPResolver
+from flowlens.enrichment.resolvers.geoip import GeoIPResolver, PrivateIPClassifier
 from flowlens.enrichment.resolvers.protocol import ProtocolResolver
 from flowlens.models.flow import FlowRecord
 
@@ -44,10 +44,12 @@ class EnrichmentWorker:
         Args:
             settings: Enrichment settings.
         """
+        all_settings = get_settings()
         if settings is None:
-            settings = get_settings().enrichment
+            settings = all_settings.enrichment
 
         self._settings = settings
+        self._resolution_settings = all_settings.resolution
         self._batch_size = settings.batch_size
         self._poll_interval = settings.poll_interval_ms / 1000
 
@@ -56,6 +58,7 @@ class EnrichmentWorker:
         self._geoip_resolver = GeoIPResolver(settings)
         self._protocol_resolver = ProtocolResolver()
         self._correlator = AssetCorrelator(self._geoip_resolver)
+        self._ip_classifier = PrivateIPClassifier()
 
         # State
         self._running = False
@@ -92,6 +95,28 @@ class EnrichmentWorker:
     async def stop(self) -> None:
         """Stop the enrichment worker."""
         self._running = False
+
+    def _should_skip_external_flow(self, src_ip: str, dst_ip: str) -> bool:
+        """Check if a flow should be skipped due to external IPs.
+
+        When discard_external_flows is enabled, skip flows involving any
+        non-RFC1918 IPv4 or non-private IPv6 addresses to avoid creating
+        external assets.
+
+        Args:
+            src_ip: Source IP address.
+            dst_ip: Destination IP address.
+
+        Returns:
+            True if the flow should be skipped.
+        """
+        if not self._resolution_settings.discard_external_flows:
+            return False
+
+        src_is_external = not self._ip_classifier.is_private(src_ip)
+        dst_is_external = not self._ip_classifier.is_private(dst_ip)
+
+        return src_is_external or dst_is_external
 
     async def _process_batch(self) -> int:
         """Process a batch of unenriched flows.
@@ -176,6 +201,8 @@ class EnrichmentWorker:
         """Enrich a single flow record.
 
         Uses a savepoint so individual flow failures don't abort the batch.
+        Skips asset creation for flows with external IPs when
+        discard_external_flows is enabled.
 
         Args:
             db: Database session.
@@ -191,13 +218,19 @@ class EnrichmentWorker:
                 src_ip = str(flow.src_ip)
                 dst_ip = str(flow.dst_ip)
 
+                # Check if this flow should skip asset creation due to external IPs
+                skip_assets = self._should_skip_external_flow(src_ip, dst_ip)
+
                 # Get hostnames from batch results
                 src_hostname = hostnames.get(src_ip)
                 dst_hostname = hostnames.get(dst_ip)
 
-                # Correlate to assets
-                src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
-                dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
+                # Correlate to assets only if not skipping external flows
+                src_asset_id = None
+                dst_asset_id = None
+                if not skip_assets:
+                    src_asset_id = await self._correlator.correlate(db, src_ip, src_hostname)
+                    dst_asset_id = await self._correlator.correlate(db, dst_ip, dst_hostname)
 
                 # Get service info
                 service_info = self._protocol_resolver.resolve(flow.dst_port, flow.protocol)
@@ -207,12 +240,13 @@ class EnrichmentWorker:
                 extended["enrichment"] = {
                     "src_hostname": src_hostname,
                     "dst_hostname": dst_hostname,
-                    "src_asset_id": str(src_asset_id),
-                    "dst_asset_id": str(dst_asset_id),
+                    "src_asset_id": str(src_asset_id) if src_asset_id else None,
+                    "dst_asset_id": str(dst_asset_id) if dst_asset_id else None,
                     "service_name": service_info.name if service_info else None,
                     "service_category": service_info.category if service_info else None,
                     "is_encrypted": service_info.encrypted if service_info else None,
                     "enriched_at": datetime.utcnow().isoformat(),
+                    "external_flow_discarded": skip_assets,
                 }
 
                 # Update flow record
