@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ArrowDownTrayIcon, ArrowUpTrayIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
-import { classificationApi, ClassificationRule, ClassificationRuleSummary } from '../services/api';
+import {
+  classificationApi,
+  ClassificationRule,
+  ClassificationRuleSummary,
+  ClassificationRuleImportPreview,
+} from '../services/api';
 import { ENVIRONMENT_OPTIONS } from '../types';
 
 interface RuleFormData {
@@ -65,6 +71,14 @@ export default function ClassificationRules() {
     location: string | null;
   } | null>(null);
 
+  // Import modal state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<ClassificationRuleImportPreview | null>(null);
+  const [skipErrors, setSkipErrors] = useState(false);
+  const [autoApply, setAutoApply] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Fetch rules
   const { data: rulesData, isLoading } = useQuery({
     queryKey: ['classification-rules'],
@@ -125,6 +139,54 @@ export default function ClassificationRules() {
       queryClient.invalidateQueries({ queryKey: ['classification-rules'] });
     },
   });
+
+  // Import preview mutation
+  const previewImportMutation = useMutation({
+    mutationFn: (file: File) => classificationApi.previewImport(file),
+    onSuccess: (data) => {
+      setImportPreview(data);
+    },
+  });
+
+  // Import mutation
+  const importMutation = useMutation({
+    mutationFn: ({ file, skipErrors, autoApply }: { file: File; skipErrors: boolean; autoApply: boolean }) =>
+      classificationApi.import(file, skipErrors, autoApply),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['classification-rules'] });
+      setShowImportModal(false);
+      setImportFile(null);
+      setImportPreview(null);
+    },
+  });
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImportFile(file);
+      setImportPreview(null);
+      previewImportMutation.mutate(file);
+    }
+  };
+
+  const handleImport = () => {
+    if (importFile) {
+      importMutation.mutate({ file: importFile, skipErrors, autoApply });
+    }
+  };
+
+  const handleExport = (format: 'csv' | 'json') => {
+    window.open(classificationApi.exportUrl(format), '_blank');
+  };
+
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setImportFile(null);
+    setImportPreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   const handleEdit = (rule: ClassificationRuleSummary) => {
     classificationApi.get(rule.id).then((fullRule) => {
@@ -193,16 +255,45 @@ export default function ClassificationRules() {
             Define CIDR-based rules to automatically classify assets by environment, datacenter, and location
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={() => {
-            setEditingRule(null);
-            setFormData(emptyFormData);
-            setShowModal(true);
-          }}
-        >
-          Add Rule
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Export Dropdown */}
+          <div className="relative group">
+            <Button variant="secondary">
+              <ArrowDownTrayIcon className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+            <div className="absolute right-0 mt-1 w-40 bg-slate-800 border border-slate-700 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+              <button
+                onClick={() => handleExport('json')}
+                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-t-lg"
+              >
+                Export as JSON
+              </button>
+              <button
+                onClick={() => handleExport('csv')}
+                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-b-lg"
+              >
+                Export as CSV
+              </button>
+            </div>
+          </div>
+          {/* Import Button */}
+          <Button variant="secondary" onClick={() => setShowImportModal(true)}>
+            <ArrowUpTrayIcon className="w-4 h-4 mr-2" />
+            Import
+          </Button>
+          {/* Add Rule Button */}
+          <Button
+            variant="primary"
+            onClick={() => {
+              setEditingRule(null);
+              setFormData(emptyFormData);
+              setShowModal(true);
+            }}
+          >
+            Add Rule
+          </Button>
+        </div>
       </div>
 
       {/* Test IP Tool */}
@@ -500,6 +591,170 @@ export default function ClassificationRules() {
                 </Button>
               </div>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">Import Classification Rules</h2>
+              <button onClick={closeImportModal} className="text-slate-400 hover:text-white">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* File Input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.json"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            {!importFile ? (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-primary-500 transition-colors"
+              >
+                <ArrowUpTrayIcon className="w-12 h-12 mx-auto text-slate-500 mb-3" />
+                <p className="text-slate-300 mb-1">Click to select a file or drag and drop</p>
+                <p className="text-sm text-slate-500">Supports CSV and JSON formats</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Selected File */}
+                <div className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
+                  <span className="text-slate-200">{importFile.name}</span>
+                  <button
+                    onClick={() => {
+                      setImportFile(null);
+                      setImportPreview(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    <XMarkIcon className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Loading State */}
+                {previewImportMutation.isPending && (
+                  <div className="text-center py-4 text-slate-400">Analyzing file...</div>
+                )}
+
+                {/* Error State */}
+                {previewImportMutation.isError && (
+                  <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400">
+                    Failed to parse file. Please check the format.
+                  </div>
+                )}
+
+                {/* Preview */}
+                {importPreview && (
+                  <>
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="p-3 bg-slate-700/50 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-white">{importPreview.total_rows}</div>
+                        <div className="text-xs text-slate-400">Total Rows</div>
+                      </div>
+                      <div className="p-3 bg-green-500/20 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-green-400">{importPreview.to_create}</div>
+                        <div className="text-xs text-slate-400">To Create</div>
+                      </div>
+                      <div className="p-3 bg-blue-500/20 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-blue-400">{importPreview.to_update}</div>
+                        <div className="text-xs text-slate-400">To Update</div>
+                      </div>
+                      <div className="p-3 bg-red-500/20 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-red-400">{importPreview.errors}</div>
+                        <div className="text-xs text-slate-400">Errors</div>
+                      </div>
+                    </div>
+
+                    {/* Validation Details */}
+                    {importPreview.validations.length > 0 && (
+                      <div className="max-h-60 overflow-y-auto border border-slate-700 rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-700/50 sticky top-0">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-slate-400">Row</th>
+                              <th className="px-3 py-2 text-left text-slate-400">Name</th>
+                              <th className="px-3 py-2 text-left text-slate-400">Status</th>
+                              <th className="px-3 py-2 text-left text-slate-400">Message</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700">
+                            {importPreview.validations.map((v) => (
+                              <tr key={v.row_number}>
+                                <td className="px-3 py-2 text-slate-300">{v.row_number}</td>
+                                <td className="px-3 py-2 text-slate-200">{v.name || '-'}</td>
+                                <td className="px-3 py-2">
+                                  <span
+                                    className={`px-2 py-0.5 text-xs rounded-full ${
+                                      v.status === 'create'
+                                        ? 'bg-green-500/20 text-green-400'
+                                        : v.status === 'update'
+                                        ? 'bg-blue-500/20 text-blue-400'
+                                        : v.status === 'error'
+                                        ? 'bg-red-500/20 text-red-400'
+                                        : 'bg-slate-500/20 text-slate-400'
+                                    }`}
+                                  >
+                                    {v.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-slate-400 text-xs">{v.message}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Import Options */}
+                    <div className="flex items-center gap-4 pt-2">
+                      <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={skipErrors}
+                          onChange={(e) => setSkipErrors(e.target.checked)}
+                          className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
+                        />
+                        Skip rows with errors
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={autoApply}
+                          onChange={(e) => setAutoApply(e.target.checked)}
+                          className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
+                        />
+                        Auto-apply rules to assets after import
+                      </label>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-slate-700">
+              <Button variant="ghost" onClick={closeImportModal}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleImport}
+                disabled={!importPreview || importMutation.isPending || (importPreview.errors > 0 && !skipErrors)}
+              >
+                {importMutation.isPending ? 'Importing...' : 'Import Rules'}
+              </Button>
+            </div>
           </Card>
         </div>
       )}
