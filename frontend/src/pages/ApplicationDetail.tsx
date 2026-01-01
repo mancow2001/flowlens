@@ -20,6 +20,15 @@ import type { AssetType, InboundSummary } from '../types';
 
 type RenderMode = 'auto' | 'svg' | 'canvas';
 
+// Entry point in topology data
+interface TopologyEntryPointInfo {
+  id: string;
+  port: number;
+  protocol: number;
+  order: number;
+  label: string | null;
+}
+
 // D3 simulation node extending the API response
 interface SimNode extends d3.SimulationNodeDatum {
   id: string;
@@ -28,8 +37,7 @@ interface SimNode extends d3.SimulationNodeDatum {
   ip_address: string;
   asset_type: AssetType | 'client_summary';
   is_entry_point: boolean;
-  entry_point_port: number | null;
-  entry_point_protocol: number | null;
+  entry_points: TopologyEntryPointInfo[];
   entry_point_order: number | null;
   role: string | null;
   is_critical: boolean;
@@ -41,6 +49,9 @@ interface SimNode extends d3.SimulationNodeDatum {
   client_count?: number;
   total_bytes_24h?: number;
   target_entry_point_id?: string;
+  // Legacy fields for client summary nodes (port/protocol for the specific entry point)
+  entry_point_port?: number | null;
+  entry_point_protocol?: number | null;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -159,6 +170,7 @@ export default function ApplicationDetail() {
           ip_address: '',
           asset_type: 'client_summary',
           is_entry_point: false,
+          entry_points: [],
           entry_point_port: summary.port,
           entry_point_protocol: summary.protocol,
           entry_point_order: null,
@@ -706,12 +718,16 @@ export default function ApplicationDetail() {
                         Role: <span className="text-slate-300">{hoveredNode.role}</span>
                       </div>
                     )}
-                    {hoveredNode.is_entry_point && hoveredNode.entry_point_port && (
+                    {hoveredNode.is_entry_point && hoveredNode.entry_points.length > 0 && (
                       <div className="text-slate-400">
-                        Entry Port:{' '}
+                        Entry Ports:{' '}
                         <span className="text-yellow-400">
-                          {hoveredNode.entry_point_port}/
-                          {getProtocolName(hoveredNode.entry_point_protocol ?? 6)}
+                          {hoveredNode.entry_points.map((ep, i) => (
+                            <span key={ep.id}>
+                              {i > 0 && ', '}
+                              {ep.label ? `${ep.label}: ` : ''}{ep.port}/{getProtocolName(ep.protocol)}
+                            </span>
+                          ))}
                         </span>
                       </div>
                     )}
