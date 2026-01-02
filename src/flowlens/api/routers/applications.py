@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import String, cast, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, Sorting, ViewerUser
@@ -291,13 +291,16 @@ async def preview_application_import(
                 all_ips.add(m["asset_ip_address"])
 
     # Fetch all assets by IP
+    # Use func.host() to extract just the IP without CIDR notation (e.g., /32)
+    # since PostgreSQL INET type adds CIDR notation when cast to string
     if all_ips:
         asset_query = select(Asset).where(
             Asset.deleted_at.is_(None),
-            cast(Asset.ip_address, String).in_(list(all_ips)),
+            func.host(Asset.ip_address).in_(list(all_ips)),
         )
         asset_result = await db.execute(asset_query)
-        ip_to_asset = {str(a.ip_address): a for a in asset_result.scalars().all()}
+        # Strip CIDR notation from keys to match import file format
+        ip_to_asset = {str(a.ip_address).split('/')[0]: a for a in asset_result.scalars().all()}
     else:
         ip_to_asset = {}
 
@@ -503,13 +506,16 @@ async def import_applications(
             if m.get("asset_ip_address"):
                 all_ips.add(m["asset_ip_address"])
 
+    # Use func.host() to extract just the IP without CIDR notation (e.g., /32)
+    # since PostgreSQL INET type adds CIDR notation when cast to string
     if all_ips:
         asset_query = select(Asset).where(
             Asset.deleted_at.is_(None),
-            cast(Asset.ip_address, String).in_(list(all_ips)),
+            func.host(Asset.ip_address).in_(list(all_ips)),
         )
         asset_result = await db.execute(asset_query)
-        ip_to_asset = {str(a.ip_address): a for a in asset_result.scalars().all()}
+        # Strip CIDR notation from keys to match import file format
+        ip_to_asset = {str(a.ip_address).split('/')[0]: a for a in asset_result.scalars().all()}
     else:
         ip_to_asset = {}
 
