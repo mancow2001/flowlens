@@ -149,18 +149,16 @@ export default function ApplicationDetail() {
 
     // Create client summary nodes from inbound_summary (leftmost column)
     if (topology.inbound_summary) {
-      const entryPointNodes = topology.nodes.filter(n => n.is_entry_point);
-      const entryPointYSpacing = height / (entryPointNodes.length + 1);
+      // Filter to only summaries with clients
+      const clientSummaries = topology.inbound_summary.filter(s => s.client_count > 0);
+      const clientYSpacing = height / (clientSummaries.length + 1);
 
-      topology.inbound_summary.forEach((summary: InboundSummary) => {
-        if (summary.client_count === 0) return;
+      clientSummaries.forEach((summary: InboundSummary, summaryIndex: number) => {
+        // Use summaryIndex for Y positioning to ensure each client summary has unique position
+        const yPos = clientYSpacing * (summaryIndex + 1);
 
-        const entryPointIndex = entryPointNodes.findIndex(
-          n => n.id === summary.entry_point_asset_id
-        );
-        const yPos = entryPointYSpacing * (entryPointIndex + 1);
-
-        const clientNodeId = `client-summary-${summary.entry_point_asset_id}`;
+        // Include port and protocol in ID to ensure uniqueness when same asset has multiple entry points
+        const clientNodeId = `client-summary-${summary.entry_point_asset_id}-${summary.port}-${summary.protocol}`;
         const xPos = getLayoutX(-1); // -1 for client summary column
 
         simNodes.push({
