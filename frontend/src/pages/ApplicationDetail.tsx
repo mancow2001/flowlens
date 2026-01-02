@@ -558,12 +558,52 @@ export default function ApplicationDetail() {
         .attr('x', (d) => {
           const source = d.source as SimNode;
           const target = d.target as SimNode;
-          return ((source.x ?? 0) + (target.x ?? 0)) / 2;
+          const sx = source.x ?? 0;
+          const sy = source.y ?? 0;
+          const tx = target.x ?? 0;
+          const ty = target.y ?? 0;
+          const midX = (sx + tx) / 2;
+
+          // For straight client edges, use simple midpoint
+          if (d.is_from_client_summary) {
+            return midX;
+          }
+
+          // For curved edges, offset perpendicular to edge direction
+          const dx = tx - sx;
+          const dy = ty - sy;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len === 0) return midX;
+
+          // Perpendicular direction (matches arc sweep direction)
+          const perpX = -dy / len;
+          const offset = 15;
+          return midX + perpX * offset;
         })
         .attr('y', (d) => {
           const source = d.source as SimNode;
           const target = d.target as SimNode;
-          return ((source.y ?? 0) + (target.y ?? 0)) / 2 - 8;
+          const sx = source.x ?? 0;
+          const sy = source.y ?? 0;
+          const tx = target.x ?? 0;
+          const ty = target.y ?? 0;
+          const midY = (sy + ty) / 2;
+
+          // For straight client edges, use simple midpoint with small offset
+          if (d.is_from_client_summary) {
+            return midY - 8;
+          }
+
+          // For curved edges, offset perpendicular to edge direction
+          const dx = tx - sx;
+          const dy = ty - sy;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len === 0) return midY - 8;
+
+          // Perpendicular direction (matches arc sweep direction)
+          const perpY = dx / len;
+          const offset = 15;
+          return midY + perpY * offset;
         });
 
       nodeElements.attr('transform', (d) => `translate(${d.x},${d.y})`);

@@ -484,8 +484,33 @@ export default function ApplicationDetailCanvas({
         const label = edge.target_port?.toString() || '';
         if (!label) return;
 
-        const mx = (sx + tx) / 2;
-        const my = (sy + ty) / 2 - 8;
+        const midX = (sx + tx) / 2;
+        const midY = (sy + ty) / 2;
+
+        let mx: number;
+        let my: number;
+
+        if (edge.is_from_client_summary) {
+          // Straight client edges - simple midpoint
+          mx = midX;
+          my = midY - 8;
+        } else {
+          // Curved edges - offset perpendicular to edge direction
+          const dx = tx - sx;
+          const dy = ty - sy;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len === 0) {
+            mx = midX;
+            my = midY - 8;
+          } else {
+            // Perpendicular direction (matches curve direction)
+            const perpX = -dy / len;
+            const perpY = dx / len;
+            const offset = 15;
+            mx = midX + perpX * offset;
+            my = midY + perpY * offset;
+          }
+        }
 
         // Background for readability
         const textWidth = ctx.measureText(label).width;
