@@ -473,6 +473,20 @@ export default function ApplicationDetailCanvas({
       ctx.textBaseline = 'middle';
       ctx.globalAlpha = 1;
 
+      // Build edge grouping map for spreading labels of edges with same source-target
+      const edgeGroupMap = new Map<string, { count: number; indexMap: Map<string, number> }>();
+      renderLinks.forEach((link) => {
+        const source = link.source as SimNode;
+        const target = link.target as SimNode;
+        const key = `${source.id}-${target.id}`;
+        if (!edgeGroupMap.has(key)) {
+          edgeGroupMap.set(key, { count: 0, indexMap: new Map() });
+        }
+        const group = edgeGroupMap.get(key)!;
+        group.indexMap.set(link.id, group.count);
+        group.count++;
+      });
+
       renderLinks.forEach(edge => {
         const source = edge.source as SimNode;
         const target = edge.target as SimNode;
@@ -509,6 +523,17 @@ export default function ApplicationDetailCanvas({
             const offset = 15;
             mx = midX + perpX * offset;
             my = midY + perpY * offset;
+
+            // Spread labels for edges with same source-target (different ports)
+            const key = `${source.id}-${target.id}`;
+            const group = edgeGroupMap.get(key);
+            if (group && group.count > 1) {
+              const idx = group.indexMap.get(edge.id) ?? 0;
+              const spreadOffset = (idx - (group.count - 1) / 2) * 18;
+              // Spread along edge direction
+              mx += (dx / len) * spreadOffset;
+              my += (dy / len) * spreadOffset;
+            }
           }
         }
 

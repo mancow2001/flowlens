@@ -536,6 +536,20 @@ export default function ApplicationDetail() {
       .attr('font-size', 9)
       .text((d) => formatProtocolPort(d.entry_point_protocol ?? 6, d.entry_point_port!));
 
+    // Build edge grouping map for spreading labels of edges with same source-target
+    const edgeGroupMap = new Map<string, { count: number; indexMap: Map<string, number> }>();
+    links.forEach((link) => {
+      const sourceId = typeof link.source === 'string' ? link.source : (link.source as SimNode).id;
+      const targetId = typeof link.target === 'string' ? link.target : (link.target as SimNode).id;
+      const key = `${sourceId}-${targetId}`;
+      if (!edgeGroupMap.has(key)) {
+        edgeGroupMap.set(key, { count: 0, indexMap: new Map() });
+      }
+      const group = edgeGroupMap.get(key)!;
+      group.indexMap.set(link.id, group.count);
+      group.count++;
+    });
+
     // Update positions on tick
     simulation.on('tick', () => {
       linkElements.attr('d', (d) => {
@@ -578,7 +592,19 @@ export default function ApplicationDetail() {
           // Perpendicular direction (matches arc sweep direction)
           const perpX = -dy / len;
           const offset = 15;
-          return midX + perpX * offset;
+          let labelX = midX + perpX * offset;
+
+          // Spread labels for edges with same source-target (different ports)
+          const key = `${source.id}-${target.id}`;
+          const group = edgeGroupMap.get(key);
+          if (group && group.count > 1) {
+            const idx = group.indexMap.get(d.id) ?? 0;
+            const spreadOffset = (idx - (group.count - 1) / 2) * 18;
+            // Spread along edge direction
+            labelX += (dx / len) * spreadOffset;
+          }
+
+          return labelX;
         })
         .attr('y', (d) => {
           const source = d.source as SimNode;
@@ -603,7 +629,19 @@ export default function ApplicationDetail() {
           // Perpendicular direction (matches arc sweep direction)
           const perpY = dx / len;
           const offset = 15;
-          return midY + perpY * offset;
+          let labelY = midY + perpY * offset;
+
+          // Spread labels for edges with same source-target (different ports)
+          const key = `${source.id}-${target.id}`;
+          const group = edgeGroupMap.get(key);
+          if (group && group.count > 1) {
+            const idx = group.indexMap.get(d.id) ?? 0;
+            const spreadOffset = (idx - (group.count - 1) / 2) * 18;
+            // Spread along edge direction
+            labelY += (dy / len) * spreadOffset;
+          }
+
+          return labelY;
         });
 
       nodeElements.attr('transform', (d) => `translate(${d.x},${d.y})`);
