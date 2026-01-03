@@ -125,6 +125,50 @@ export function isICMP(protocol: number): boolean {
 }
 
 /**
+ * Check if a port is an ephemeral/dynamic port.
+ * Ephemeral ports are temporary ports assigned by the OS for client-side connections.
+ * These are typically in the range 32768-65535 (Linux) or 49152-65535 (IANA).
+ * We use 10000 as a threshold to also catch common high ports that aren't well-known services.
+ * @param port - Port number
+ * @returns True if the port is likely an ephemeral port
+ */
+export function isEphemeralPort(port: number): boolean {
+  // If the port is in our known services list, it's not ephemeral
+  if (PORT_SERVICES[port]) {
+    return false;
+  }
+  // Consider ports > 10000 as ephemeral unless they're known services
+  return port > 10000;
+}
+
+/**
+ * Get a meaningful label for an edge based on port.
+ * Returns service name for well-known ports, port number for other recognized ports,
+ * or empty string for ephemeral ports.
+ * @param port - Port number
+ * @returns Label string or empty string for ephemeral ports
+ */
+export function getEdgeLabelForPort(port: number): string {
+  if (!port || port === 0) {
+    return '';
+  }
+
+  // Check for known service name first
+  const service = PORT_SERVICES[port];
+  if (service) {
+    return service.toLowerCase();
+  }
+
+  // Filter out ephemeral ports - they're not meaningful to display
+  if (isEphemeralPort(port)) {
+    return '';
+  }
+
+  // For other low ports without a known service, show the port number
+  return port.toString();
+}
+
+/**
  * Format bytes to human-readable string.
  * @param bytes - Number of bytes
  * @returns Formatted string (e.g., "1.5 GB", "256 KB")
