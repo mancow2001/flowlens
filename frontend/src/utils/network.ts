@@ -21,45 +21,100 @@ const PROTOCOL_NAMES: Record<number, string> = {
 
 // Common port to service name mapping
 const PORT_SERVICES: Record<number, string> = {
-  20: 'FTP-DATA',
+  // File transfer
+  20: 'FTP-Data',
   21: 'FTP',
   22: 'SSH',
-  23: 'Telnet',
+
+  // Email
   25: 'SMTP',
+  110: 'POP3',
+  143: 'IMAP',
+  465: 'SMTPS',
+  587: 'SMTP-TLS',
+  993: 'IMAPS',
+  995: 'POP3S',
+
+  // Identity & Auth
+  49: 'TACACS',
+  88: 'Kerberos',
+  389: 'LDAP',
+  636: 'LDAPS',
+  1812: 'RADIUS',
+  1813: 'RADIUS-Acct',
+
+  // Infrastructure core
   53: 'DNS',
   67: 'DHCP',
   68: 'DHCP',
-  80: 'HTTP',
-  110: 'POP3',
   123: 'NTP',
-  143: 'IMAP',
   161: 'SNMP',
   162: 'SNMP-Trap',
-  389: 'LDAP',
-  443: 'HTTPS',
-  445: 'SMB',
-  465: 'SMTPS',
   514: 'Syslog',
-  636: 'LDAPS',
-  993: 'IMAPS',
-  995: 'POP3S',
+
+  // Web & Edge
+  80: 'HTTP',
+  443: 'HTTPS',
+  3128: 'Proxy',
+  8080: 'HTTP-Alt',
+  8081: 'Proxy-HTTPS',
+  8443: 'HTTPS-Alt',
+
+  // Storage
+  445: 'SMB',
+  2049: 'NFS',
+
+  // Databases - Relational
   1433: 'MSSQL',
+  1434: 'MSSQL-Browser',
   1521: 'Oracle',
   3306: 'MySQL',
-  3389: 'RDP',
   5432: 'PostgreSQL',
-  5672: 'AMQP',
-  5900: 'VNC',
+  50000: 'DB2',
+
+  // Databases - NoSQL
   6379: 'Redis',
-  6443: 'K8s API',
-  8080: 'HTTP-Alt',
-  8443: 'HTTPS-Alt',
-  9000: 'SonarQube',
-  9090: 'Prometheus',
-  9200: 'Elasticsearch',
-  9300: 'ES Transport',
-  11211: 'Memcached',
+  6380: 'Redis-TLS',
+  8091: 'Couchbase',
+  9042: 'Cassandra',
+  11210: 'Couchbase-Data',
   27017: 'MongoDB',
+
+  // Messaging & Streaming
+  1883: 'MQTT',
+  2181: 'Zookeeper',
+  5671: 'RabbitMQ-TLS',
+  5672: 'RabbitMQ',
+  8883: 'MQTT-TLS',
+  9092: 'Kafka',
+  9093: 'Kafka-TLS',
+
+  // Management & Monitoring
+  3000: 'Grafana',
+  3389: 'RDP',
+  5900: 'VNC',
+  5985: 'WinRM',
+  5986: 'WinRM-TLS',
+  9090: 'Prometheus',
+
+  // Virtualization & Containers
+  2375: 'Docker',
+  2376: 'Docker-TLS',
+  2379: 'etcd',
+  6443: 'K8s-API',
+
+  // Service Mesh & APIs
+  9901: 'Envoy',
+  15010: 'Istio',
+  50051: 'gRPC',
+
+  // Search & Analytics
+  9000: 'MinIO',
+  9200: 'Elasticsearch',
+  9300: 'ES-Transport',
+
+  // Legacy/Other
+  11211: 'Memcached',
 };
 
 /**
