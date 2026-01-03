@@ -12,7 +12,7 @@
 
 import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
-import { formatProtocolPort } from '../../utils/network';
+import { formatProtocolPort, getEdgeLabelForPort } from '../../utils/network';
 import type { AssetType } from '../../types';
 
 // Entry point in topology data
@@ -495,7 +495,7 @@ export default function ApplicationDetailCanvas({
         const tx = target.x ?? 0;
         const ty = target.y ?? 0;
 
-        const label = edge.target_port?.toString() || '';
+        const label = getEdgeLabelForPort(edge.target_port);
         if (!label) return;
 
         const midX = (sx + tx) / 2;
