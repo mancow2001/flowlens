@@ -124,39 +124,49 @@ export function isICMP(protocol: number): boolean {
   return protocol === 1 || protocol === 58; // ICMPv4 or ICMPv6
 }
 
+// Ephemeral port threshold - ports at or above this are typically dynamic/ephemeral
+// Linux uses 32768-60999, IANA recommends 49152-65535
+const EPHEMERAL_PORT_THRESHOLD = 32768;
+
 /**
  * Check if a port is an ephemeral/dynamic port.
  * Ephemeral ports are temporary ports assigned by the OS for client-side connections.
- * These are typically in the range 32768-65535 (Linux) or 49152-65535 (IANA).
- * We use 10000 as a threshold to also catch common high ports that aren't well-known services.
  * @param port - Port number
- * @returns True if the port is likely an ephemeral port
+ * @returns True if the port is in the ephemeral range (>= 32768)
  */
 export function isEphemeralPort(port: number): boolean {
-  // If the port is in our known services list, it's not ephemeral
+  // Known services are never considered ephemeral
   if (PORT_SERVICES[port]) {
     return false;
   }
-  // Consider ports > 10000 as ephemeral unless they're known services
-  return port > 10000;
+  return port >= EPHEMERAL_PORT_THRESHOLD;
 }
 
 /**
  * Get a meaningful label for an edge based on port.
- * Only returns service name for well-known ports.
- * Returns empty string for unknown ports to avoid cluttering the topology view.
+ * Returns service name for well-known ports, port number for non-ephemeral ports,
+ * or empty string for ephemeral ports (32768+) to avoid cluttering the view.
  * @param port - Port number
- * @returns Service name label or empty string for unknown ports
+ * @returns Service name, port number, or empty string for ephemeral ports
  */
 export function getEdgeLabelForPort(port: number): string {
   if (!port || port === 0) {
     return '';
   }
 
-  // Only show labels for ports with known service names
-  // This avoids cluttering the view with meaningless port numbers
+  // Check for known service name first
   const service = PORT_SERVICES[port];
-  return service ? service.toLowerCase() : '';
+  if (service) {
+    return service.toLowerCase();
+  }
+
+  // Filter out ephemeral ports (32768+) - they're client-side dynamic ports
+  if (port >= EPHEMERAL_PORT_THRESHOLD) {
+    return '';
+  }
+
+  // Show port number for non-ephemeral unknown ports (e.g., 2055 for NetFlow)
+  return port.toString();
 }
 
 /**
