@@ -143,29 +143,20 @@ export function isEphemeralPort(port: number): boolean {
 
 /**
  * Get a meaningful label for an edge based on port.
- * Returns service name for well-known ports, port number for other recognized ports,
- * or empty string for ephemeral ports.
+ * Only returns service name for well-known ports.
+ * Returns empty string for unknown ports to avoid cluttering the topology view.
  * @param port - Port number
- * @returns Label string or empty string for ephemeral ports
+ * @returns Service name label or empty string for unknown ports
  */
 export function getEdgeLabelForPort(port: number): string {
   if (!port || port === 0) {
     return '';
   }
 
-  // Check for known service name first
+  // Only show labels for ports with known service names
+  // This avoids cluttering the view with meaningless port numbers
   const service = PORT_SERVICES[port];
-  if (service) {
-    return service.toLowerCase();
-  }
-
-  // Filter out ephemeral ports - they're not meaningful to display
-  if (isEphemeralPort(port)) {
-    return '';
-  }
-
-  // For other low ports without a known service, show the port number
-  return port.toString();
+  return service ? service.toLowerCase() : '';
 }
 
 /**

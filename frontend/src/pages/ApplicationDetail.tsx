@@ -15,7 +15,7 @@ import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import ApplicationDetailCanvas from '../components/topology/ApplicationDetailCanvas';
 import { applicationsApi } from '../services/api';
-import { getProtocolName, formatProtocolPort, formatBytes } from '../utils/network';
+import { getProtocolName, formatProtocolPort, formatBytes, getEdgeLabelForPort } from '../utils/network';
 import type { AssetType, InboundSummary } from '../types';
 
 type RenderMode = 'auto' | 'svg' | 'canvas';
@@ -424,7 +424,7 @@ export default function ApplicationDetail() {
       .attr('fill', '#94a3b8')
       .attr('font-size', 10)
       .attr('pointer-events', 'none')
-      .text((d) => d.target_port?.toString() || '');
+      .text((d) => getEdgeLabelForPort(d.target_port));
 
     // Draw nodes
     const nodesGroup = g.append('g').attr('class', 'nodes');
