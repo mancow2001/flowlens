@@ -124,49 +124,30 @@ export function isICMP(protocol: number): boolean {
   return protocol === 1 || protocol === 58; // ICMPv4 or ICMPv6
 }
 
-// Ephemeral port threshold - ports at or above this are typically dynamic/ephemeral
-// Linux uses 32768-60999, IANA recommends 49152-65535
-const EPHEMERAL_PORT_THRESHOLD = 32768;
-
 /**
- * Check if a port is an ephemeral/dynamic port.
- * Ephemeral ports are temporary ports assigned by the OS for client-side connections.
+ * Check if a port has a known service name.
  * @param port - Port number
- * @returns True if the port is in the ephemeral range (>= 32768)
+ * @returns True if the port has a known service mapping
  */
-export function isEphemeralPort(port: number): boolean {
-  // Known services are never considered ephemeral
-  if (PORT_SERVICES[port]) {
-    return false;
-  }
-  return port >= EPHEMERAL_PORT_THRESHOLD;
+export function isKnownServicePort(port: number): boolean {
+  return !!PORT_SERVICES[port];
 }
 
 /**
  * Get a meaningful label for an edge based on port.
- * Returns service name for well-known ports, port number for non-ephemeral ports,
- * or empty string for ephemeral ports (32768+) to avoid cluttering the view.
+ * Only shows labels for well-known service ports to keep the topology clean.
+ * Unknown/ephemeral ports show no label.
  * @param port - Port number
- * @returns Service name, port number, or empty string for ephemeral ports
+ * @returns Service name for known ports, empty string otherwise
  */
 export function getEdgeLabelForPort(port: number): string {
   if (!port || port === 0) {
     return '';
   }
 
-  // Check for known service name first
+  // Only show labels for known services
   const service = PORT_SERVICES[port];
-  if (service) {
-    return service.toLowerCase();
-  }
-
-  // Filter out ephemeral ports (32768+) - they're client-side dynamic ports
-  if (port >= EPHEMERAL_PORT_THRESHOLD) {
-    return '';
-  }
-
-  // Show port number for non-ephemeral unknown ports (e.g., 2055 for NetFlow)
-  return port.toString();
+  return service ? service.toLowerCase() : '';
 }
 
 /**
