@@ -1,6 +1,6 @@
 # FlowLens Development Backlog
 
-**Last Updated:** 2025-12-28
+**Last Updated:** 2026-01-04
 
 ---
 
@@ -135,8 +135,8 @@
 - [x] **Timezone-aware datetimes** - All timestamp columns properly typed
 
 ### Testing Infrastructure
-- [x] **Comprehensive pytest test suite** - 219 unit tests + 74 integration tests
-  - Unit tests for: scoring engine, heuristics, classification constants, gateway inference, change detector, flow aggregator, backpressure queue, NetFlow v5 parser, rate limiting, caching
+- [x] **Comprehensive pytest test suite** - 281 unit tests + 76 integration tests (357 total)
+  - Unit tests for: scoring engine, heuristics, classification constants, gateway inference, change detector, flow aggregator, backpressure queue, NetFlow v5 parser, rate limiting, caching, alert rule evaluator, dependency builder, classification import/export
   - Integration tests for: assets, dependencies, topology, alerts, changes, classification, gateways, maintenance windows APIs
   - Test fixtures in conftest.py for classification, gateway, and change detection scenarios
   - Markers for unit/integration/slow test categorization
@@ -162,6 +162,44 @@
 ---
 
 ## Completed Features (Recent)
+
+### Authentication & Authorization
+- [x] **JWT Authentication** - Access and refresh token-based authentication
+- [x] **Role-Based Access Control (RBAC)** - Admin, Analyst, Viewer roles
+- [x] **User Management** - Local user accounts with password hashing
+- [x] **SAML Integration** - SSO support for Azure AD, Okta, Ping Identity
+- [x] **Auth Audit Logging** - Track login, logout, password changes, account locks
+- [x] **Session Management** - Refresh token tracking and revocation
+- [x] **Account Security** - Failed login tracking, account locking
+- [x] **Setup Flow** - First-run admin user creation
+
+### Application Grouping
+- [x] **Application model** - Logical groupings of related assets
+- [x] **Application members** - Assets with roles (frontend, backend, database, cache, etc.)
+- [x] **Multiple entry points** - Each member can have multiple port/protocol entry points
+- [x] **Application API** - Full CRUD for applications and members
+- [x] **Application UI** - Management page with create/edit modal, member management
+- [x] **Application topology** - Filter topology by application
+
+### Import/Export Functionality
+- [x] **Classification rules export** - JSON export of all CIDR classification rules
+- [x] **Classification rules import** - Validate and import rules with preview
+- [x] **Application export** - JSON export with member IP addresses and entry points
+- [x] **Application import** - Validate assets exist, preview changes, import
+- [x] **Frontend UI** - Import/export buttons on Classification Rules and Applications pages
+
+### Topology Enhancements
+- [x] **Edge service labels** - Show service names (HTTP, SSH, MySQL) on dependency edges
+- [x] **Ephemeral port filtering** - Only show known services, not ephemeral ports
+- [x] **Overlapping label handling** - Curved edge labels positioned correctly
+- [x] **Multiple entry point connections** - Edges connect to correct entry point positions
+- [x] **Comprehensive PORT_SERVICES mapping** - Extensive service-to-port mappings
+
+### Dependency Filtering
+- [x] **Discard external flows option** - Filter out non-internal traffic at ingestion
+- [x] **External source/target filtering** - Configurable exclusion of external dependencies
+- [x] **Settings propagation** - Filters properly applied to DependencyBuilder
+- [x] **Filtering tests** - Unit tests for dependency builder filtering
 
 ### Alert Rule Evaluation Engine
 - [x] **AlertRuleEvaluator service** - Evaluates change events against configured alert rules
@@ -197,13 +235,13 @@
 - [ ] **Traffic anomaly detection ML** - Statistical analysis of traffic patterns
 
 ### Frontend
-- [ ] **Application grouping** - Group assets into logical applications
+- [x] ~~**Application grouping** - Group assets into logical applications~~ *(Completed 2025-12-30)*
 - [ ] **Compliance reporting** - Pre-built report templates
 - [ ] **PDF report generation** - Export analysis results as PDFs
 - [ ] **Keyboard shortcuts** - Power user navigation
 
 ### Security & Enterprise
-- [ ] **SSO integration** - SAML/OIDC authentication
+- [x] ~~**SSO integration** - SAML/OIDC authentication~~ *(Completed 2025-12-29)*
 - [ ] **Multi-tenancy** - Separate data by organization/tenant
 - [ ] **Audit log export** - SIEM integration for audit events
 
@@ -247,6 +285,19 @@ These features are explicitly excluded from FlowLens scope:
 
 ## Bug Fixes Applied
 
+### Session 2026-01-04
+- [x] Fixed classification rules import/export is_internal handling - proper boolean handling in task execution
+- [x] Fixed settings propagation to DependencyBuilder - external flow filtering now applies correctly
+- [x] Fixed topology edge labels - only show known services, filter ephemeral ports (>32767)
+- [x] Fixed overlapping edge labels - curved edges now position labels correctly
+- [x] Fixed edge connections for multiple entry points - edges connect to correct entry point positions on assets
+- [x] Fixed asset IP validation during application import - proper validation before import
+- [x] Fixed 401 error when exporting applications and classification rules - authentication token handling
+- [x] Fixed duplicate /api/v1 path in export URLs - corrected API path construction
+- [x] Fixed PostgreSQL advisory lock deadlock in asset creation - lock ordering
+- [x] Fixed external asset creation in enrichment service - proper handling of non-internal IPs
+- [x] Added uv.lock for dependency reproducibility
+
 ### Session 2025-12-28
 - [x] Fixed PATCH /assets endpoint 500 error - manual AssetResponse construction instead of model_validate
 - [x] Fixed metadata field mapping - `extra_data` ORM attribute to `metadata` API field
@@ -287,6 +338,24 @@ These features are explicitly excluded from FlowLens scope:
 
 ## Environment Variables (New Features)
 
+### Authentication
+```bash
+AUTH_ENABLED=true                           # Enable/disable authentication (default: true)
+AUTH_SECRET_KEY=your-secret-key             # JWT signing key (CHANGE IN PRODUCTION!)
+AUTH_ACCESS_TOKEN_EXPIRE_MINUTES=30         # Access token lifetime (default: 30)
+AUTH_REFRESH_TOKEN_EXPIRE_DAYS=7            # Refresh token lifetime (default: 7)
+AUTH_MAX_FAILED_ATTEMPTS=5                  # Failed logins before lockout (default: 5)
+AUTH_LOCKOUT_MINUTES=15                     # Lockout duration (default: 15)
+```
+
+### SAML SSO
+```bash
+SAML_ENABLED=true                           # Enable SAML authentication
+SAML_SP_ENTITY_ID=flowlens                  # Service Provider entity ID
+SAML_SP_ACS_URL=https://flowlens.example.com/api/v1/auth/saml/acs
+SAML_DEFAULT_ROLE=viewer                    # Default role for new SAML users
+```
+
 ### Slack Notifications
 ```bash
 SLACK_ENABLED=true
@@ -321,6 +390,14 @@ API_RATE_LIMIT_WINDOW_SECONDS=60  # Rate limit window in seconds (default: 60)
 API_TOPOLOGY_MAX_NODES=5000          # Max nodes in topology response (default: 5000)
 API_TOPOLOGY_MAX_EDGES=10000         # Max edges in topology response (default: 10000)
 API_TOPOLOGY_CACHE_TTL_SECONDS=30    # Cache TTL for topology queries (default: 30, 0 to disable)
+```
+
+### Dependency Filtering
+```bash
+RESOLUTION_EXCLUDE_EXTERNAL_IPS=false       # Exclude non-private IPs from dependencies
+RESOLUTION_EXCLUDE_EXTERNAL_SOURCES=false   # Exclude dependencies with external sources
+RESOLUTION_EXCLUDE_EXTERNAL_TARGETS=false   # Exclude dependencies with external targets
+INGESTION_DISCARD_EXTERNAL_FLOWS=true       # Discard flows with external IPs at ingestion (default: true)
 ```
 
 ---
