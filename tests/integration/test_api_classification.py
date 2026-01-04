@@ -185,3 +185,126 @@ class TestClassificationRulesAPI:
         response = await async_client.post("/api/v1/classification/rules/apply")
         # May succeed or return count of affected assets
         assert response.status_code in (200, 202)
+
+    @pytest.mark.asyncio
+    async def test_export_classification_rules_csv_is_internal_formats(self, async_client: AsyncClient):
+        """Test that CSV export formats is_internal correctly (empty for None)."""
+        # Create rules with different is_internal values
+        rules_data = [
+            {"name": "Export Test Internal", "cidr": "10.1.0.0/16", "is_internal": True, "priority": 1},
+            {"name": "Export Test External", "cidr": "10.2.0.0/16", "is_internal": False, "priority": 2},
+            {"name": "Export Test NotSpecified", "cidr": "10.3.0.0/16", "is_internal": None, "priority": 3},
+        ]
+
+        for rule_data in rules_data:
+            await async_client.post("/api/v1/classification-rules", json=rule_data)
+
+        # Export as CSV
+        response = await async_client.get("/api/v1/classification-rules/export?format=csv")
+        assert response.status_code == 200
+
+        csv_content = response.text
+        lines = csv_content.strip().split("\n")
+
+        # Find the exported rules and verify is_internal format
+        header = lines[0].split(",")
+        is_internal_idx = header.index("is_internal")
+
+        found_internal = False
+        found_external = False
+        found_not_specified = False
+
+        for line in lines[1:]:
+            if "Export Test Internal" in line:
+                values = line.split(",")
+                assert values[is_internal_idx] == "true", f"Expected 'true' for internal, got {values[is_internal_idx]}"
+                found_internal = True
+            elif "Export Test External" in line:
+                values = line.split(",")
+                assert values[is_internal_idx] == "false", f"Expected 'false' for external, got {values[is_internal_idx]}"
+                found_external = True
+            elif "Export Test NotSpecified" in line:
+                values = line.split(",")
+                assert values[is_internal_idx] == "", f"Expected empty string for not specified, got {values[is_internal_idx]}"
+                found_not_specified = True
+
+        assert found_internal, "Internal rule not found in export"
+        assert found_external, "External rule not found in export"
+        assert found_not_specified, "NotSpecified rule not found in export"
+
+    @pytest.mark.asyncio
+    async def test_import_classification_rules_is_internal_values(self, async_client: AsyncClient):
+        """Test that import properly handles all is_internal value formats."""
+        import io
+
+        # Test CSV with various is_internal values
+        csv_content = """name,cidr,is_internal,priority
+Import Test True,10.100.0.0/16,true,1
+Import Test Yes,10.101.0.0/16,yes,2
+Import Test 1,10.102.0.0/16,1,3
+Import Test Internal,10.103.0.0/16,internal,4
+Import Test False,10.104.0.0/16,false,5
+Import Test No,10.105.0.0/16,no,6
+Import Test 0,10.106.0.0/16,0,7
+Import Test External,10.107.0.0/16,external,8
+Import Test Empty,10.108.0.0/16,,9
+Import Test None,10.109.0.0/16,none,10
+Import Test Null,10.110.0.0/16,null,11
+"""
+
+        # First preview the import
+        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+        preview_response = await async_client.post(
+            "/api/v1/classification-rules/import/preview",
+            files=files,
+        )
+        assert preview_response.status_code == 200
+
+        preview_data = preview_response.json()
+        assert preview_data["to_create"] == 11
+        assert preview_data["errors"] == 0
+
+        # Now actually import (without auto-apply to avoid timing issues in tests)
+        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+        import_response = await async_client.post(
+            "/api/v1/classification-rules/import?autoApply=false",
+            files=files,
+        )
+        assert import_response.status_code == 200
+
+        import_data = import_response.json()
+        assert import_data["created"] == 11
+        assert import_data["errors"] == 0
+
+        # Verify the rules were created with correct is_internal values
+        # True cases
+        for name in ["Import Test True", "Import Test Yes", "Import Test 1", "Import Test Internal"]:
+            response = await async_client.get(f"/api/v1/classification-rules?search={name}")
+            data = response.json()
+            assert len(data["items"]) >= 1
+            rule = next((r for r in data["items"] if r["name"] == name), None)
+            assert rule is not None, f"Rule {name} not found"
+            # Note: Summary doesn't include is_internal, so we need to fetch the full rule
+            rule_response = await async_client.get(f"/api/v1/classification-rules/{rule['id']}")
+            full_rule = rule_response.json()
+            assert full_rule["is_internal"] is True, f"Expected True for {name}, got {full_rule['is_internal']}"
+
+        # False cases
+        for name in ["Import Test False", "Import Test No", "Import Test 0", "Import Test External"]:
+            response = await async_client.get(f"/api/v1/classification-rules?search={name}")
+            data = response.json()
+            rule = next((r for r in data["items"] if r["name"] == name), None)
+            assert rule is not None, f"Rule {name} not found"
+            rule_response = await async_client.get(f"/api/v1/classification-rules/{rule['id']}")
+            full_rule = rule_response.json()
+            assert full_rule["is_internal"] is False, f"Expected False for {name}, got {full_rule['is_internal']}"
+
+        # None cases
+        for name in ["Import Test Empty", "Import Test None", "Import Test Null"]:
+            response = await async_client.get(f"/api/v1/classification-rules?search={name}")
+            data = response.json()
+            rule = next((r for r in data["items"] if r["name"] == name), None)
+            assert rule is not None, f"Rule {name} not found"
+            rule_response = await async_client.get(f"/api/v1/classification-rules/{rule['id']}")
+            full_rule = rule_response.json()
+            assert full_rule["is_internal"] is None, f"Expected None for {name}, got {full_rule['is_internal']}"
