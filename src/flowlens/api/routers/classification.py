@@ -38,6 +38,53 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/classification-rules", tags=["classification"])
 
 
+def _parse_is_internal(value: str | None) -> bool | None:
+    """Parse is_internal value from import data.
+
+    Handles three states:
+    - True (Internal): "true", "1", "yes", "internal"
+    - False (External): "false", "0", "no", "external"
+    - None (Not Specified): "", None, "null", "none", or missing
+
+    Args:
+        value: The string value from import file.
+
+    Returns:
+        True, False, or None based on the input value.
+    """
+    if value is None or value == "":
+        return None
+
+    lower_val = str(value).lower().strip()
+
+    if lower_val in ("true", "1", "yes", "internal"):
+        return True
+    elif lower_val in ("false", "0", "no", "external"):
+        return False
+    elif lower_val in ("null", "none", "not specified", ""):
+        return None
+
+    # Default to None for unrecognized values
+    return None
+
+
+def _export_is_internal(value: bool | None) -> str:
+    """Convert is_internal value for export.
+
+    Args:
+        value: The boolean or None value.
+
+    Returns:
+        "true", "false", or "" (empty string for Not Specified).
+    """
+    if value is True:
+        return "true"
+    elif value is False:
+        return "false"
+    else:
+        return ""
+
+
 async def _trigger_classification_task(
     db: DbSession,
     rule_id: UUID,
@@ -222,7 +269,12 @@ async def export_classification_rules(
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow(row.model_dump())
+            row_dict = row.model_dump()
+            # Convert is_internal to proper export format (empty string for None/Not Specified)
+            row_dict["is_internal"] = _export_is_internal(row_dict["is_internal"])
+            # Convert is_active to lowercase for consistency with import
+            row_dict["is_active"] = "true" if row_dict["is_active"] else "false"
+            writer.writerow(row_dict)
 
         output.seek(0)
         return StreamingResponse(
@@ -364,9 +416,9 @@ async def preview_classification_rule_import(
                     errors += 1
                     continue
 
-            # Handle is_internal (bool)
+            # Handle is_internal (bool or None)
             if "is_internal" in row and row["is_internal"] != "":
-                new_internal = str(row["is_internal"]).lower() in ("true", "1", "yes")
+                new_internal = _parse_is_internal(row["is_internal"])
                 if new_internal != existing.is_internal:
                     changes["is_internal"] = {"old": existing.is_internal, "new": new_internal}
 
@@ -543,9 +595,9 @@ async def import_classification_rules(
                         detail=f"Row {idx}: Invalid priority: {row['priority']}",
                     )
 
-            # Handle is_internal
+            # Handle is_internal (bool or None)
             if "is_internal" in row and row["is_internal"] != "":
-                new_internal = str(row["is_internal"]).lower() in ("true", "1", "yes")
+                new_internal = _parse_is_internal(row["is_internal"])
                 if new_internal != existing.is_internal:
                     existing.is_internal = new_internal
                     has_changes = True
@@ -571,9 +623,8 @@ async def import_classification_rules(
                 except ValueError:
                     priority = 100
 
-            is_internal = None
-            if "is_internal" in row and row["is_internal"] != "":
-                is_internal = str(row["is_internal"]).lower() in ("true", "1", "yes")
+            # Parse is_internal using the helper (handles True, False, or None)
+            is_internal = _parse_is_internal(row.get("is_internal"))
 
             is_active = True
             if "is_active" in row and row["is_active"] != "":
@@ -616,7 +667,7 @@ async def import_classification_rules(
 
             run_task_in_background(
                 task.id,
-                run_classification_task_with_new_session(task.id, force=updated > 0),
+                run_classification_task_with_new_session(task.id, force=updated > 0, rule_id=None),
             )
 
             logger.info(
