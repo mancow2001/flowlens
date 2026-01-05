@@ -98,8 +98,7 @@ services:
     environment:
       ENVIRONMENT: development
       DEBUG: "true"
-      <<: *db-env
-      <<: *resolution-env
+      <<: [*db-env, *resolution-env]
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       API_WORKERS: "2"
@@ -158,8 +157,7 @@ services:
     command: ["python", "-m", "flowlens.enrichment.main"]
     environment:
       ENVIRONMENT: development
-      <<: *db-logging-env
-      <<: *resolution-env
+      <<: [*db-logging-env, *resolution-env]
       ENRICHMENT_WORKER_COUNT: "2"
       ENRICHMENT_BATCH_SIZE: "500"
     depends_on:
@@ -183,8 +181,7 @@ services:
       - .env
     environment:
       ENVIRONMENT: development
-      <<: *db-logging-env
-      <<: *resolution-env
+      <<: [*db-logging-env, *resolution-env]
       RESOLUTION_WORKER_COUNT: "1"
       RESOLUTION_WINDOW_SIZE_MINUTES: "5"
     depends_on:
