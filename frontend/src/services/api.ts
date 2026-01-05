@@ -44,7 +44,6 @@ import type {
   DiscoveryProviderListResponse,
   DiscoveryProviderCreate,
   DiscoveryProviderUpdate,
-  ConnectionTestResponse,
   SyncTriggerResponse,
 } from '../types';
 import { useAuthStore } from '../stores/authStore';

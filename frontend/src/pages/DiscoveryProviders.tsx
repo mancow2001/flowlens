@@ -11,7 +11,6 @@ import {
   XMarkIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
-  ClockIcon,
 } from '@heroicons/react/24/outline';
 import { discoveryProviderApi } from '../services/api';
 import Card from '../components/common/Card';
