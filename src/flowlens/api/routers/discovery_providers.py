@@ -8,8 +8,9 @@ import math
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.api.dependencies import AdminUser, DbSession, Pagination
 from flowlens.common.logging import get_logger
@@ -18,6 +19,7 @@ from flowlens.common.settings_service import (
     test_nutanix_connection,
     test_vcenter_connection,
 )
+from flowlens.common.database import get_session
 from flowlens.models.discovery import DiscoveryProvider, DiscoveryProviderType
 from flowlens.schemas.discovery_providers import (
     ConnectionTestResponse,
@@ -32,6 +34,88 @@ from flowlens.schemas.discovery_providers import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/discovery-providers", tags=["Discovery Providers"])
+
+
+async def _run_provider_sync(provider_id: uuid.UUID) -> None:
+    """Run discovery sync for a provider in background.
+
+    This function is designed to run as a background task, so it gets
+    its own database session and handles all errors internally.
+    """
+    try:
+        async with get_session() as db:
+            # Re-fetch the provider in this session
+            result = await db.execute(
+                select(DiscoveryProvider).where(DiscoveryProvider.id == provider_id)
+            )
+            provider = result.scalar_one_or_none()
+
+            if provider is None:
+                logger.error("Provider not found for sync", provider_id=str(provider_id))
+                return
+
+            if not provider.is_enabled:
+                logger.warning("Provider disabled, skipping sync", provider_id=str(provider_id))
+                return
+
+            logger.info(
+                "Starting provider sync",
+                provider_id=str(provider.id),
+                name=provider.name,
+                provider_type=provider.provider_type,
+            )
+
+            # Run the appropriate sync based on provider type
+            if provider.provider_type == DiscoveryProviderType.VCENTER.value:
+                from flowlens.discovery.vcenter import VCenterProviderDiscoveryService
+
+                service = VCenterProviderDiscoveryService(provider)
+                await service.sync(db)
+
+            elif provider.provider_type == DiscoveryProviderType.KUBERNETES.value:
+                from flowlens.discovery.kubernetes import KubernetesProviderDiscoveryService
+
+                service = KubernetesProviderDiscoveryService(provider)
+                await service.sync(db)
+
+            elif provider.provider_type == DiscoveryProviderType.NUTANIX.value:
+                from flowlens.discovery.nutanix import NutanixProviderDiscoveryService
+
+                service = NutanixProviderDiscoveryService(provider)
+                await service.sync(db)
+
+            else:
+                logger.error(
+                    "Unknown provider type",
+                    provider_id=str(provider.id),
+                    provider_type=provider.provider_type,
+                )
+                provider.status = "failed"
+                provider.last_error = f"Unknown provider type: {provider.provider_type}"
+                provider.last_completed_at = datetime.now(timezone.utc)
+
+            await db.commit()
+
+    except Exception as exc:
+        logger.exception(
+            "Provider sync failed with unexpected error",
+            provider_id=str(provider_id),
+            error=str(exc),
+        )
+        # Try to update status to failed
+        try:
+            async with get_session() as db:
+                result = await db.execute(
+                    select(DiscoveryProvider).where(DiscoveryProvider.id == provider_id)
+                )
+                provider = result.scalar_one_or_none()
+                if provider:
+                    provider.status = "failed"
+                    provider.last_error = str(exc)[:500]
+                    provider.last_completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+        except Exception:
+            logger.exception("Failed to update provider status after error")
 
 
 def _mask_sensitive_config(config: dict | None, provider_type: str) -> dict | None:
@@ -493,12 +577,13 @@ async def test_discovery_provider(
 @router.post("/{provider_id}/sync", response_model=SyncTriggerResponse)
 async def trigger_discovery_sync(
     provider_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     _admin: AdminUser,
     db: DbSession,
 ) -> SyncTriggerResponse:
     """Trigger a manual discovery sync for a provider.
 
-    Admin only. This queues a sync job to run immediately.
+    Admin only. This queues a sync job to run immediately in the background.
     """
     result = await db.execute(
         select(DiscoveryProvider).where(DiscoveryProvider.id == provider_id)
@@ -530,8 +615,8 @@ async def trigger_discovery_sync(
 
     await db.commit()
 
-    # TODO: Actually trigger the sync job (queue to background worker)
-    # For now, just mark it as ready to sync
+    # Queue the sync to run in background
+    background_tasks.add_task(_run_provider_sync, provider_id)
 
     logger.info(
         "Discovery sync triggered",
