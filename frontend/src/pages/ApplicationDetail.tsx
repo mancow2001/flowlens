@@ -65,6 +65,28 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   is_from_client_summary?: boolean;
 }
 
+// Infrastructure service types (typically "noise" in topology views)
+const INFRASTRUCTURE_SERVICES = new Set([
+  'infrastructure',
+  'dns',
+  'dhcp',
+  'dhcp-server',
+  'dhcp-client',
+  'dhcpv6-client',
+  'dhcpv6-server',
+  'ntp',
+  'snmp',
+  'snmptrap',
+  'syslog',
+  'rpcbind',
+  'msrpc',
+  'netbios-ns',
+  'netbios-dgm',
+  'netbios-ssn',
+  'rip',
+  'upnp',
+]);
+
 // Color scheme for nodes
 const NODE_COLORS = {
   entry_point: '#eab308', // yellow for entry points
@@ -105,6 +127,7 @@ export default function ApplicationDetail() {
   const [showExternal, setShowExternal] = useState(false);
   const [maxDepth, setMaxDepth] = useState(1);
   const [renderMode, setRenderMode] = useState<RenderMode>('auto');
+  const [hideInfrastructureOnly, setHideInfrastructureOnly] = useState(true);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
   // Fetch application topology
@@ -231,8 +254,43 @@ export default function ApplicationDetail() {
       });
     });
 
+    // Filter out infrastructure-only nodes if enabled
+    if (hideInfrastructureOnly) {
+      // Build a map of node -> has non-infrastructure edges
+      const nodeHasNonInfraEdge = new Map<string, boolean>();
+      simNodes.forEach(node => nodeHasNonInfraEdge.set(node.id, false));
+
+      // Check each edge to see if it's infrastructure
+      simLinks.forEach(edge => {
+        const serviceType = edge.dependency_type?.toLowerCase() || '';
+        const isInfraEdge = INFRASTRUCTURE_SERVICES.has(serviceType);
+
+        if (!isInfraEdge) {
+          const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as SimNode).id;
+          const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as SimNode).id;
+          nodeHasNonInfraEdge.set(sourceId, true);
+          nodeHasNonInfraEdge.set(targetId, true);
+        }
+      });
+
+      // Keep entry points and nodes with non-infrastructure edges
+      const filteredNodes = simNodes.filter(node => {
+        if (node.is_entry_point || node.is_client_summary) return true;
+        return nodeHasNonInfraEdge.get(node.id) === true;
+      });
+
+      const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+      const filteredLinks = simLinks.filter(edge => {
+        const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as SimNode).id;
+        const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as SimNode).id;
+        return filteredNodeIds.has(sourceId) && filteredNodeIds.has(targetId);
+      });
+
+      return { nodes: filteredNodes, links: filteredLinks };
+    }
+
     return { nodes: simNodes, links: simLinks };
-  }, [topology, dimensions, maxDepth]);
+  }, [topology, dimensions, maxDepth, hideInfrastructureOnly]);
 
   // Determine effective render mode based on graph size
   const effectiveRenderMode = useMemo((): 'svg' | 'canvas' => {
@@ -710,6 +768,15 @@ export default function ApplicationDetail() {
               className="rounded bg-slate-700 border-slate-600 text-blue-500 focus:ring-blue-500"
             />
             Show external connections
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-400">
+            <input
+              type="checkbox"
+              checked={hideInfrastructureOnly}
+              onChange={(e) => setHideInfrastructureOnly(e.target.checked)}
+              className="rounded bg-slate-700 border-slate-600 text-blue-500 focus:ring-blue-500"
+            />
+            Hide infrastructure-only
           </label>
           <div className="flex items-center gap-2 border-l border-slate-700 pl-4">
             <CpuChipIcon className="h-4 w-4 text-slate-400" />
