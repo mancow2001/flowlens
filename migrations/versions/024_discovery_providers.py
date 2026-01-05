@@ -51,7 +51,7 @@ def upgrade() -> None:
         sa.Column("priority", sa.Integer, nullable=False, server_default="100"),
         sa.Column("sync_interval_minutes", sa.Integer, nullable=False, server_default="15"),
         # Status tracking
-        sa.Column("status", sa.String(20), nullable=False, server_default="'idle'"),
+        sa.Column("status", sa.String(20), nullable=False, server_default=sa.text("'idle'")),
         sa.Column("last_started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_success_at", sa.DateTime(timezone=True), nullable=True),
