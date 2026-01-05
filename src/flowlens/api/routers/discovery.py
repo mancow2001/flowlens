@@ -10,6 +10,8 @@ from flowlens.schemas.discovery import DiscoveryLastScanResponse, DiscoveryStatu
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 KUBERNETES_PROVIDER = "kubernetes"
+VCENTER_PROVIDER = "vcenter"
+NUTANIX_PROVIDER = "nutanix"
 
 
 async def _get_or_create_status(db: DbSession, provider: str) -> DiscoveryStatus:
@@ -49,6 +51,70 @@ async def get_kubernetes_last_scan(
 ) -> DiscoveryLastScanResponse:
     """Get Kubernetes discovery last scan timestamps."""
     status = await _get_or_create_status(db, KUBERNETES_PROVIDER)
+    return DiscoveryLastScanResponse(
+        provider=status.provider,
+        last_scan_at=status.last_completed_at,
+        last_success_at=status.last_success_at,
+        status=status.status,
+    )
+
+
+@router.get("/vcenter/status", response_model=DiscoveryStatusResponse)
+async def get_vcenter_discovery_status(
+    db: DbSession,
+    _user: ViewerUser,
+) -> DiscoveryStatusResponse:
+    """Get vCenter discovery sync status."""
+    status = await _get_or_create_status(db, VCENTER_PROVIDER)
+    return DiscoveryStatusResponse(
+        provider=status.provider,
+        status=status.status,
+        last_started_at=status.last_started_at,
+        last_completed_at=status.last_completed_at,
+        last_success_at=status.last_success_at,
+        last_error=status.last_error,
+    )
+
+
+@router.get("/vcenter/last-scan", response_model=DiscoveryLastScanResponse)
+async def get_vcenter_last_scan(
+    db: DbSession,
+    _user: ViewerUser,
+) -> DiscoveryLastScanResponse:
+    """Get vCenter discovery last scan timestamps."""
+    status = await _get_or_create_status(db, VCENTER_PROVIDER)
+    return DiscoveryLastScanResponse(
+        provider=status.provider,
+        last_scan_at=status.last_completed_at,
+        last_success_at=status.last_success_at,
+        status=status.status,
+    )
+
+
+@router.get("/nutanix/status", response_model=DiscoveryStatusResponse)
+async def get_nutanix_discovery_status(
+    db: DbSession,
+    _user: ViewerUser,
+) -> DiscoveryStatusResponse:
+    """Get Nutanix discovery sync status."""
+    status = await _get_or_create_status(db, NUTANIX_PROVIDER)
+    return DiscoveryStatusResponse(
+        provider=status.provider,
+        status=status.status,
+        last_started_at=status.last_started_at,
+        last_completed_at=status.last_completed_at,
+        last_success_at=status.last_success_at,
+        last_error=status.last_error,
+    )
+
+
+@router.get("/nutanix/last-scan", response_model=DiscoveryLastScanResponse)
+async def get_nutanix_last_scan(
+    db: DbSession,
+    _user: ViewerUser,
+) -> DiscoveryLastScanResponse:
+    """Get Nutanix discovery last scan timestamps."""
+    status = await _get_or_create_status(db, NUTANIX_PROVIDER)
     return DiscoveryLastScanResponse(
         provider=status.provider,
         last_scan_at=status.last_completed_at,
