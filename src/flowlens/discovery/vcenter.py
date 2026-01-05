@@ -589,6 +589,18 @@ class VCenterProviderDiscoveryService:
 
         try:
             snapshot = await self.fetch_snapshot()
+
+            # Debug logging to understand what vCenter returned
+            vms_with_ip = sum(1 for vm in snapshot.vms if vm.get("guest_IP") or vm.get("guest_IPs"))
+            logger.info(
+                "vCenter snapshot fetched",
+                provider_name=self._provider.name,
+                total_vms=len(snapshot.vms),
+                vms_with_ip=vms_with_ip,
+                clusters=len(snapshot.clusters),
+                networks=len(snapshot.networks),
+            )
+
             assets_metadata = snapshot.build_asset_metadata()
 
             # Update multi-provider cache
