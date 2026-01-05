@@ -4,6 +4,7 @@ Admin-only endpoints for configuring discovery providers
 (Kubernetes, vCenter, Nutanix).
 """
 
+import asyncio
 import math
 import uuid
 from datetime import datetime, timezone
@@ -36,11 +37,10 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/discovery-providers", tags=["Discovery Providers"])
 
 
-async def _run_provider_sync(provider_id: uuid.UUID) -> None:
-    """Run discovery sync for a provider in background.
+async def _run_provider_sync_async(provider_id: uuid.UUID) -> None:
+    """Run discovery sync for a provider (async implementation).
 
-    This function is designed to run as a background task, so it gets
-    its own database session and handles all errors internally.
+    This function handles the actual sync logic with proper async/await.
     """
     try:
         async with get_session() as db:
@@ -116,6 +116,18 @@ async def _run_provider_sync(provider_id: uuid.UUID) -> None:
                     await db.commit()
         except Exception:
             logger.exception("Failed to update provider status after error")
+
+
+def _run_provider_sync(provider_id: uuid.UUID) -> None:
+    """Sync wrapper to run async sync in background task.
+
+    FastAPI BackgroundTasks may not properly await async functions,
+    so we use this sync wrapper with asyncio.run().
+    """
+    try:
+        asyncio.run(_run_provider_sync_async(provider_id))
+    except Exception:
+        logger.exception("Background sync task failed", provider_id=str(provider_id))
 
 
 def _mask_sensitive_config(config: dict | None, provider_type: str) -> dict | None:
