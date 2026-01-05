@@ -542,13 +542,24 @@ class VCenterProviderClient:
         try:
             data = await self._get(f"/rest/vcenter/vm/{vm_id}", session_id)
             vm_info = data.get("value", {})
-            nics = vm_info.get("nics", {})
+            nics = vm_info.get("nics", [])
             mac_addresses = []
-            for nic_key, nic_info in nics.items():
-                mac = nic_info.get("mac_address")
-                if mac:
-                    mac_addresses.append(mac)
-                    logger.info("Found MAC in hardware", vm_id=vm_id, nic_key=nic_key, mac=mac)
+
+            # Handle both list and dict formats from vCenter API
+            if isinstance(nics, dict):
+                nic_items = nics.values()
+            else:
+                nic_items = nics
+
+            for nic_info in nic_items:
+                # NIC info might be nested under 'value' key
+                if isinstance(nic_info, dict):
+                    nic_data = nic_info.get("value", nic_info)
+                    mac = nic_data.get("mac_address")
+                    if mac:
+                        mac_addresses.append(mac)
+                        logger.info("Found MAC in hardware", vm_id=vm_id, mac=mac)
+
             logger.info("VM hardware NICs result", vm_id=vm_id, nic_count=len(nics), mac_count=len(mac_addresses), macs=mac_addresses)
             return mac_addresses
         except httpx.HTTPStatusError as e:
