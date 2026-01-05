@@ -49,6 +49,36 @@ class DependencyBuilder:
         self._settings = settings or get_settings().resolution
         self._ip_classifier = PrivateIPClassifier()
 
+    def _is_ephemeral_port(self, port: int, protocol: int) -> bool:
+        """Check if port should be treated as ephemeral (unknown high port).
+
+        Args:
+            port: Target port number.
+            protocol: IP protocol number (1=ICMP, 6=TCP, 17=UDP).
+
+        Returns:
+            True if the port is ephemeral and should be skipped.
+        """
+        if not self._settings.skip_unknown_high_ports:
+            return False
+
+        # ICMP (protocol 1) doesn't use ports meaningfully - always allow
+        if protocol == 1:
+            return False
+
+        # Ports below threshold are always allowed
+        if port < self._settings.unknown_port_threshold:
+            return False
+
+        # High port - check if it's a known service
+        service_info = self._protocol_resolver.resolve(port, protocol)
+        if service_info is not None:
+            # Known service port (e.g., 3306/MySQL, 5432/PostgreSQL)
+            return False
+
+        # Unknown high port - treat as ephemeral
+        return True
+
     def _should_exclude_external(
         self,
         src_ip: str,
