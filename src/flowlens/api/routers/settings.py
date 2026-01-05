@@ -17,8 +17,11 @@ from flowlens.common.settings_service import (
     get_section_data,
     is_restart_required,
     test_database_connection,
+    test_kubernetes_connection,
     test_notification_channel,
+    test_nutanix_connection,
     test_redis_connection,
+    test_vcenter_connection,
     trigger_restart,
     update_section_settings,
 )
@@ -172,7 +175,8 @@ async def test_connection(
 ) -> ConnectionTestResponse:
     """Test connection to a service.
 
-    Supported services: database, redis, kafka, email, webhook, slack, teams, pagerduty
+    Supported services: database, redis, kafka, email, webhook, slack, teams, pagerduty,
+                       kubernetes, vcenter, nutanix
 
     Args:
         service: Service to test.
@@ -189,6 +193,12 @@ async def test_connection(
     elif service == "kafka":
         # TODO: Implement Kafka connection test
         success, message, details = False, "Kafka connection test not implemented", None
+    elif service == "kubernetes":
+        success, message, details = await test_kubernetes_connection(test_values)
+    elif service == "vcenter":
+        success, message, details = await test_vcenter_connection(test_values)
+    elif service == "nutanix":
+        success, message, details = await test_nutanix_connection(test_values)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

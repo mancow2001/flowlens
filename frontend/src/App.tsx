@@ -20,6 +20,7 @@ import Login from './pages/Login';
 import Setup from './pages/Setup';
 import UserManagement from './pages/UserManagement';
 import SAMLConfiguration from './pages/SAMLConfiguration';
+import DiscoveryProviders from './pages/DiscoveryProviders';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebSocketEvents } from './hooks/useWebSocketEvents';
@@ -121,6 +122,14 @@ function App() {
                     element={
                       <ProtectedRoute requiredRoles={['admin']}>
                         <SAMLConfiguration />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/discovery"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin']}>
+                        <DiscoveryProviders />
                       </ProtectedRoute>
                     }
                   />

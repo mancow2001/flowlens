@@ -40,6 +40,12 @@ import type {
   UserRole,
   SAMLProvider,
   AuthSession,
+  DiscoveryProvider,
+  DiscoveryProviderListResponse,
+  DiscoveryProviderCreate,
+  DiscoveryProviderUpdate,
+  ConnectionTestResponse,
+  SyncTriggerResponse,
 } from '../types';
 import { useAuthStore } from '../stores/authStore';
 
@@ -1491,6 +1497,53 @@ export const samlProviderApi = {
 
   activate: async (id: string): Promise<SAMLProvider> => {
     const { data } = await api.post(`/saml-providers/${id}/activate`);
+    return data;
+  },
+};
+
+// Discovery Provider API endpoints (admin only)
+export const discoveryProviderApi = {
+  list: async (params?: { provider_type?: string; is_enabled?: boolean }): Promise<DiscoveryProviderListResponse> => {
+    const { data } = await api.get('/discovery-providers', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<DiscoveryProvider> => {
+    const { data } = await api.get(`/discovery-providers/${id}`);
+    return data;
+  },
+
+  create: async (provider: DiscoveryProviderCreate): Promise<DiscoveryProvider> => {
+    const { data } = await api.post('/discovery-providers', provider);
+    return data;
+  },
+
+  update: async (id: string, updates: DiscoveryProviderUpdate): Promise<DiscoveryProvider> => {
+    const { data } = await api.patch(`/discovery-providers/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/discovery-providers/${id}`);
+  },
+
+  enable: async (id: string): Promise<DiscoveryProvider> => {
+    const { data } = await api.post(`/discovery-providers/${id}/enable`);
+    return data;
+  },
+
+  disable: async (id: string): Promise<DiscoveryProvider> => {
+    const { data } = await api.post(`/discovery-providers/${id}/disable`);
+    return data;
+  },
+
+  test: async (id: string): Promise<ConnectionTestResponse> => {
+    const { data } = await api.post(`/discovery-providers/${id}/test`);
+    return data;
+  },
+
+  sync: async (id: string): Promise<SyncTriggerResponse> => {
+    const { data } = await api.post(`/discovery-providers/${id}/sync`);
     return data;
   },
 };

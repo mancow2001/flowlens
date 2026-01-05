@@ -20,6 +20,7 @@ from flowlens.common.database import close_database, init_database
 from flowlens.common.exceptions import FlowLensError
 from flowlens.common.logging import bind_context, clear_context, get_logger, setup_logging
 from flowlens.common.metrics import API_REQUESTS, API_REQUEST_DURATION, set_app_info
+from flowlens.discovery.migration import migrate_env_providers
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ws_manager = get_connection_manager()
     await ws_manager.start()
     logger.info("WebSocket connection manager started")
+
+    # Migrate discovery providers from environment variables to database
+    try:
+        await migrate_env_providers()
+    except Exception as e:
+        logger.warning("Failed to migrate discovery providers from env vars", error=str(e))
 
     yield
 
@@ -207,7 +214,7 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, changes, classification, dependencies, discovery, gateways, maintenance, saml_providers, saved_views, search, settings as settings_router, tasks, topology, users, ws
+    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, changes, classification, dependencies, discovery, discovery_providers, gateways, maintenance, saml_providers, saved_views, search, settings as settings_router, tasks, topology, users, ws
 
     app.include_router(admin.router)
     app.include_router(auth.router, prefix="/api/v1")
@@ -220,6 +227,7 @@ def create_app() -> FastAPI:
     app.include_router(classification.router, prefix="/api/v1")  # CIDR classification rules
     app.include_router(dependencies.router, prefix="/api/v1")
     app.include_router(discovery.router, prefix="/api/v1")
+    app.include_router(discovery_providers.router, prefix="/api/v1")
     app.include_router(gateways.router, prefix="/api/v1")
     app.include_router(topology.router, prefix="/api/v1")
     app.include_router(analysis.router, prefix="/api/v1")
