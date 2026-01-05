@@ -520,9 +520,15 @@ class VCenterProviderClient:
         """Get guest networking info for a VM including MAC addresses."""
         try:
             data = await self._get(f"/rest/vcenter/vm/{vm_id}/guest/networking", session_id)
-            return data.get("value", {})
-        except httpx.HTTPStatusError:
-            # VM might be powered off or tools not installed
+            result = data.get("value", {})
+            nics = result.get("network_interfaces", []) if result else []
+            logger.info("VM networking API response", vm_id=vm_id, has_result=bool(result), nic_count=len(nics))
+            return result
+        except httpx.HTTPStatusError as e:
+            logger.info("Failed to get networking info for VM", vm_id=vm_id, status=e.response.status_code)
+            return {}
+        except Exception as e:
+            logger.info("Error getting networking info for VM", vm_id=vm_id, error=str(e))
             return {}
 
     async def list_vms_with_guest_info(self, session_id: str) -> list[dict[str, Any]]:
@@ -576,12 +582,12 @@ class VCenterProviderClient:
                     enriched_vm["mac_addresses"] = mac_addresses
 
             if enriched_vm.get("guest_IP"):
-                logger.debug(
+                logger.info(
                     "Found guest info for VM",
                     vm_name=vm.get("name"),
                     ip=enriched_vm.get("guest_IP"),
                     hostname=enriched_vm.get("hostname"),
-                    macs=len(enriched_vm.get("mac_addresses", [])),
+                    mac_addresses=enriched_vm.get("mac_addresses", []),
                 )
 
             enriched_vms.append(enriched_vm)
@@ -749,6 +755,13 @@ class VCenterProviderDiscoveryService:
     ) -> None:
         """Sync assets to database."""
         for metadata in assets:
+            logger.info(
+                "Processing asset metadata",
+                ip=metadata.ip,
+                name=metadata.name,
+                hostname=metadata.hostname,
+                mac_addresses=metadata.mac_addresses,
+            )
             asset_id = await self._asset_mapper.get_or_create_asset(db, metadata.ip)
             result = await db.execute(select(Asset).where(Asset.id == asset_id))
             asset = result.scalar_one_or_none()
