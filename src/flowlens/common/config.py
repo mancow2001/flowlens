@@ -195,6 +195,23 @@ class ResolutionSettings(BaseSettings):
     )
 
 
+class KubernetesSettings(BaseSettings):
+    """Kubernetes discovery configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="K8S_")
+
+    enabled: bool = False
+    api_server: str = "https://kubernetes.default.svc"
+    cluster_name: str = "default-cluster"
+    namespace: str | None = None
+
+    token: str | None = None
+    token_file: Path | None = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ca_cert_path: Path | None = Path("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+    verify_ssl: bool = True
+    timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+
+
 class APISettings(BaseSettings):
     """Query/API Service configuration."""
 
@@ -478,6 +495,7 @@ class Settings(BaseSettings):
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
     enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
     resolution: ResolutionSettings = Field(default_factory=ResolutionSettings)
+    kubernetes: KubernetesSettings = Field(default_factory=KubernetesSettings)
     classification: ClassificationSettings = Field(default_factory=ClassificationSettings)
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)

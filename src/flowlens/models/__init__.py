@@ -15,6 +15,7 @@ from flowlens.models.auth import (
 from flowlens.models.change import Alert, AlertSeverity, ChangeEvent, ChangeType
 from flowlens.models.classification import ClassificationRule
 from flowlens.models.dependency import Dependency, DependencyHistory
+from flowlens.models.discovery import DiscoveryStatus
 from flowlens.models.flow import FlowAggregate, FlowRecord
 from flowlens.models.gateway import AssetGateway, GatewayObservation, GatewayRole, InferenceMethod
 from flowlens.models.maintenance_window import MaintenanceWindow
@@ -35,6 +36,7 @@ __all__ = [
     "ClassificationRule",
     "Dependency",
     "DependencyHistory",
+    "DiscoveryStatus",
     "FlowRecord",
     "FlowAggregate",
     "AssetGateway",

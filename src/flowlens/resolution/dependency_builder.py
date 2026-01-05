@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flowlens.common.config import ResolutionSettings, get_settings
 from flowlens.common.logging import get_logger
 from flowlens.common.metrics import DEPENDENCIES_CREATED, DEPENDENCIES_UPDATED
+from flowlens.discovery.kubernetes import KubernetesAssetEnricher
 from flowlens.enrichment.resolvers.geoip import PrivateIPClassifier
 from flowlens.enrichment.resolvers.protocol import ProtocolResolver
 from flowlens.models.dependency import Dependency, DependencyHistory
@@ -35,6 +36,7 @@ class DependencyBuilder:
         self,
         asset_mapper: AssetMapper | None = None,
         protocol_resolver: ProtocolResolver | None = None,
+        k8s_enricher: KubernetesAssetEnricher | None = None,
         settings: ResolutionSettings | None = None,
     ) -> None:
         """Initialize dependency builder.
@@ -46,6 +48,7 @@ class DependencyBuilder:
         """
         self._asset_mapper = asset_mapper or AssetMapper()
         self._protocol_resolver = protocol_resolver or ProtocolResolver()
+        self._k8s_enricher = k8s_enricher or KubernetesAssetEnricher()
         self._settings = settings or get_settings().resolution
         self._ip_classifier = PrivateIPClassifier()
 
@@ -164,6 +167,14 @@ class DependencyBuilder:
         # Map to assets
         src_asset_id, dst_asset_id = await self._asset_mapper.map_aggregate_to_assets(
             db, aggregate
+        )
+
+        await self._k8s_enricher.enrich_assets(
+            db,
+            src_asset_id,
+            dst_asset_id,
+            src_ip,
+            dst_ip,
         )
 
         # Skip self-loops

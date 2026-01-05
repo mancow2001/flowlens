@@ -55,7 +55,11 @@ class ResolutionWorker:
         asset_mapper = AssetMapper(geoip_resolver)
 
         self._aggregator = FlowAggregator(settings)
-        self._dependency_builder = DependencyBuilder(asset_mapper, protocol_resolver, settings)
+        self._dependency_builder = DependencyBuilder(
+            asset_mapper=asset_mapper,
+            protocol_resolver=protocol_resolver,
+            settings=settings,
+        )
         self._change_detector = ChangeDetector(settings)
         self._gateway_inference = GatewayInferenceService()
 
