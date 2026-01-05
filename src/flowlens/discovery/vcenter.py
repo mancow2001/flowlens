@@ -720,18 +720,22 @@ class VCenterProviderDiscoveryService:
             if metadata.cluster:
                 tags["vcenter_cluster"] = metadata.cluster
             if metadata.networks:
-                tags["vcenter_networks"] = metadata.networks
+                # Store as comma-separated string (tags must be strings)
+                tags["vcenter_networks"] = ", ".join(metadata.networks)
             if metadata.tags:
-                tags["vcenter_tags"] = metadata.tags
+                # Store as comma-separated string (tags must be strings)
+                tags["vcenter_tags"] = ", ".join(metadata.tags)
 
-            # Track discovery sources
-            discovered_by = tags.get("discovered_by", [])
-            if isinstance(discovered_by, str):
-                discovered_by = [discovered_by]
+            # Track discovery sources (as comma-separated string)
             source = f"vcenter:{metadata.cluster or self._provider.name}"
-            if source not in discovered_by:
-                discovered_by.append(source)
-            tags["discovered_by"] = discovered_by
+            existing_sources = tags.get("discovered_by", "")
+            if existing_sources:
+                sources_list = [s.strip() for s in existing_sources.split(",")]
+                if source not in sources_list:
+                    sources_list.append(source)
+                tags["discovered_by"] = ", ".join(sources_list)
+            else:
+                tags["discovered_by"] = source
             asset.tags = tags
 
             # Set asset type if unknown
