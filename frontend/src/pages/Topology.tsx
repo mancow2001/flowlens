@@ -89,6 +89,28 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
 
 type GroupingMode = 'none' | 'location' | 'environment' | 'datacenter' | 'type';
 
+// Infrastructure service types (these are typically "noise" in topology views)
+const INFRASTRUCTURE_SERVICES = new Set([
+  'infrastructure',
+  'dns',
+  'dhcp',
+  'dhcp-server',
+  'dhcp-client',
+  'dhcpv6-client',
+  'dhcpv6-server',
+  'ntp',
+  'snmp',
+  'snmptrap',
+  'syslog',
+  'rpcbind',
+  'msrpc',
+  'netbios-ns',
+  'netbios-dgm',
+  'netbios-ssn',
+  'rip',
+  'upnp',
+]);
+
 // Colors for groups (used for hulls)
 const GROUP_COLORS = [
   '#3b82f6', // blue
@@ -496,7 +518,7 @@ export default function Topology() {
     if (!topology) return null;
 
     // First, filter by visibility
-    const visibleNodes = topology.nodes.filter(node => {
+    let visibleNodes = topology.nodes.filter(node => {
       if (!showInternal && node.is_internal) return false;
       if (!showExternal && !node.is_internal) return false;
       if (groupingMode !== 'none') {
@@ -505,6 +527,37 @@ export default function Topology() {
       }
       return true;
     });
+
+    // Filter out nodes that only have infrastructure service edges
+    if (filters.hideInfrastructureOnly) {
+      // Build a map of node -> has non-infrastructure edges
+      const nodeHasNonInfraEdge = new Map<string, boolean>();
+
+      // Initialize all nodes as having no non-infra edges
+      visibleNodes.forEach(node => nodeHasNonInfraEdge.set(node.id, false));
+
+      // Check each edge
+      topology.edges.forEach(edge => {
+        const serviceType = edge.service_type?.toLowerCase() || '';
+        const isInfraEdge = INFRASTRUCTURE_SERVICES.has(serviceType);
+
+        if (!isInfraEdge) {
+          // This edge is NOT infrastructure, so mark both nodes as having non-infra edges
+          nodeHasNonInfraEdge.set(edge.source, true);
+          nodeHasNonInfraEdge.set(edge.target, true);
+        }
+      });
+
+      // Filter out nodes that only have infrastructure edges (but keep nodes with no edges)
+      visibleNodes = visibleNodes.filter(node => {
+        const hasNonInfra = nodeHasNonInfraEdge.get(node.id);
+        // Keep if: has non-infra edges, OR has no edges at all
+        const nodeEdgeCount = topology.edges.filter(
+          e => e.source === node.id || e.target === node.id
+        ).length;
+        return hasNonInfra || nodeEdgeCount === 0;
+      });
+    }
 
     // If no grouping or no collapsed groups, return filtered topology
     if (groupingMode === 'none' || collapsedGroups.size === 0) {
@@ -682,7 +735,7 @@ export default function Topology() {
     }
 
     return { nodes: resultNodes, edges: resultEdges };
-  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode, collapsedGroups, nodeToGroupMap, showGateways, gatewayTopology]);
+  }, [topology, showInternal, showExternal, hiddenGroups, groupingMode, collapsedGroups, nodeToGroupMap, showGateways, gatewayTopology, filters.hideInfrastructureOnly]);
 
   // Determine render mode based on settings and graph size
   const effectiveRenderMode = useMemo((): RenderMode => {

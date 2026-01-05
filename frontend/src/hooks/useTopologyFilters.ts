@@ -11,6 +11,7 @@ export interface TopologyFilters {
   focusedEndpoint: string | null;  // Asset ID to focus on
   focusedEndpointName: string | null;  // Display name for the focused endpoint
   hopLevel: number;  // Number of hops for outbound connections (1-5)
+  hideInfrastructureOnly: boolean;  // Hide nodes that only have infrastructure service edges
 }
 
 const DEFAULT_FILTERS: TopologyFilters = {
@@ -23,6 +24,7 @@ const DEFAULT_FILTERS: TopologyFilters = {
   focusedEndpoint: null,
   focusedEndpointName: null,
   hopLevel: 1,
+  hideInfrastructureOnly: false,
 };
 
 const STORAGE_KEY = 'flowlens-topology-filters';
@@ -40,8 +42,9 @@ export function useTopologyFilters() {
     const focusedEndpointParam = searchParams.get('focusedEndpoint');
     const focusedEndpointNameParam = searchParams.get('focusedEndpointName');
     const hopLevelParam = searchParams.get('hopLevel');
+    const hideInfrastructureOnlyParam = searchParams.get('hideInfrastructureOnly');
 
-    if (envParam || dcParam || typesParam || externalParam || bytesParam || asOfParam || focusedEndpointParam) {
+    if (envParam || dcParam || typesParam || externalParam || bytesParam || asOfParam || focusedEndpointParam || hideInfrastructureOnlyParam) {
       return {
         environments: envParam ? envParam.split(',').filter(Boolean) : [],
         datacenters: dcParam ? dcParam.split(',').filter(Boolean) : [],
@@ -52,6 +55,7 @@ export function useTopologyFilters() {
         focusedEndpoint: focusedEndpointParam || null,
         focusedEndpointName: focusedEndpointNameParam || null,
         hopLevel: hopLevelParam ? parseInt(hopLevelParam, 10) : 1,
+        hideInfrastructureOnly: hideInfrastructureOnlyParam === 'true',
       };
     }
 
@@ -85,6 +89,7 @@ export function useTopologyFilters() {
       params.delete('focusedEndpoint');
       params.delete('focusedEndpointName');
       params.delete('hopLevel');
+      params.delete('hideInfrastructureOnly');
 
       if (filters.environments.length > 0) {
         params.set('environments', filters.environments.join(','));
@@ -112,6 +117,9 @@ export function useTopologyFilters() {
       }
       if (filters.focusedEndpoint && filters.hopLevel !== 1) {
         params.set('hopLevel', filters.hopLevel.toString());
+      }
+      if (filters.hideInfrastructureOnly) {
+        params.set('hideInfrastructureOnly', 'true');
       }
 
       return params;
@@ -141,7 +149,8 @@ export function useTopologyFilters() {
       !filters.includeExternal ||
       filters.minBytes24h > 0 ||
       filters.asOf !== null ||
-      filters.focusedEndpoint !== null
+      filters.focusedEndpoint !== null ||
+      filters.hideInfrastructureOnly
     );
   }, [filters]);
 

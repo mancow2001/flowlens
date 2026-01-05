@@ -388,6 +388,25 @@ export default function FilterPanel({
             </div>
           )}
 
+          {/* Hide Infrastructure-Only Nodes */}
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={localFilters.hideInfrastructureOnly}
+                onChange={(e) => setLocalFilters(prev => ({
+                  ...prev,
+                  hideInfrastructureOnly: e.target.checked,
+                }))}
+                className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
+              />
+              <span className="text-sm text-slate-300">Hide Infrastructure-Only</span>
+            </label>
+            <p className="mt-1 text-xs text-slate-500 ml-6">
+              Hide nodes with only DNS, DHCP, NTP connections
+            </p>
+          </div>
+
           {/* Min Bytes 24h */}
           <div>
             <label className="block text-xs text-slate-400 uppercase tracking-wider mb-2">
@@ -484,6 +503,17 @@ export default function FilterPanel({
                 {!localFilters.includeExternal && !externalFlowsDiscarded && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-300 text-xs rounded">
                     Internal Only
+                  </span>
+                )}
+                {localFilters.hideInfrastructureOnly && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-500/20 text-slate-300 text-xs rounded">
+                    No Infra-Only
+                    <button
+                      onClick={() => setLocalFilters(prev => ({ ...prev, hideInfrastructureOnly: false }))}
+                      className="hover:text-slate-100"
+                    >
+                      x
+                    </button>
                   </span>
                 )}
                 {localFilters.minBytes24h > 0 && (
