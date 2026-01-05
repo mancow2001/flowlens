@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import httpx
@@ -15,8 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flowlens.common.config import NutanixSettings, get_settings
 from flowlens.common.logging import get_logger
 from flowlens.models.asset import Application, ApplicationMember, Asset, AssetType
-from flowlens.models.discovery import DiscoveryStatus
+from flowlens.models.discovery import DiscoveryProvider, DiscoveryStatus
 from flowlens.resolution.asset_mapper import AssetMapper
+
+if TYPE_CHECKING:
+    from flowlens.discovery.cache import MultiProviderAssetCache
 
 logger = get_logger(__name__)
 
@@ -396,6 +399,252 @@ class NutanixDiscoveryService:
             await db.execute(insert_stmt)
 
             result = await db.execute(select(Application).where(Application.name == app.name))
+            application = result.scalar_one_or_none()
+            if not application:
+                continue
+
+            asset_ids: list[UUID] = []
+            for ip in app.asset_ips:
+                asset_id = await self._asset_mapper.get_or_create_asset(db, ip)
+                asset_ids.append(asset_id)
+
+            for asset_id in asset_ids:
+                member_stmt = pg_insert(ApplicationMember).values(
+                    application_id=application.id,
+                    asset_id=asset_id,
+                    role="nutanix",
+                ).on_conflict_do_nothing(index_elements=["application_id", "asset_id"])
+                await db.execute(member_stmt)
+
+        await db.flush()
+
+
+class NutanixProviderClient:
+    """Nutanix Prism API client that uses DiscoveryProvider configuration."""
+
+    def __init__(self, provider: DiscoveryProvider) -> None:
+        self._provider = provider
+        self._nutanix_config = provider.nutanix_config or {}
+
+    def _base_url(self) -> str:
+        return self._provider.api_url.rstrip("/")
+
+    def _auth(self) -> tuple[str, str] | None:
+        if self._provider.username and self._provider.password_encrypted:
+            return (self._provider.username, self._provider.password_encrypted)  # TODO: decrypt
+        return None
+
+    def _timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(self._provider.timeout_seconds)
+
+    async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(
+            verify=self._provider.verify_ssl,
+            timeout=self._timeout(),
+        ) as client:
+            response = await client.post(
+                f"{self._base_url()}{path}",
+                auth=self._auth(),
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def list_vms(self) -> list[dict[str, Any]]:
+        payload = {"kind": "vm", "length": 1000}
+        data = await self._post("/api/nutanix/v3/vms/list", payload)
+        return data.get("entities", [])
+
+    async def list_clusters(self) -> list[dict[str, Any]]:
+        payload = {"kind": "cluster", "length": 500}
+        data = await self._post("/api/nutanix/v3/clusters/list", payload)
+        return data.get("entities", [])
+
+    async def list_subnets(self) -> list[dict[str, Any]]:
+        payload = {"kind": "subnet", "length": 1000}
+        data = await self._post("/api/nutanix/v3/subnets/list", payload)
+        return data.get("entities", [])
+
+
+class NutanixProviderDiscoveryService:
+    """Discovery service that uses DiscoveryProvider configuration.
+
+    This service works with the MultiProviderAssetCache instead of
+    the singleton NutanixAssetCache.
+    """
+
+    def __init__(
+        self,
+        provider: DiscoveryProvider,
+        multi_cache: "MultiProviderAssetCache | None" = None,
+        asset_mapper: AssetMapper | None = None,
+    ) -> None:
+        self._provider = provider
+        self._client = NutanixProviderClient(provider)
+        self._asset_mapper = asset_mapper or AssetMapper()
+
+        # Use multi-provider cache
+        if multi_cache is None:
+            from flowlens.discovery.cache import get_multi_provider_cache
+            multi_cache = get_multi_provider_cache()
+        self._multi_cache = multi_cache
+
+        # Register this provider with the cache
+        self._multi_cache.register_provider(
+            provider_id=provider.id,
+            provider_type="nutanix",
+            priority=provider.priority,
+        )
+
+    async def fetch_snapshot(self) -> NutanixSnapshot:
+        """Fetch current state from Nutanix API."""
+        vms = await self._client.list_vms()
+        clusters = await self._client.list_clusters()
+        subnets = await self._client.list_subnets()
+        return NutanixSnapshot(vms=vms, clusters=clusters, subnets=subnets)
+
+    async def sync(self, db: AsyncSession) -> NutanixSnapshot:
+        """Run discovery and persist assets/applications."""
+        if not self._provider.is_enabled:
+            raise RuntimeError(f"Provider {self._provider.name} is disabled")
+
+        started_at = datetime.now(timezone.utc)
+        self._provider.status = "running"
+        self._provider.last_started_at = started_at
+        self._provider.last_error = None
+        await db.flush()
+
+        try:
+            snapshot = await self.fetch_snapshot()
+            assets_metadata = snapshot.build_asset_metadata()
+
+            # Update multi-provider cache
+            self._multi_cache.update_provider_cache(self._provider.id, assets_metadata)
+
+            application_mappings = snapshot.build_application_mappings()
+
+            await self._sync_assets(db, assets_metadata)
+            await self._sync_applications(db, application_mappings)
+
+            completed_at = datetime.now(timezone.utc)
+            self._provider.status = "success"
+            self._provider.last_completed_at = completed_at
+            self._provider.last_success_at = completed_at
+            self._provider.last_error = None
+            self._provider.assets_discovered = len(assets_metadata)
+            self._provider.applications_discovered = len(application_mappings)
+            await db.flush()
+
+            logger.info(
+                "Nutanix provider sync completed",
+                provider_id=str(self._provider.id),
+                provider_name=self._provider.name,
+                assets=len(assets_metadata),
+                applications=len(application_mappings),
+            )
+
+            return snapshot
+        except Exception as exc:
+            completed_at = datetime.now(timezone.utc)
+            self._provider.status = "failed"
+            self._provider.last_completed_at = completed_at
+            self._provider.last_error = str(exc)[:500]
+            await db.flush()
+
+            logger.exception(
+                "Nutanix provider sync failed",
+                provider_id=str(self._provider.id),
+                provider_name=self._provider.name,
+                error=str(exc),
+            )
+            raise
+
+    async def _sync_assets(
+        self,
+        db: AsyncSession,
+        assets: list[NutanixVMMetadata],
+    ) -> None:
+        """Sync assets to database."""
+        for metadata in assets:
+            asset_id = await self._asset_mapper.get_or_create_asset(db, metadata.ip)
+            result = await db.execute(select(Asset).where(Asset.id == asset_id))
+            asset = result.scalar_one_or_none()
+            if not asset:
+                continue
+
+            # Store provider-specific metadata
+            extra_data = dict(asset.extra_data or {})
+            if "nutanix" not in extra_data:
+                extra_data["nutanix"] = {}
+
+            cluster_key = f"cluster_{metadata.cluster}" if metadata.cluster else str(self._provider.id)[:8]
+            extra_data["nutanix"][cluster_key] = {
+                "provider_id": str(self._provider.id),
+                "vm_id": metadata.vm_id,
+                "cluster": metadata.cluster,
+                "subnets": metadata.subnets,
+                "categories": metadata.categories,
+                "power_state": metadata.power_state,
+            }
+            asset.extra_data = extra_data
+
+            # Update tags
+            tags = dict(asset.tags or {})
+            if metadata.cluster:
+                tags["nutanix_cluster"] = metadata.cluster
+            if metadata.subnets:
+                tags["nutanix_subnets"] = metadata.subnets
+            if metadata.categories:
+                tags["nutanix_categories"] = metadata.categories
+
+            # Track discovery sources
+            discovered_by = tags.get("discovered_by", [])
+            if isinstance(discovered_by, str):
+                discovered_by = [discovered_by]
+            source = f"nutanix:{metadata.cluster or self._provider.name}"
+            if source not in discovered_by:
+                discovered_by.append(source)
+            tags["discovered_by"] = discovered_by
+            asset.tags = tags
+
+            # Set asset type if unknown
+            if asset.asset_type == AssetType.UNKNOWN.value:
+                asset.asset_type = AssetType.VIRTUAL_MACHINE.value
+
+            if not asset.display_name:
+                asset.display_name = metadata.name
+
+            # Link to provider
+            asset.discovered_by_provider_id = self._provider.id
+
+        await db.flush()
+
+    async def _sync_applications(
+        self,
+        db: AsyncSession,
+        apps: list[NutanixApplicationMapping],
+    ) -> None:
+        """Sync applications to database."""
+        for app in apps:
+            # Include provider name in application name to avoid conflicts
+            app_name = f"{self._provider.name}:{app.cluster}"
+
+            insert_stmt = pg_insert(Application).values(
+                name=app_name,
+                display_name=app.display_name,
+                description=f"Nutanix cluster {app.cluster} (from {self._provider.name})",
+                tags={},
+                extra_data={
+                    "nutanix": {
+                        "provider_id": str(self._provider.id),
+                        "provider_name": self._provider.name,
+                        "cluster": app.cluster,
+                    }
+                },
+            ).on_conflict_do_nothing(index_elements=["name"])
+            await db.execute(insert_stmt)
+
+            result = await db.execute(select(Application).where(Application.name == app_name))
             application = result.scalar_one_or_none()
             if not application:
                 continue

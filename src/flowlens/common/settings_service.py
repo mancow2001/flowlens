@@ -86,6 +86,9 @@ def _get_section_object(settings: Settings, section_key: str) -> Any:
         "slack": settings.notifications.slack,
         "teams": settings.notifications.teams,
         "pagerduty": settings.notifications.pagerduty,
+        "kubernetes": settings.kubernetes,
+        "vcenter": settings.vcenter,
+        "nutanix": settings.nutanix,
     }
     return mapping.get(section_key)
 
@@ -988,3 +991,139 @@ async def test_notification_channel(channel: str, test_values: dict[str, Any] | 
     # TODO: Add email, webhook, teams testing
 
     return False, f"Unknown channel: {channel}", None
+
+
+async def test_kubernetes_connection(test_values: dict[str, Any] | None = None) -> tuple[bool, str, dict | None]:
+    """Test Kubernetes API connection.
+
+    Args:
+        test_values: Optional override values to test.
+
+    Returns:
+        Tuple of (success, message, details).
+    """
+    import httpx
+
+    settings = get_settings()
+    k8s = settings.kubernetes
+
+    api_server = test_values.get("api_server", k8s.api_server) if test_values else k8s.api_server
+    token = test_values.get("token") if test_values and test_values.get("token") else k8s.token
+    verify_ssl = test_values.get("verify_ssl", k8s.verify_ssl) if test_values else k8s.verify_ssl
+    timeout = test_values.get("timeout_seconds", k8s.timeout_seconds) if test_values else k8s.timeout_seconds
+
+    if not token:
+        # Try to read from token file
+        token_file = test_values.get("token_file", k8s.token_file) if test_values else k8s.token_file
+        if token_file:
+            try:
+                from pathlib import Path
+                token = Path(token_file).read_text().strip()
+            except Exception:
+                pass
+
+    if not token:
+        return False, "No token configured", None
+
+    try:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
+            response = await client.get(
+                f"{api_server}/api/v1",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return True, "Connection successful", {"api_version": data.get("kind", "Unknown")}
+            else:
+                return False, f"API returned status {response.status_code}", None
+    except Exception as e:
+        return False, f"Connection failed: {str(e)}", None
+
+
+async def test_vcenter_connection(test_values: dict[str, Any] | None = None) -> tuple[bool, str, dict | None]:
+    """Test vCenter API connection.
+
+    Args:
+        test_values: Optional override values to test.
+
+    Returns:
+        Tuple of (success, message, details).
+    """
+    import httpx
+
+    settings = get_settings()
+    vc = settings.vcenter
+
+    api_url = test_values.get("api_url", vc.api_url) if test_values else vc.api_url
+    username = test_values.get("username", vc.username) if test_values else vc.username
+    password = test_values.get("password") if test_values and test_values.get("password") else (vc.password.get_secret_value() if vc.password else None)
+    verify_ssl = test_values.get("verify_ssl", vc.verify_ssl) if test_values else vc.verify_ssl
+    timeout = test_values.get("timeout_seconds", vc.timeout_seconds) if test_values else vc.timeout_seconds
+
+    if not username or not password:
+        return False, "Username and password required", None
+
+    try:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
+            # Authenticate to get session
+            response = await client.post(
+                f"{api_url}/api/session",
+                auth=(username, password),
+            )
+            if response.status_code == 201:
+                session_id = response.json()
+                # Clean up session
+                await client.delete(
+                    f"{api_url}/api/session",
+                    headers={"vmware-api-session-id": session_id},
+                )
+                return True, "Connection successful", {"authenticated": True}
+            else:
+                return False, f"Authentication failed: {response.status_code}", None
+    except Exception as e:
+        return False, f"Connection failed: {str(e)}", None
+
+
+async def test_nutanix_connection(test_values: dict[str, Any] | None = None) -> tuple[bool, str, dict | None]:
+    """Test Nutanix Prism API connection.
+
+    Args:
+        test_values: Optional override values to test.
+
+    Returns:
+        Tuple of (success, message, details).
+    """
+    import base64
+    import httpx
+
+    settings = get_settings()
+    nx = settings.nutanix
+
+    api_url = test_values.get("api_url", nx.api_url) if test_values else nx.api_url
+    username = test_values.get("username", nx.username) if test_values else nx.username
+    password = test_values.get("password") if test_values and test_values.get("password") else (nx.password.get_secret_value() if nx.password else None)
+    verify_ssl = test_values.get("verify_ssl", nx.verify_ssl) if test_values else nx.verify_ssl
+    timeout = test_values.get("timeout_seconds", nx.timeout_seconds) if test_values else nx.timeout_seconds
+
+    if not username or not password:
+        return False, "Username and password required", None
+
+    try:
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
+            response = await client.get(
+                f"{api_url}/api/nutanix/v3/clusters/list",
+                headers={
+                    "Authorization": f"Basic {credentials}",
+                    "Content-Type": "application/json",
+                },
+                json={"kind": "cluster", "length": 1},
+            )
+            if response.status_code == 200:
+                data = response.json()
+                cluster_count = data.get("metadata", {}).get("total_matches", 0)
+                return True, "Connection successful", {"clusters": cluster_count}
+            else:
+                return False, f"API returned status {response.status_code}", None
+    except Exception as e:
+        return False, f"Connection failed: {str(e)}", None

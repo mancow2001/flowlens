@@ -17,6 +17,7 @@ from flowlens.models.base import SoftDeleteModel, TimestampMixin, UUIDMixin, Bas
 
 if TYPE_CHECKING:
     from flowlens.models.dependency import Dependency
+    from flowlens.models.discovery import DiscoveryProvider
     from flowlens.models.gateway import AssetGateway
 
 
@@ -231,6 +232,14 @@ class Asset(SoftDeleteModel):
         DateTime(timezone=True),
         nullable=False,
         server_default="now()",
+        index=True,
+    )
+
+    # Discovery provider tracking
+    discovered_by_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("discovery_providers.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 

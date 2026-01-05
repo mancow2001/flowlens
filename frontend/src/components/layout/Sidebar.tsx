@@ -17,6 +17,7 @@ import {
   CubeTransparentIcon,
   UsersIcon,
   ShieldCheckIcon,
+  CloudIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -46,6 +47,7 @@ const settingsNavigation: NavItem[] = [
   { name: 'Classification Rules', href: '/settings/classification', icon: TagIcon, requiredRoles: ['admin', 'analyst'] },
   { name: 'Alert Rules', href: '/settings/alert-rules', icon: AdjustmentsHorizontalIcon, requiredRoles: ['admin', 'analyst'] },
   { name: 'Maintenance', href: '/settings/maintenance', icon: WrenchScrewdriverIcon, requiredRoles: ['admin', 'analyst'] },
+  { name: 'Discovery Providers', href: '/settings/discovery', icon: CloudIcon, requiredRoles: ['admin'] },
   { name: 'System Settings', href: '/settings/system', icon: Cog6ToothIcon, requiredRoles: ['admin'] },
   { name: 'User Management', href: '/settings/users', icon: UsersIcon, requiredRoles: ['admin'] },
   { name: 'SAML Configuration', href: '/settings/saml', icon: ShieldCheckIcon, requiredRoles: ['admin'] },

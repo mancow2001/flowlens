@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flowlens.common.config import ResolutionSettings, get_settings
 from flowlens.common.logging import get_logger
 from flowlens.common.metrics import DEPENDENCIES_CREATED, DEPENDENCIES_UPDATED
+from flowlens.discovery.enricher import MultiProviderAssetEnricher, get_multi_provider_enricher
 from flowlens.discovery.kubernetes import KubernetesAssetEnricher
 from flowlens.discovery.nutanix import NutanixAssetEnricher
 from flowlens.discovery.vcenter import VCenterAssetEnricher
@@ -41,22 +42,35 @@ class DependencyBuilder:
         k8s_enricher: KubernetesAssetEnricher | None = None,
         vcenter_enricher: VCenterAssetEnricher | None = None,
         nutanix_enricher: NutanixAssetEnricher | None = None,
+        multi_provider_enricher: MultiProviderAssetEnricher | None = None,
         settings: ResolutionSettings | None = None,
+        use_multi_provider: bool = True,
     ) -> None:
         """Initialize dependency builder.
 
         Args:
             asset_mapper: Asset mapper instance.
             protocol_resolver: Protocol resolver for service classification.
+            k8s_enricher: Legacy Kubernetes enricher (used if use_multi_provider=False).
+            vcenter_enricher: Legacy vCenter enricher (used if use_multi_provider=False).
+            nutanix_enricher: Legacy Nutanix enricher (used if use_multi_provider=False).
+            multi_provider_enricher: Multi-provider enricher with priority-based resolution.
             settings: Resolution settings for filtering configuration.
+            use_multi_provider: If True, use the multi-provider enricher instead of individual ones.
         """
         self._asset_mapper = asset_mapper or AssetMapper()
         self._protocol_resolver = protocol_resolver or ProtocolResolver()
+        self._settings = settings or get_settings().resolution
+        self._ip_classifier = PrivateIPClassifier()
+        self._use_multi_provider = use_multi_provider
+
+        # Multi-provider enricher (preferred)
+        self._multi_provider_enricher = multi_provider_enricher or get_multi_provider_enricher()
+
+        # Legacy individual enrichers (for backward compatibility)
         self._k8s_enricher = k8s_enricher or KubernetesAssetEnricher()
         self._vcenter_enricher = vcenter_enricher or VCenterAssetEnricher()
         self._nutanix_enricher = nutanix_enricher or NutanixAssetEnricher()
-        self._settings = settings or get_settings().resolution
-        self._ip_classifier = PrivateIPClassifier()
 
     def _is_ephemeral_port(self, port: int, protocol: int) -> bool:
         """Check if port should be treated as ephemeral (unknown high port).
@@ -175,27 +189,39 @@ class DependencyBuilder:
             db, aggregate
         )
 
-        await self._k8s_enricher.enrich_assets(
-            db,
-            src_asset_id,
-            dst_asset_id,
-            src_ip,
-            dst_ip,
-        )
-        await self._vcenter_enricher.enrich_assets(
-            db,
-            src_asset_id,
-            dst_asset_id,
-            src_ip,
-            dst_ip,
-        )
-        await self._nutanix_enricher.enrich_assets(
-            db,
-            src_asset_id,
-            dst_asset_id,
-            src_ip,
-            dst_ip,
-        )
+        # Enrich assets with discovery metadata
+        if self._use_multi_provider:
+            # Use unified multi-provider enricher with priority-based resolution
+            await self._multi_provider_enricher.enrich_assets(
+                db,
+                src_asset_id,
+                dst_asset_id,
+                src_ip,
+                dst_ip,
+            )
+        else:
+            # Legacy: use individual enrichers
+            await self._k8s_enricher.enrich_assets(
+                db,
+                src_asset_id,
+                dst_asset_id,
+                src_ip,
+                dst_ip,
+            )
+            await self._vcenter_enricher.enrich_assets(
+                db,
+                src_asset_id,
+                dst_asset_id,
+                src_ip,
+                dst_ip,
+            )
+            await self._nutanix_enricher.enrich_assets(
+                db,
+                src_asset_id,
+                dst_asset_id,
+                src_ip,
+                dst_ip,
+            )
 
         # Skip self-loops
         if src_asset_id == dst_asset_id:

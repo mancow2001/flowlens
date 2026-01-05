@@ -764,3 +764,109 @@ export interface AuthSession {
   created_at: string;
   is_current: boolean;
 }
+
+// Discovery Provider types
+export type DiscoveryProviderType = 'kubernetes' | 'vcenter' | 'nutanix';
+export type DiscoveryProviderStatus = 'idle' | 'running' | 'success' | 'failed';
+
+export interface KubernetesConfig {
+  cluster_name: string;
+  namespace: string | null;
+  token: string | null;
+  ca_cert: string | null;
+}
+
+export interface VCenterConfig {
+  include_tags: boolean;
+}
+
+export interface NutanixConfig {}
+
+export interface DiscoveryProvider {
+  id: string;
+  name: string;
+  display_name: string | null;
+  provider_type: DiscoveryProviderType;
+  api_url: string;
+  username: string | null;
+  has_password: boolean;
+  verify_ssl: boolean;
+  timeout_seconds: number;
+  is_enabled: boolean;
+  priority: number;
+  sync_interval_minutes: number;
+  kubernetes_config: KubernetesConfig | null;
+  vcenter_config: VCenterConfig | null;
+  nutanix_config: NutanixConfig | null;
+  status: DiscoveryProviderStatus;
+  last_started_at: string | null;
+  last_completed_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  assets_discovered: number;
+  applications_discovered: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiscoveryProviderSummary {
+  id: string;
+  name: string;
+  display_name: string | null;
+  provider_type: DiscoveryProviderType;
+  api_url: string;
+  is_enabled: boolean;
+  status: DiscoveryProviderStatus;
+  last_success_at: string | null;
+  assets_discovered: number;
+}
+
+export interface DiscoveryProviderListResponse {
+  items: DiscoveryProviderSummary[];
+  total: number;
+}
+
+export interface DiscoveryProviderCreate {
+  name: string;
+  display_name?: string;
+  provider_type: DiscoveryProviderType;
+  api_url: string;
+  username?: string;
+  password?: string;
+  verify_ssl?: boolean;
+  timeout_seconds?: number;
+  is_enabled?: boolean;
+  priority?: number;
+  sync_interval_minutes?: number;
+  kubernetes_config?: KubernetesConfig;
+  vcenter_config?: VCenterConfig;
+  nutanix_config?: NutanixConfig;
+}
+
+export interface DiscoveryProviderUpdate {
+  name?: string;
+  display_name?: string;
+  api_url?: string;
+  username?: string;
+  password?: string;
+  verify_ssl?: boolean;
+  timeout_seconds?: number;
+  is_enabled?: boolean;
+  priority?: number;
+  sync_interval_minutes?: number;
+  kubernetes_config?: KubernetesConfig;
+  vcenter_config?: VCenterConfig;
+  nutanix_config?: NutanixConfig;
+}
+
+export interface ConnectionTestResponse {
+  success: boolean;
+  message: string;
+  details: Record<string, unknown> | null;
+}
+
+export interface SyncTriggerResponse {
+  success: boolean;
+  message: string;
+  provider_id: string;
+}
