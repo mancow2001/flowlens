@@ -493,8 +493,49 @@ class VCenterProviderClient:
             return response.json()
 
     async def list_vms(self, session_id: str) -> list[dict[str, Any]]:
+        """List all VMs with basic info."""
         data = await self._get("/rest/vcenter/vm", session_id)
         return data.get("value", [])
+
+    async def get_vm_guest_identity(self, session_id: str, vm_id: str) -> dict[str, Any]:
+        """Get guest identity info for a VM including IP addresses."""
+        try:
+            data = await self._get(f"/rest/vcenter/vm/{vm_id}/guest/identity", session_id)
+            return data.get("value", {})
+        except httpx.HTTPStatusError:
+            # VM might be powered off or tools not installed
+            return {}
+
+    async def list_vms_with_ips(self, session_id: str) -> list[dict[str, Any]]:
+        """List all VMs and enrich with guest IP addresses.
+
+        This fetches the basic VM list, then for each VM fetches guest identity
+        to get IP addresses. VMs without tools or powered off won't have IPs.
+        """
+        vms = await self.list_vms(session_id)
+        enriched_vms = []
+
+        logger.info("Fetching guest IPs for VMs", total_vms=len(vms))
+
+        for vm in vms:
+            vm_id = vm.get("vm")
+            if not vm_id:
+                enriched_vms.append(vm)
+                continue
+
+            # Get guest identity for IP addresses
+            guest_info = await self.get_vm_guest_identity(session_id, vm_id)
+            ip_address = guest_info.get("ip_address")
+
+            # Add IP to VM data
+            enriched_vm = dict(vm)
+            if ip_address:
+                enriched_vm["guest_IP"] = ip_address
+                logger.debug("Found IP for VM", vm_name=vm.get("name"), ip=ip_address)
+
+            enriched_vms.append(enriched_vm)
+
+        return enriched_vms
 
     async def list_clusters(self, session_id: str) -> list[dict[str, Any]]:
         data = await self._get("/rest/vcenter/cluster", session_id)
@@ -567,7 +608,8 @@ class VCenterProviderDiscoveryService:
     async def fetch_snapshot(self) -> VCenterSnapshot:
         """Fetch current state from vCenter API."""
         session_id = await self._client.get_session()
-        vms = await self._client.list_vms(session_id)
+        # Use list_vms_with_ips to get guest IP addresses for each VM
+        vms = await self._client.list_vms_with_ips(session_id)
         clusters = await self._client.list_clusters(session_id)
         networks = await self._client.list_networks(session_id)
         tags: dict[str, list[str]] = {}
