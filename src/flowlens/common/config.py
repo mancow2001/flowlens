@@ -212,6 +212,33 @@ class KubernetesSettings(BaseSettings):
     timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
 
 
+class VCenterSettings(BaseSettings):
+    """VMware vCenter discovery configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="VCENTER_")
+
+    enabled: bool = False
+    api_url: str = "https://vcenter.local"
+    username: str | None = None
+    password: SecretStr | None = None
+    verify_ssl: bool = True
+    timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
+    include_tags: bool = True
+
+
+class NutanixSettings(BaseSettings):
+    """Nutanix Prism discovery configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="NUTANIX_")
+
+    enabled: bool = False
+    api_url: str = "https://nutanix.local:9440"
+    username: str | None = None
+    password: SecretStr | None = None
+    verify_ssl: bool = True
+    timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
+
+
 class APISettings(BaseSettings):
     """Query/API Service configuration."""
 
@@ -496,6 +523,8 @@ class Settings(BaseSettings):
     enrichment: EnrichmentSettings = Field(default_factory=EnrichmentSettings)
     resolution: ResolutionSettings = Field(default_factory=ResolutionSettings)
     kubernetes: KubernetesSettings = Field(default_factory=KubernetesSettings)
+    vcenter: VCenterSettings = Field(default_factory=VCenterSettings)
+    nutanix: NutanixSettings = Field(default_factory=NutanixSettings)
     classification: ClassificationSettings = Field(default_factory=ClassificationSettings)
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
