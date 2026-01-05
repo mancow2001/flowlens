@@ -182,6 +182,18 @@ class ResolutionSettings(BaseSettings):
         description="Exclude dependencies where the target is external"
     )
 
+    # Ephemeral/unknown port filtering
+    skip_unknown_high_ports: bool = Field(
+        default=True,
+        description="Skip dependencies for high ports that aren't known services (ephemeral client ports)"
+    )
+    unknown_port_threshold: int = Field(
+        default=1024,
+        ge=1024,
+        le=65535,
+        description="Ports >= this value are skipped unless they match a known service. ICMP is always allowed."
+    )
+
 
 class APISettings(BaseSettings):
     """Query/API Service configuration."""

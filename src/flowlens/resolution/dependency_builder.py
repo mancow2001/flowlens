@@ -111,6 +111,17 @@ class DependencyBuilder:
         src_ip = str(aggregate.src_ip)
         dst_ip = str(aggregate.dst_ip)
 
+        # Check if target port is ephemeral (unknown high port)
+        if self._is_ephemeral_port(aggregate.dst_port, aggregate.protocol):
+            logger.debug(
+                "Skipping ephemeral port dependency",
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                port=aggregate.dst_port,
+                protocol=aggregate.protocol,
+            )
+            return None
+
         # Check external IP exclusion settings
         if self._should_exclude_external(src_ip, dst_ip):
             logger.debug(
