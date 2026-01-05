@@ -37,6 +37,11 @@ class VCenterVMMetadata:
     networks: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     power_state: str | None = None
+    hostname: str | None = None
+    fqdn: str | None = None
+    mac_addresses: list[str] = field(default_factory=list)
+    os_family: str | None = None
+    os_name: str | None = None
 
 
 @dataclass
@@ -93,6 +98,11 @@ class VCenterSnapshot:
                         networks=networks,
                         tags=vm_tags,
                         power_state=vm.get("power_state"),
+                        hostname=vm.get("hostname"),
+                        fqdn=vm.get("fqdn"),
+                        mac_addresses=vm.get("mac_addresses", []),
+                        os_family=vm.get("os_family"),
+                        os_name=vm.get("os_name"),
                     )
                 )
         return assets
@@ -498,7 +508,7 @@ class VCenterProviderClient:
         return data.get("value", [])
 
     async def get_vm_guest_identity(self, session_id: str, vm_id: str) -> dict[str, Any]:
-        """Get guest identity info for a VM including IP addresses."""
+        """Get guest identity info for a VM including IP addresses, hostname, OS."""
         try:
             data = await self._get(f"/rest/vcenter/vm/{vm_id}/guest/identity", session_id)
             return data.get("value", {})
@@ -506,16 +516,25 @@ class VCenterProviderClient:
             # VM might be powered off or tools not installed
             return {}
 
-    async def list_vms_with_ips(self, session_id: str) -> list[dict[str, Any]]:
-        """List all VMs and enrich with guest IP addresses.
+    async def get_vm_guest_networking(self, session_id: str, vm_id: str) -> dict[str, Any]:
+        """Get guest networking info for a VM including MAC addresses."""
+        try:
+            data = await self._get(f"/rest/vcenter/vm/{vm_id}/guest/networking", session_id)
+            return data.get("value", {})
+        except httpx.HTTPStatusError:
+            # VM might be powered off or tools not installed
+            return {}
+
+    async def list_vms_with_guest_info(self, session_id: str) -> list[dict[str, Any]]:
+        """List all VMs and enrich with guest info (IP, hostname, MAC, OS).
 
         This fetches the basic VM list, then for each VM fetches guest identity
-        to get IP addresses. VMs without tools or powered off won't have IPs.
+        and networking info. VMs without tools or powered off won't have guest data.
         """
         vms = await self.list_vms(session_id)
         enriched_vms = []
 
-        logger.info("Fetching guest IPs for VMs", total_vms=len(vms))
+        logger.info("Fetching guest info for VMs", total_vms=len(vms))
 
         for vm in vms:
             vm_id = vm.get("vm")
@@ -523,19 +542,56 @@ class VCenterProviderClient:
                 enriched_vms.append(vm)
                 continue
 
-            # Get guest identity for IP addresses
-            guest_info = await self.get_vm_guest_identity(session_id, vm_id)
-            ip_address = guest_info.get("ip_address")
-
-            # Add IP to VM data
             enriched_vm = dict(vm)
-            if ip_address:
-                enriched_vm["guest_IP"] = ip_address
-                logger.debug("Found IP for VM", vm_name=vm.get("name"), ip=ip_address)
+
+            # Get guest identity for IP, hostname, OS
+            guest_identity = await self.get_vm_guest_identity(session_id, vm_id)
+            if guest_identity:
+                ip_address = guest_identity.get("ip_address")
+                if ip_address:
+                    enriched_vm["guest_IP"] = ip_address
+
+                # Hostname and FQDN
+                host_name = guest_identity.get("host_name")
+                if host_name:
+                    enriched_vm["hostname"] = host_name
+                    # Check if it looks like FQDN (has dots)
+                    if "." in host_name:
+                        enriched_vm["fqdn"] = host_name
+
+                # OS info
+                enriched_vm["os_family"] = guest_identity.get("family")
+                enriched_vm["os_name"] = guest_identity.get("full_name", {}).get("default_message") if isinstance(guest_identity.get("full_name"), dict) else guest_identity.get("full_name")
+
+            # Get guest networking for MAC addresses
+            guest_networking = await self.get_vm_guest_networking(session_id, vm_id)
+            if guest_networking:
+                nics = guest_networking.get("network_interfaces", [])
+                mac_addresses = []
+                for nic in nics:
+                    mac = nic.get("mac_address")
+                    if mac:
+                        mac_addresses.append(mac)
+                if mac_addresses:
+                    enriched_vm["mac_addresses"] = mac_addresses
+
+            if enriched_vm.get("guest_IP"):
+                logger.debug(
+                    "Found guest info for VM",
+                    vm_name=vm.get("name"),
+                    ip=enriched_vm.get("guest_IP"),
+                    hostname=enriched_vm.get("hostname"),
+                    macs=len(enriched_vm.get("mac_addresses", [])),
+                )
 
             enriched_vms.append(enriched_vm)
 
         return enriched_vms
+
+    # Keep old method for backwards compatibility
+    async def list_vms_with_ips(self, session_id: str) -> list[dict[str, Any]]:
+        """Alias for list_vms_with_guest_info."""
+        return await self.list_vms_with_guest_info(session_id)
 
     async def list_clusters(self, session_id: str) -> list[dict[str, Any]]:
         data = await self._get("/rest/vcenter/cluster", session_id)
@@ -712,8 +768,23 @@ class VCenterProviderDiscoveryService:
                 "networks": metadata.networks,
                 "tags": metadata.tags,
                 "power_state": metadata.power_state,
+                "hostname": metadata.hostname,
+                "fqdn": metadata.fqdn,
+                "mac_addresses": metadata.mac_addresses,
+                "os_family": metadata.os_family,
+                "os_name": metadata.os_name,
             }
             asset.extra_data = extra_data
+
+            # Update core asset fields from vCenter data
+            if metadata.hostname and not asset.hostname:
+                asset.hostname = metadata.hostname
+            if metadata.fqdn and not asset.hostname:
+                # Use FQDN as hostname if no hostname set
+                asset.hostname = metadata.fqdn
+            if metadata.mac_addresses and not asset.mac_address:
+                # Use first MAC address
+                asset.mac_address = metadata.mac_addresses[0]
 
             # Update tags
             tags = dict(asset.tags or {})
@@ -725,6 +796,12 @@ class VCenterProviderDiscoveryService:
             if metadata.tags:
                 # Store as comma-separated string (tags must be strings)
                 tags["vcenter_tags"] = ", ".join(metadata.tags)
+            if metadata.os_family:
+                tags["os_family"] = metadata.os_family
+            if metadata.os_name:
+                tags["os_name"] = metadata.os_name
+            if metadata.mac_addresses:
+                tags["mac_addresses"] = ", ".join(metadata.mac_addresses)
 
             # Track discovery sources (as comma-separated string)
             source = f"vcenter:{metadata.cluster or self._provider.name}"
