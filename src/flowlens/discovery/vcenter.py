@@ -531,6 +531,31 @@ class VCenterProviderClient:
             logger.info("Error getting networking info for VM", vm_id=vm_id, error=str(e))
             return {}
 
+    async def get_vm_hardware_nics(self, session_id: str, vm_id: str) -> list[str]:
+        """Get MAC addresses from VM hardware configuration.
+
+        This fetches MAC addresses from the VM's virtual NIC hardware config,
+        which is more reliable than guest networking info (doesn't require
+        VMware Tools to report it).
+        """
+        try:
+            data = await self._get(f"/rest/vcenter/vm/{vm_id}", session_id)
+            vm_info = data.get("value", {})
+            nics = vm_info.get("nics", {})
+            mac_addresses = []
+            for nic_key, nic_info in nics.items():
+                mac = nic_info.get("mac_address")
+                if mac:
+                    mac_addresses.append(mac)
+            logger.info("VM hardware NICs", vm_id=vm_id, nic_count=len(nics), mac_count=len(mac_addresses))
+            return mac_addresses
+        except httpx.HTTPStatusError as e:
+            logger.info("Failed to get VM hardware info", vm_id=vm_id, status=e.response.status_code)
+            return []
+        except Exception as e:
+            logger.info("Error getting VM hardware info", vm_id=vm_id, error=str(e))
+            return []
+
     async def list_vms_with_guest_info(self, session_id: str) -> list[dict[str, Any]]:
         """List all VMs and enrich with guest info (IP, hostname, MAC, OS).
 
@@ -569,17 +594,22 @@ class VCenterProviderClient:
                 enriched_vm["os_family"] = guest_identity.get("family")
                 enriched_vm["os_name"] = guest_identity.get("full_name", {}).get("default_message") if isinstance(guest_identity.get("full_name"), dict) else guest_identity.get("full_name")
 
-            # Get guest networking for MAC addresses
+            # Get MAC addresses - try guest networking first, then fall back to hardware
+            mac_addresses = []
             guest_networking = await self.get_vm_guest_networking(session_id, vm_id)
             if guest_networking:
                 nics = guest_networking.get("network_interfaces", [])
-                mac_addresses = []
                 for nic in nics:
                     mac = nic.get("mac_address")
                     if mac:
                         mac_addresses.append(mac)
-                if mac_addresses:
-                    enriched_vm["mac_addresses"] = mac_addresses
+
+            # If guest networking didn't return MACs, get from VM hardware config
+            if not mac_addresses:
+                mac_addresses = await self.get_vm_hardware_nics(session_id, vm_id)
+
+            if mac_addresses:
+                enriched_vm["mac_addresses"] = mac_addresses
 
             if enriched_vm.get("guest_IP"):
                 logger.info(
