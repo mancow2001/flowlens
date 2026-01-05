@@ -19,6 +19,7 @@ from flowlens.ingestion.backpressure import BackpressureQueue
 from flowlens.ingestion.parsers.base import FlowParser, FlowRecord
 from flowlens.ingestion.parsers.netflow_v5 import NetFlowV5Parser
 from flowlens.ingestion.parsers.netflow_v9 import NetFlowV9Parser
+from flowlens.ingestion.parsers.sflow import SFlowParser
 from flowlens.ingestion.router import FlowRouter, PostgreSQLRouter
 
 logger = get_logger(__name__)
@@ -69,8 +70,8 @@ class FlowProtocol(asyncio.DatagramProtocol):
             exporter=exporter_ip,
         ).inc()
 
-        # Non-blocking put to queue
-        asyncio.create_task(self._queue.put((data, exporter_ip)))
+        # Non-blocking put to queue (include protocol name for routing)
+        asyncio.create_task(self._queue.put((data, exporter_ip, self._protocol_name)))
 
     def error_received(self, exc: Exception) -> None:
         """Called when a send/receive operation fails."""
@@ -117,8 +118,8 @@ class FlowCollector:
             batch_size=self._settings.batch_size,
         )
 
-        # Packet queue
-        self._queue: BackpressureQueue[tuple[bytes, str]] = BackpressureQueue(
+        # Packet queue (data, exporter_ip, protocol_name)
+        self._queue: BackpressureQueue[tuple[bytes, str, str]] = BackpressureQueue(
             self._settings,
         )
 
@@ -126,6 +127,7 @@ class FlowCollector:
         self._parsers: dict[str, FlowParser] = {
             "netflow_v5": NetFlowV5Parser(),
             "netflow_v9": NetFlowV9Parser(),
+            "sflow": SFlowParser(),
         }
 
         # Transports
@@ -221,18 +223,19 @@ class FlowCollector:
 
                 # Parse all packets
                 records: list[FlowRecord] = []
-                for data, exporter_ip in packets:
+                for data, exporter_ip, protocol in packets:
                     try:
-                        parsed = self._parse_packet(data, exporter_ip)
+                        parsed = self._parse_packet(data, exporter_ip, protocol)
                         records.extend(parsed)
                     except Exception as e:
                         FLOWS_PARSE_ERRORS.labels(
-                            protocol="unknown",
+                            protocol=protocol,
                             error_type=type(e).__name__,
                         ).inc()
                         logger.debug(
                             "Failed to parse packet",
                             exporter=exporter_ip,
+                            protocol=protocol,
                             error=str(e),
                         )
 
@@ -253,23 +256,33 @@ class FlowCollector:
         self,
         data: bytes,
         exporter_ip: str,
+        protocol: str,
     ) -> list[FlowRecord]:
         """Parse a single packet.
 
         Args:
             data: Raw packet data.
             exporter_ip: IP of the exporter.
+            protocol: Protocol name from listener ("netflow" or "sflow").
 
         Returns:
             List of parsed flow records.
         """
-        # Detect protocol version from first 2 bytes
         if len(data) < 2:
-            raise ValueError("Packet too short to detect version")
+            raise ValueError("Packet too short")
 
+        # Route sFlow directly to sFlow parser
+        if protocol == "sflow":
+            parser = self._parsers.get("sflow")
+            if parser:
+                records = parser.parse(data, IPv4Address(exporter_ip))
+                FLOWS_PARSED.labels(protocol="sflow").inc(len(records))
+                return records
+            raise ValueError("sFlow parser not available")
+
+        # For NetFlow/IPFIX, detect version from first 2 bytes
         version = int.from_bytes(data[0:2], byteorder="big")
 
-        # Route to appropriate parser
         if version == 5:
             parser = self._parsers.get("netflow_v5")
             if parser:
@@ -284,7 +297,7 @@ class FlowCollector:
                 FLOWS_PARSED.labels(protocol="netflow_v9").inc(len(records))
                 return records
 
-        # TODO: Add IPFIX (version 10), sFlow parsers
+        # TODO: Add IPFIX (version 10) parser
         raise ValueError(f"Unsupported flow version: {version}")
 
     @property
