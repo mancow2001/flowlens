@@ -538,6 +538,7 @@ class VCenterProviderClient:
         which is more reliable than guest networking info (doesn't require
         VMware Tools to report it).
         """
+        logger.info("Fetching VM hardware config for MACs", vm_id=vm_id)
         try:
             data = await self._get(f"/rest/vcenter/vm/{vm_id}", session_id)
             vm_info = data.get("value", {})
@@ -547,13 +548,14 @@ class VCenterProviderClient:
                 mac = nic_info.get("mac_address")
                 if mac:
                     mac_addresses.append(mac)
-            logger.info("VM hardware NICs", vm_id=vm_id, nic_count=len(nics), mac_count=len(mac_addresses))
+                    logger.info("Found MAC in hardware", vm_id=vm_id, nic_key=nic_key, mac=mac)
+            logger.info("VM hardware NICs result", vm_id=vm_id, nic_count=len(nics), mac_count=len(mac_addresses), macs=mac_addresses)
             return mac_addresses
         except httpx.HTTPStatusError as e:
-            logger.info("Failed to get VM hardware info", vm_id=vm_id, status=e.response.status_code)
+            logger.error("Failed to get VM hardware info", vm_id=vm_id, status=e.response.status_code, error=str(e))
             return []
         except Exception as e:
-            logger.info("Error getting VM hardware info", vm_id=vm_id, error=str(e))
+            logger.error("Error getting VM hardware info", vm_id=vm_id, error=str(e), error_type=type(e).__name__)
             return []
 
     async def list_vms_with_guest_info(self, session_id: str) -> list[dict[str, Any]]:
