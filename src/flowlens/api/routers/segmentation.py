@@ -230,7 +230,7 @@ async def generate_policy_from_topology(
             include_downstream_dependencies=data.include_downstream_dependencies,
             max_downstream_depth=data.max_downstream_depth,
             min_bytes_threshold=data.min_bytes_threshold,
-            generated_by=_user.email,
+            generated_by=_user.sub,
         )
     except ValueError as e:
         raise HTTPException(
@@ -268,7 +268,7 @@ async def regenerate_policy(
     try:
         policy = await generator.regenerate_policy(
             policy_id=policy_id,
-            generated_by=_user.email,
+            generated_by=_user.sub,
         )
     except ValueError as e:
         raise HTTPException(
@@ -479,7 +479,7 @@ async def publish_policy_version(
         rules_added=rules_added,
         rules_removed=rules_removed,
         rules_modified=rules_modified,
-        created_by=_user.email,
+        created_by=_user.sub,
         change_reason=data.change_reason if data else None,
     )
 
@@ -772,7 +772,7 @@ async def approve_policy(
         )
 
     policy.status = PolicyStatus.APPROVED.value
-    policy.approved_by = _user.email
+    policy.approved_by = _user.sub
     policy.approved_at = datetime.now(timezone.utc)
 
     await db.commit()
