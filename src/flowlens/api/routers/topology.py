@@ -682,7 +682,7 @@ async def get_arc_topology(
 
     if apply_exclusions:
         exclusions_query = select(TopologyExclusion).where(
-            TopologyExclusion.user_id == user.id
+            TopologyExclusion.user_id == user.sub
         )
         exclusions_result = await db.execute(exclusions_query)
         exclusions = exclusions_result.scalars().all()
@@ -1162,7 +1162,7 @@ async def list_exclusions(
     from the arc topology view.
     """
     # Get exclusions for the current user
-    query = select(TopologyExclusion).where(TopologyExclusion.user_id == user.id)
+    query = select(TopologyExclusion).where(TopologyExclusion.user_id == user.sub)
     result = await db.execute(query)
     exclusions = result.scalars().all()
 
@@ -1233,7 +1233,7 @@ async def create_exclusion(
 
     # Check if exclusion already exists
     existing_query = select(TopologyExclusion).where(
-        TopologyExclusion.user_id == user.id,
+        TopologyExclusion.user_id == user.sub,
         TopologyExclusion.entity_type == data.entity_type.value,
         TopologyExclusion.entity_id == data.entity_id,
     )
@@ -1246,7 +1246,7 @@ async def create_exclusion(
 
     # Create the exclusion
     exclusion = TopologyExclusion(
-        user_id=user.id,
+        user_id=user.sub,
         entity_type=data.entity_type.value,
         entity_id=data.entity_id,
         reason=data.reason,
@@ -1280,7 +1280,7 @@ async def delete_exclusion(
     # Get the exclusion (must belong to the current user)
     query = select(TopologyExclusion).where(
         TopologyExclusion.id == exclusion_id,
-        TopologyExclusion.user_id == user.id,
+        TopologyExclusion.user_id == user.sub,
     )
     result = await db.execute(query)
     exclusion = result.scalar_one_or_none()
