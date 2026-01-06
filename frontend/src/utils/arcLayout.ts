@@ -324,12 +324,15 @@ export function isPointNearConnection(
   x: number,
   y: number,
   connection: VisualConnection,
-  threshold: number = 8
+  threshold: number = 15
 ): boolean {
   // Parse the path to get the control points
   // Path format: "M x1,y1 Q cx,cy x2,y2"
-  const pathMatch = connection.path.match(/M ([-\d.]+),([-\d.]+) Q ([-\d.]+),([-\d.]+) ([-\d.]+),([-\d.]+)/);
-  if (!pathMatch) return false;
+  // Use a more flexible regex that handles various number formats
+  const pathMatch = connection.path.match(/M\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*Q\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*([-\d.e+]+)[,\s]+([-\d.e+]+)/i);
+  if (!pathMatch) {
+    return false;
+  }
 
   const x1 = parseFloat(pathMatch[1]);
   const y1 = parseFloat(pathMatch[2]);
@@ -339,7 +342,7 @@ export function isPointNearConnection(
   const y2 = parseFloat(pathMatch[6]);
 
   // Sample points along the quadratic bezier curve
-  const samples = 20;
+  const samples = 30;
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
     // Quadratic bezier formula: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
@@ -361,7 +364,7 @@ export function findConnectionAtPoint(
   x: number,
   y: number,
   connections: VisualConnection[],
-  threshold: number = 8
+  threshold: number = 15
 ): VisualConnection | null {
   // Check connections in reverse order (last drawn = on top)
   for (let i = connections.length - 1; i >= 0; i--) {

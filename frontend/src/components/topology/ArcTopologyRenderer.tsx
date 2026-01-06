@@ -138,11 +138,22 @@ export function ArcTopologyRenderer({
 
         ctx.beginPath();
         const path2D = new Path2D(conn.path);
-        ctx.strokeStyle = isHighlighted
-          ? 'rgba(59, 130, 246, 0.9)' // Blue highlight
-          : `rgba(100, 116, 139, ${conn.opacity})`;
-        ctx.lineWidth = isHighlighted ? conn.strokeWidth * 1.5 : conn.strokeWidth;
-        ctx.stroke(path2D);
+
+        if (isHighlighted) {
+          // Draw a glow effect for highlighted connections
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
+          ctx.lineWidth = conn.strokeWidth * 3;
+          ctx.stroke(path2D);
+          // Draw the main highlighted line
+          ctx.strokeStyle = 'rgba(59, 130, 246, 1)';
+          ctx.lineWidth = conn.strokeWidth * 1.5;
+          ctx.stroke(path2D);
+        } else {
+          // Make base connections more visible
+          ctx.strokeStyle = `rgba(100, 116, 139, ${Math.max(conn.opacity, 0.5)})`;
+          ctx.lineWidth = Math.max(conn.strokeWidth, 2);
+          ctx.stroke(path2D);
+        }
       }
     }
 
@@ -288,7 +299,9 @@ export function ArcTopologyRenderer({
       // Check for connection hover (only when in focused view)
       let connection: VisualConnection | null = null;
       if (focusedFolderId && !node && focusedData.visibleConnections.length > 0) {
-        connection = findConnectionAtPoint(mouseX, mouseY, focusedData.visibleConnections);
+        // Adjust threshold based on zoom level - when zoomed out, need larger threshold
+        const adjustedThreshold = 20 / transform.k;
+        connection = findConnectionAtPoint(mouseX, mouseY, focusedData.visibleConnections, adjustedThreshold);
       }
 
       setHoveredNode(node);
