@@ -184,6 +184,13 @@ export function buildExpandableHierarchy(
 
     // If expanded, add applications as children
     if (isExpanded) {
+      console.log('[buildExpandableHierarchy] Expanding folder:', {
+        folderId: folder.id,
+        folderName: folder.name,
+        applicationsCount: folder.applications?.length ?? 0,
+        applications: folder.applications?.map(a => ({ id: a.id, name: a.name })) ?? [],
+      });
+
       for (const app of folder.applications) {
         const appNode: ArcNode = {
           id: String(app.id),
@@ -204,6 +211,8 @@ export function buildExpandableHierarchy(
         const childNode = processFolderNode(child, node, depth + 1);
         node.children.push(childNode);
       }
+
+      console.log('[buildExpandableHierarchy] After expansion, node.children:', node.children.length);
     }
 
     return node;
