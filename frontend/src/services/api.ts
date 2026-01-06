@@ -70,6 +70,7 @@ import type {
   MoveFolderRequest,
   MoveApplicationRequest,
   ArcTopologyData,
+  ApplicationDependencyList,
 } from '../types';
 import { useAuthStore } from '../stores/authStore';
 
@@ -1757,14 +1758,76 @@ export const folderApi = {
 
 // Arc Topology API endpoints
 export const arcTopologyApi = {
-  getData: async (): Promise<ArcTopologyData> => {
-    const { data } = await api.get('/topology/arc');
+  getData: async (applyExclusions: boolean = true): Promise<ArcTopologyData> => {
+    const { data } = await api.get('/topology/arc', {
+      params: { apply_exclusions: applyExclusions },
+    });
     return data;
   },
 
   moveApplicationToFolder: async (applicationId: string, request: MoveApplicationRequest): Promise<Application> => {
     const { data } = await api.post(`/applications/${applicationId}/move`, request);
     return data;
+  },
+
+  getAppDependencies: async (
+    appId: string,
+    direction: 'incoming' | 'outgoing' | 'both' = 'both'
+  ): Promise<ApplicationDependencyList> => {
+    const { data } = await api.get(`/topology/arc/app/${appId}/dependencies`, {
+      params: { direction },
+    });
+    return data;
+  },
+
+  exportAppDependencies: async (
+    appId: string,
+    direction: 'incoming' | 'outgoing' | 'both' = 'both'
+  ): Promise<void> => {
+    const response = await api.get(`/topology/arc/app/${appId}/dependencies/export`, {
+      params: { direction },
+      responseType: 'blob',
+    });
+
+    // Get filename from response header or generate one
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = `dependencies_${direction}.csv`;
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename="?(.+?)"?$/);
+      if (match) {
+        filename = match[1];
+      }
+    }
+
+    // Create blob and trigger download
+    const blob = new Blob([response.data], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+};
+
+// Topology Exclusions API endpoints
+import type { TopologyExclusion, TopologyExclusionCreate, TopologyExclusionList } from '../types';
+
+export const exclusionsApi = {
+  list: async (): Promise<TopologyExclusionList> => {
+    const { data } = await api.get('/topology/exclusions');
+    return data;
+  },
+
+  create: async (exclusion: TopologyExclusionCreate): Promise<TopologyExclusion> => {
+    const { data } = await api.post('/topology/exclusions', exclusion);
+    return data;
+  },
+
+  delete: async (exclusionId: string): Promise<void> => {
+    await api.delete(`/topology/exclusions/${exclusionId}`);
   },
 };
 

@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import Card from '../components/common/Card';
@@ -10,6 +10,8 @@ import EdgeTooltip from '../components/topology/EdgeTooltip';
 import CanvasTopologyRenderer from '../components/topology/CanvasTopologyRenderer';
 import { ArcTopologyRenderer } from '../components/topology/ArcTopologyRenderer';
 import { FolderPanel } from '../components/topology/FolderPanel';
+import { ApplicationDetailsSlideOver } from '../components/topology/ApplicationDetailsSlideOver';
+import { ExclusionFilterPanel } from '../components/topology/ExclusionFilterPanel';
 import TopologySettingsDialog, {
   type TopologySettings,
   type RenderMode,
@@ -338,12 +340,15 @@ export default function Topology() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   // View mode state - arc view is the new default
   const [viewMode, setViewMode] = useState<ViewMode>('arc');
   const [focusedFolderId, setFocusedFolderId] = useState<string | null>(null);
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
+  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [showDetailsPane, setShowDetailsPane] = useState(false);
+  const [showExclusionPanel, setShowExclusionPanel] = useState(false);
 
   // Search highlight params from URL (e.g., from header search)
   const highlightSourceId = searchParams.get('source');
@@ -461,10 +466,12 @@ export default function Topology() {
   });
 
   // Fetch arc topology data (for arc view mode)
-  const { data: arcTopologyData, isLoading: isArcLoading } = useQuery({
+  const { data: arcTopologyData, isLoading: isArcLoading, isError: isArcError, error: arcError } = useQuery({
     queryKey: ['topology', 'arc'],
     queryFn: () => arcTopologyApi.getData(),
     enabled: viewMode === 'arc',
+    retry: 2,
+    staleTime: 30000, // 30 seconds
   });
 
   // Save view mutation
@@ -855,6 +862,41 @@ export default function Topology() {
     window.addEventListener('resize', updateDimensions);
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
+
+  // Keyboard navigation (Escape to close/deselect)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // Close details pane first if open
+        if (showDetailsPane) {
+          setShowDetailsPane(false);
+          return;
+        }
+        // Deselect application if selected
+        if (selectedAppId) {
+          setSelectedAppId(null);
+          return;
+        }
+        // Collapse all expanded folders if any
+        if (expandedFolderIds.size > 0) {
+          setExpandedFolderIds(new Set());
+          return;
+        }
+        // Clear focused folder if set
+        if (focusedFolderId) {
+          setFocusedFolderId(null);
+          return;
+        }
+        // Clear node selection in force view
+        if (selectedNode) {
+          clearSelection();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showDetailsPane, selectedAppId, expandedFolderIds, focusedFolderId, selectedNode, clearSelection]);
 
   // Reset view function
   const resetView = () => {
@@ -2187,12 +2229,17 @@ export default function Topology() {
 
         {/* Folder Panel - only shown in arc view */}
         {viewMode === 'arc' && (
-          <div className="w-72 shrink-0">
+          <div className="w-72 shrink-0 space-y-4">
             <FolderPanel
               onFolderSelect={(folderId) => {
                 setFocusedFolderId(folderId);
               }}
               selectedFolderId={focusedFolderId}
+            />
+            <ExclusionFilterPanel
+              topologyData={arcTopologyData}
+              isExpanded={showExclusionPanel}
+              onToggleExpand={() => setShowExclusionPanel(!showExclusionPanel)}
             />
           </div>
         )}
@@ -2205,7 +2252,34 @@ export default function Topology() {
           >
             {isArcLoading ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-slate-400">Loading arc topology...</div>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+                  <div className="text-slate-400">Loading arc topology...</div>
+                </div>
+              </div>
+            ) : isArcError ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="flex flex-col items-center gap-3 text-center px-4">
+                  <div className="text-red-400 text-lg">Failed to load topology</div>
+                  <div className="text-slate-400 text-sm max-w-md">
+                    {arcError instanceof Error ? arcError.message : 'An unexpected error occurred'}
+                  </div>
+                  <button
+                    onClick={() => queryClient.invalidateQueries({ queryKey: ['topology', 'arc'] })}
+                    className="mt-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-500 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            ) : arcTopologyData && arcTopologyData.hierarchy.roots.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="flex flex-col items-center gap-3 text-center px-4">
+                  <div className="text-slate-400 text-lg">No folders or applications</div>
+                  <div className="text-slate-500 text-sm max-w-md">
+                    Create folders and assign applications to visualize your topology.
+                  </div>
+                </div>
               </div>
             ) : arcTopologyData ? (
               <ArcTopologyRenderer
@@ -2213,15 +2287,36 @@ export default function Topology() {
                 width={dimensions.width}
                 height={dimensions.height}
                 onFolderClick={(folderId) => {
-                  console.log('Folder clicked:', folderId);
+                  // Single click selects/highlights the folder
+                  setFocusedFolderId(folderId === focusedFolderId ? null : folderId);
                 }}
-                onApplicationClick={(appId) => {
-                  navigate(`/applications/${appId}`);
+                onApplicationClick={() => {
+                  // Double-click on app could navigate to details (not implemented yet)
+                  // Single click is for selection filtering via onApplicationSelect
+                }}
+                onApplicationSelect={(appId) => {
+                  // Single click toggles application selection for filtering
+                  setSelectedAppId(appId);
+                  // Open details pane when an app is selected
+                  if (appId) {
+                    setShowDetailsPane(true);
+                  }
                 }}
                 onFolderDoubleClick={(folderId) => {
-                  setFocusedFolderId(focusedFolderId === folderId ? null : folderId);
+                  // Double-click toggles folder expansion to show applications
+                  setExpandedFolderIds(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has(folderId)) {
+                      newSet.delete(folderId);
+                    } else {
+                      newSet.add(folderId);
+                    }
+                    return newSet;
+                  });
                 }}
                 focusedFolderId={focusedFolderId}
+                expandedFolderIds={expandedFolderIds}
+                selectedAppId={selectedAppId}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-slate-400">
@@ -2229,26 +2324,68 @@ export default function Topology() {
               </div>
             )}
 
-            {/* Focus breadcrumb */}
-            {focusedFolderId && (
-              <div className="absolute top-4 left-4 bg-slate-900/90 border border-slate-600 rounded-lg px-4 py-2 flex items-center gap-2">
-                <button
-                  onClick={() => setFocusedFolderId(null)}
-                  className="text-primary-400 hover:text-primary-300 text-sm font-medium"
-                >
-                  All Folders
-                </button>
-                <span className="text-slate-500">/</span>
-                <span className="text-slate-300 text-sm">Focused View</span>
-                <button
-                  onClick={() => setFocusedFolderId(null)}
-                  className="ml-2 text-slate-400 hover:text-slate-300"
-                  title="Exit focus mode (Esc)"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+            {/* View state toolbar */}
+            {(focusedFolderId || expandedFolderIds.size > 0 || selectedAppId) && (
+              <div className="absolute top-4 left-4 bg-slate-900/90 border border-slate-600 rounded-lg px-4 py-2 flex items-center gap-3">
+                {selectedAppId && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-yellow-400 text-xs">Filtering:</span>
+                    <span className="text-yellow-300 text-sm font-medium">
+                      {arcTopologyData?.hierarchy.roots.flatMap(f => f.applications).find(a => a.id === selectedAppId)?.name ||
+                       arcTopologyData?.hierarchy.roots.flatMap(f => f.children).flatMap(c => c.applications).find(a => a.id === selectedAppId)?.name ||
+                       'Application'}
+                    </span>
+                    <button
+                      onClick={() => setSelectedAppId(null)}
+                      className="text-yellow-400 hover:text-yellow-300"
+                      title="Clear app filter (Esc)"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+                {selectedAppId && (focusedFolderId || expandedFolderIds.size > 0) && (
+                  <span className="text-slate-600">|</span>
+                )}
+                {focusedFolderId && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 text-xs">Folder:</span>
+                    <span className="text-slate-300 text-sm font-medium">
+                      {arcTopologyData?.hierarchy.roots.find(f => f.id === focusedFolderId)?.name ||
+                       arcTopologyData?.hierarchy.roots.flatMap(f => f.children).find(c => c.id === focusedFolderId)?.name ||
+                       'Folder'}
+                    </span>
+                    <button
+                      onClick={() => setFocusedFolderId(null)}
+                      className="text-slate-400 hover:text-slate-300"
+                      title="Clear folder selection"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+                {focusedFolderId && expandedFolderIds.size > 0 && (
+                  <span className="text-slate-600">|</span>
+                )}
+                {expandedFolderIds.size > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 text-xs">Expanded:</span>
+                    <span className="text-primary-400 text-sm">{expandedFolderIds.size} folder{expandedFolderIds.size !== 1 ? 's' : ''}</span>
+                    <button
+                      onClick={() => setExpandedFolderIds(new Set())}
+                      className="text-slate-400 hover:text-slate-300"
+                      title="Collapse all folders"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2626,6 +2763,15 @@ export default function Topology() {
         onSettingsChange={setTopologySettings}
         nodeCount={filteredTopology?.nodes.length ?? 0}
         edgeCount={filteredTopology?.edges.length ?? 0}
+      />
+
+      {/* Application Details SlideOver (for arc view) */}
+      <ApplicationDetailsSlideOver
+        appId={selectedAppId}
+        isOpen={showDetailsPane}
+        onClose={() => {
+          setShowDetailsPane(false);
+        }}
       />
     </div>
   );

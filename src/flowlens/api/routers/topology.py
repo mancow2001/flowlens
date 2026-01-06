@@ -15,12 +15,21 @@ from flowlens.common.logging import get_logger
 from flowlens.models.asset import Application, ApplicationMember, Asset
 from flowlens.models.dependency import Dependency
 from flowlens.models.folder import Folder
+from flowlens.models.topology_exclusion import TopologyExclusion
 from flowlens.schemas.folder import (
+    ApplicationDependencyList,
+    ApplicationDependencySummary,
     ApplicationInFolder,
     ArcDependency,
     ArcTopologyData,
+    EdgeDirection,
+    ExclusionEntityType,
+    FolderDependency,
     FolderTree,
     FolderTreeNode,
+    TopologyExclusionCreate,
+    TopologyExclusionList,
+    TopologyExclusionResponse,
 )
 from flowlens.schemas.topology import (
     PathResult,
@@ -607,8 +616,33 @@ async def get_subgraph(
     return await get_topology_graph(filters, db, _user)
 
 
-def build_folder_tree_node(folder: Folder) -> FolderTreeNode:
-    """Recursively build a folder tree node from a Folder model."""
+def build_folder_tree_node(
+    folder: Folder,
+    excluded_folder_ids: set[UUID] | None = None,
+    excluded_app_ids: set[UUID] | None = None,
+) -> FolderTreeNode:
+    """Recursively build a folder tree node from a Folder model.
+
+    Args:
+        folder: The folder to build the tree node from.
+        excluded_folder_ids: Set of folder IDs to exclude from children.
+        excluded_app_ids: Set of application IDs to exclude from applications.
+    """
+    excluded_folder_ids = excluded_folder_ids or set()
+    excluded_app_ids = excluded_app_ids or set()
+
+    # Filter children and applications
+    children = [
+        build_folder_tree_node(child, excluded_folder_ids, excluded_app_ids)
+        for child in folder.children
+        if child.id not in excluded_folder_ids
+    ]
+    applications = [
+        ApplicationInFolder.model_validate(app)
+        for app in folder.applications
+        if app.id not in excluded_app_ids
+    ]
+
     return FolderTreeNode(
         id=folder.id,
         name=folder.name,
@@ -617,24 +651,47 @@ def build_folder_tree_node(folder: Folder) -> FolderTreeNode:
         icon=folder.icon,
         order=folder.order,
         parent_id=folder.parent_id,
-        children=[build_folder_tree_node(child) for child in folder.children],
-        applications=[
-            ApplicationInFolder.model_validate(app) for app in folder.applications
-        ],
+        children=children,
+        applications=applications,
     )
 
 
 @router.get("/arc", response_model=ArcTopologyData)
 async def get_arc_topology(
     db: DbSession,
-    _user: ViewerUser,
+    user: ViewerUser,
+    apply_exclusions: bool = Query(
+        True,
+        description="Whether to apply user's exclusions to filter the topology",
+    ),
 ) -> ArcTopologyData:
     """Get arc-based topology data with folder hierarchy and dependencies.
 
     Returns a hierarchical folder structure with applications, plus aggregated
     dependencies between applications for arc visualization.
+
+    By default, entities excluded by the user are filtered out from both
+    the hierarchy and dependency aggregations. Set apply_exclusions=false
+    to see all entities.
     """
     from sqlalchemy import func
+
+    # Get user's exclusions if applying them
+    excluded_folder_ids: set[UUID] = set()
+    excluded_app_ids: set[UUID] = set()
+
+    if apply_exclusions:
+        exclusions_query = select(TopologyExclusion).where(
+            TopologyExclusion.user_id == user.id
+        )
+        exclusions_result = await db.execute(exclusions_query)
+        exclusions = exclusions_result.scalars().all()
+
+        for exc in exclusions:
+            if exc.entity_type == ExclusionEntityType.FOLDER.value:
+                excluded_folder_ids.add(exc.entity_id)
+            elif exc.entity_type == ExclusionEntityType.APPLICATION.value:
+                excluded_app_ids.add(exc.entity_id)
 
     # Get all root folders with their children and applications eagerly loaded
     folder_query = (
@@ -651,6 +708,9 @@ async def get_arc_topology(
     folder_result = await db.execute(folder_query)
     root_folders = folder_result.scalars().all()
 
+    # Filter out excluded folders
+    root_folders = [f for f in root_folders if f.id not in excluded_folder_ids]
+
     # Count totals
     folder_count_result = await db.execute(select(func.count(Folder.id)))
     total_folders = folder_count_result.scalar() or 0
@@ -663,11 +723,21 @@ async def get_arc_topology(
     apps_result = await db.execute(apps_query)
     all_apps = apps_result.scalars().all()
 
+    # Filter out excluded applications and apps in excluded folders
+    all_apps = [
+        app for app in all_apps
+        if app.id not in excluded_app_ids
+        and (app.folder_id is None or app.folder_id not in excluded_folder_ids)
+    ]
+
     # Find unassigned applications (not in any folder)
     unassigned_apps = [app for app in all_apps if app.folder_id is None]
 
-    # Build folder tree roots
-    tree_roots = [build_folder_tree_node(f) for f in root_folders]
+    # Build folder tree roots (pass exclusions for recursive filtering)
+    tree_roots = [
+        build_folder_tree_node(f, excluded_folder_ids, excluded_app_ids)
+        for f in root_folders
+    ]
 
     # Add "Unassigned" virtual folder if there are unassigned apps
     if unassigned_apps:
@@ -708,8 +778,9 @@ async def get_arc_topology(
     deps_result = await db.execute(deps_query)
     all_deps = deps_result.scalars().all()
 
-    # Aggregate dependencies by application pair
-    app_deps: dict[tuple[UUID, UUID], dict] = {}
+    # Aggregate dependencies by application pair (directional)
+    # Key: (source_app_id, target_app_id) -> aggregated data
+    app_deps_directional: dict[tuple[UUID, UUID], dict] = {}
     for dep in all_deps:
         source_app_id = asset_to_app.get(dep.source_asset_id)
         target_app_id = asset_to_app.get(dep.target_asset_id)
@@ -717,42 +788,505 @@ async def get_arc_topology(
         # Only include dependencies where both assets belong to applications
         if source_app_id and target_app_id and source_app_id != target_app_id:
             key = (source_app_id, target_app_id)
-            if key not in app_deps:
-                app_deps[key] = {
+            if key not in app_deps_directional:
+                app_deps_directional[key] = {
                     "connection_count": 0,
                     "bytes_total": 0,
+                    "bytes_last_24h": 0,
                 }
-            app_deps[key]["connection_count"] += 1
-            app_deps[key]["bytes_total"] += dep.bytes_total or 0
+            app_deps_directional[key]["connection_count"] += 1
+            app_deps_directional[key]["bytes_total"] += dep.bytes_total or 0
+            app_deps_directional[key]["bytes_last_24h"] += dep.bytes_last_24h or 0
+
+    # Merge bi-directional app dependencies into single edges
+    # Key: frozenset({app_id1, app_id2}) -> merged data with direction
+    app_deps_merged: dict[frozenset, dict] = {}
+    for (source_app_id, target_app_id), agg in app_deps_directional.items():
+        edge_key = frozenset({source_app_id, target_app_id})
+        if edge_key in app_deps_merged:
+            # This is the reverse direction - mark as bi-directional and merge
+            existing = app_deps_merged[edge_key]
+            existing["direction"] = EdgeDirection.BI
+            existing["connection_count"] += agg["connection_count"]
+            existing["bytes_total"] += agg["bytes_total"]
+            existing["bytes_last_24h"] += agg["bytes_last_24h"]
+        else:
+            # First time seeing this edge pair
+            app_deps_merged[edge_key] = {
+                "source_app_id": source_app_id,
+                "target_app_id": target_app_id,
+                "direction": EdgeDirection.OUT,
+                "connection_count": agg["connection_count"],
+                "bytes_total": agg["bytes_total"],
+                "bytes_last_24h": agg["bytes_last_24h"],
+            }
 
     # Build dependency list
     dependencies = []
-    for (source_app_id, target_app_id), agg in app_deps.items():
-        source_app = app_map.get(source_app_id)
-        target_app = app_map.get(target_app_id)
+    for agg in app_deps_merged.values():
+        source_app = app_map.get(agg["source_app_id"])
+        target_app = app_map.get(agg["target_app_id"])
         if source_app and target_app:
             dependencies.append(
                 ArcDependency(
-                    source_folder_id=app_folder_map.get(source_app_id),
-                    source_app_id=source_app_id,
+                    source_folder_id=app_folder_map.get(agg["source_app_id"]),
+                    source_app_id=agg["source_app_id"],
                     source_app_name=source_app.name,
-                    target_folder_id=app_folder_map.get(target_app_id),
-                    target_app_id=target_app_id,
+                    target_folder_id=app_folder_map.get(agg["target_app_id"]),
+                    target_app_id=agg["target_app_id"],
                     target_app_name=target_app.name,
                     connection_count=agg["connection_count"],
                     bytes_total=agg["bytes_total"],
+                    bytes_last_24h=agg["bytes_last_24h"],
+                    direction=agg["direction"],
                 )
             )
 
     # Sort by bytes descending
     dependencies.sort(key=lambda d: d.bytes_total, reverse=True)
 
+    # Build folder-to-folder dependencies (aggregated from app dependencies)
+    # Map folder_id to folder name for lookup
+    folder_name_map: dict[UUID | str, str] = {}
+    for folder in root_folders:
+        folder_name_map[folder.id] = folder.display_name or folder.name
+    if unassigned_apps:
+        folder_name_map["unassigned"] = "Unassigned"
+
+    # Aggregate by folder pair (directional first)
+    folder_deps_directional: dict[tuple, dict] = {}
+    for dep in dependencies:
+        source_folder_id = dep.source_folder_id or "unassigned"
+        target_folder_id = dep.target_folder_id or "unassigned"
+
+        # Skip same-folder dependencies
+        if source_folder_id == target_folder_id:
+            continue
+
+        key = (source_folder_id, target_folder_id)
+        if key not in folder_deps_directional:
+            folder_deps_directional[key] = {
+                "connection_count": 0,
+                "bytes_total": 0,
+                "bytes_last_24h": 0,
+            }
+        folder_deps_directional[key]["connection_count"] += dep.connection_count
+        folder_deps_directional[key]["bytes_total"] += dep.bytes_total
+        folder_deps_directional[key]["bytes_last_24h"] += dep.bytes_last_24h
+
+    # Merge bi-directional folder dependencies
+    folder_deps_merged: dict[frozenset, dict] = {}
+    for (source_folder_id, target_folder_id), agg in folder_deps_directional.items():
+        edge_key = frozenset({source_folder_id, target_folder_id})
+        if edge_key in folder_deps_merged:
+            # Reverse direction exists - mark as bi-directional
+            existing = folder_deps_merged[edge_key]
+            existing["direction"] = EdgeDirection.BI
+            existing["connection_count"] += agg["connection_count"]
+            existing["bytes_total"] += agg["bytes_total"]
+            existing["bytes_last_24h"] += agg["bytes_last_24h"]
+        else:
+            folder_deps_merged[edge_key] = {
+                "source_folder_id": source_folder_id,
+                "target_folder_id": target_folder_id,
+                "direction": EdgeDirection.OUT,
+                "connection_count": agg["connection_count"],
+                "bytes_total": agg["bytes_total"],
+                "bytes_last_24h": agg["bytes_last_24h"],
+            }
+
+    # Build folder dependency list
+    folder_dependencies = []
+    for agg in folder_deps_merged.values():
+        source_name = folder_name_map.get(agg["source_folder_id"], "Unknown")
+        target_name = folder_name_map.get(agg["target_folder_id"], "Unknown")
+        folder_dependencies.append(
+            FolderDependency(
+                source_folder_id=agg["source_folder_id"],
+                source_folder_name=source_name,
+                target_folder_id=agg["target_folder_id"],
+                target_folder_name=target_name,
+                direction=agg["direction"],
+                connection_count=agg["connection_count"],
+                bytes_total=agg["bytes_total"],
+                bytes_last_24h=agg["bytes_last_24h"],
+            )
+        )
+
+    # Sort folder dependencies by bytes descending
+    folder_dependencies.sort(key=lambda d: d.bytes_total, reverse=True)
+
     return ArcTopologyData(
         hierarchy=hierarchy,
         dependencies=dependencies,
+        folder_dependencies=folder_dependencies,
         statistics={
             "total_folders": total_folders,
             "total_applications": total_applications,
             "total_dependencies": len(dependencies),
+            "total_folder_dependencies": len(folder_dependencies),
         },
     )
+
+
+@router.get("/arc/app/{app_id}/dependencies", response_model=ApplicationDependencyList)
+async def get_app_dependencies(
+    app_id: UUID,
+    db: DbSession,
+    _user: ViewerUser,
+    direction: str = Query(
+        "both",
+        description="Filter by direction: 'incoming', 'outgoing', or 'both'",
+    ),
+) -> ApplicationDependencyList:
+    """Get dependency details for a specific application.
+
+    Returns a list of counterparties (apps that this app communicates with)
+    along with traffic statistics for each connection.
+    """
+    # Get the application
+    app_result = await db.execute(
+        select(Application).where(Application.id == app_id)
+    )
+    app = app_result.scalar_one_or_none()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    # Get all member asset IDs for this application
+    members_result = await db.execute(
+        select(ApplicationMember.asset_id).where(
+            ApplicationMember.application_id == app_id
+        )
+    )
+    member_asset_ids = [row[0] for row in members_result.fetchall()]
+
+    if not member_asset_ids:
+        return ApplicationDependencyList(
+            app_id=app_id,
+            app_name=app.name,
+            direction_filter=direction,
+            dependencies=[],
+            total_connections=0,
+            total_bytes=0,
+            total_bytes_24h=0,
+        )
+
+    # Build application membership mapping for all apps
+    all_members_result = await db.execute(
+        select(ApplicationMember.asset_id, ApplicationMember.application_id)
+    )
+    asset_to_app: dict[UUID, UUID] = {}
+    for asset_id, application_id in all_members_result.fetchall():
+        asset_to_app[asset_id] = application_id
+
+    # Get all applications for name lookup
+    apps_result = await db.execute(
+        select(Application.id, Application.name, Application.folder_id)
+    )
+    app_info: dict[UUID, tuple[str, UUID | None]] = {}
+    for aid, aname, folder_id in apps_result.fetchall():
+        app_info[aid] = (aname, folder_id)
+
+    # Get folder names
+    folders_result = await db.execute(select(Folder.id, Folder.name))
+    folder_names: dict[UUID, str] = {fid: fname for fid, fname in folders_result.fetchall()}
+
+    # Query dependencies
+    deps_query = select(Dependency)
+
+    if direction == "outgoing":
+        deps_query = deps_query.where(Dependency.source_asset_id.in_(member_asset_ids))
+    elif direction == "incoming":
+        deps_query = deps_query.where(Dependency.target_asset_id.in_(member_asset_ids))
+    else:  # both
+        deps_query = deps_query.where(
+            (Dependency.source_asset_id.in_(member_asset_ids))
+            | (Dependency.target_asset_id.in_(member_asset_ids))
+        )
+
+    deps_result = await db.execute(deps_query)
+    dependencies = deps_result.scalars().all()
+
+    # Aggregate by counterparty application
+    counterparty_agg: dict[UUID, dict] = {}
+
+    for dep in dependencies:
+        source_app_id = asset_to_app.get(dep.source_asset_id)
+        target_app_id = asset_to_app.get(dep.target_asset_id)
+
+        # Determine if this is incoming or outgoing from our app's perspective
+        if dep.source_asset_id in member_asset_ids:
+            # Outgoing: our app is the source
+            counterparty_app_id = target_app_id
+            dep_direction = EdgeDirection.OUT
+        else:
+            # Incoming: our app is the target
+            counterparty_app_id = source_app_id
+            dep_direction = EdgeDirection.IN
+
+        # Skip if counterparty is the same app or not in an application
+        if not counterparty_app_id or counterparty_app_id == app_id:
+            continue
+
+        key = counterparty_app_id
+        if key not in counterparty_agg:
+            cp_name, cp_folder_id = app_info.get(counterparty_app_id, ("Unknown", None))
+            cp_folder_name = folder_names.get(cp_folder_id) if cp_folder_id else None
+            counterparty_agg[key] = {
+                "counterparty_id": counterparty_app_id,
+                "counterparty_name": cp_name,
+                "counterparty_folder_id": cp_folder_id,
+                "counterparty_folder_name": cp_folder_name,
+                "direction": dep_direction,
+                "connection_count": 0,
+                "bytes_total": 0,
+                "bytes_last_24h": 0,
+                "last_seen": None,
+            }
+
+        agg = counterparty_agg[key]
+        agg["connection_count"] += 1
+        agg["bytes_total"] += dep.bytes_total or 0
+        agg["bytes_last_24h"] += dep.bytes_last_24h or 0
+
+        # Track bi-directional
+        if agg["direction"] != dep_direction and agg["direction"] != EdgeDirection.BI:
+            agg["direction"] = EdgeDirection.BI
+
+        # Track most recent last_seen
+        if dep.last_seen:
+            last_seen_str = dep.last_seen.isoformat()
+            if agg["last_seen"] is None or last_seen_str > agg["last_seen"]:
+                agg["last_seen"] = last_seen_str
+
+    # Build response
+    dep_summaries = [
+        ApplicationDependencySummary(**agg) for agg in counterparty_agg.values()
+    ]
+
+    # Sort by bytes_total descending
+    dep_summaries.sort(key=lambda d: d.bytes_total, reverse=True)
+
+    total_connections = sum(d.connection_count for d in dep_summaries)
+    total_bytes = sum(d.bytes_total for d in dep_summaries)
+    total_bytes_24h = sum(d.bytes_last_24h for d in dep_summaries)
+
+    return ApplicationDependencyList(
+        app_id=app_id,
+        app_name=app.name,
+        direction_filter=direction,
+        dependencies=dep_summaries,
+        total_connections=total_connections,
+        total_bytes=total_bytes,
+        total_bytes_24h=total_bytes_24h,
+    )
+
+
+@router.get("/arc/app/{app_id}/dependencies/export")
+async def export_app_dependencies(
+    app_id: UUID,
+    db: DbSession,
+    _user: ViewerUser,
+    direction: str = Query(
+        "both",
+        description="Filter by direction: 'incoming', 'outgoing', or 'both'",
+    ),
+):
+    """Export application dependencies as CSV.
+
+    Returns a downloadable CSV file with dependency details.
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+    import csv
+
+    # Get the dependency list using the existing endpoint logic
+    dep_list = await get_app_dependencies(app_id, db, _user, direction)
+
+    # Create CSV in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write header
+    writer.writerow([
+        "Counterparty Name",
+        "Counterparty Folder",
+        "Direction",
+        "Connections",
+        "Total Bytes",
+        "Bytes (24h)",
+        "Last Seen",
+    ])
+
+    # Write data rows
+    for dep in dep_list.dependencies:
+        direction_label = "Bi-directional" if dep.direction == EdgeDirection.BI else (
+            "Outgoing" if dep.direction == EdgeDirection.OUT else "Incoming"
+        )
+        writer.writerow([
+            dep.counterparty_name,
+            dep.counterparty_folder_name or "",
+            direction_label,
+            dep.connection_count,
+            dep.bytes_total,
+            dep.bytes_last_24h,
+            dep.last_seen or "",
+        ])
+
+    # Reset stream position
+    output.seek(0)
+
+    # Generate filename
+    filename = f"{dep_list.app_name.replace(' ', '_')}_dependencies_{direction}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# =============================================================================
+# Topology Exclusion Endpoints
+# =============================================================================
+
+
+@router.get("/exclusions", response_model=TopologyExclusionList)
+async def list_exclusions(
+    db: DbSession,
+    user: ViewerUser,
+) -> TopologyExclusionList:
+    """List all topology exclusions for the current user.
+
+    Returns the user's excluded folders and applications that are hidden
+    from the arc topology view.
+    """
+    # Get exclusions for the current user
+    query = select(TopologyExclusion).where(TopologyExclusion.user_id == user.id)
+    result = await db.execute(query)
+    exclusions = result.scalars().all()
+
+    # Build response with entity names
+    items = []
+    for exc in exclusions:
+        entity_name = None
+
+        # Look up the entity name based on type
+        if exc.entity_type == ExclusionEntityType.FOLDER.value:
+            folder_result = await db.execute(
+                select(Folder.name).where(Folder.id == exc.entity_id)
+            )
+            folder_name = folder_result.scalar()
+            entity_name = folder_name
+        elif exc.entity_type == ExclusionEntityType.APPLICATION.value:
+            app_result = await db.execute(
+                select(Application.name).where(Application.id == exc.entity_id)
+            )
+            app_name = app_result.scalar()
+            entity_name = app_name
+
+        items.append(
+            TopologyExclusionResponse(
+                id=exc.id,
+                user_id=exc.user_id,
+                entity_type=exc.entity_type,
+                entity_id=exc.entity_id,
+                entity_name=entity_name,
+                reason=exc.reason,
+                created_at=exc.created_at,
+            )
+        )
+
+    return TopologyExclusionList(items=items, total=len(items))
+
+
+@router.post("/exclusions", response_model=TopologyExclusionResponse, status_code=201)
+async def create_exclusion(
+    data: TopologyExclusionCreate,
+    db: DbSession,
+    user: ViewerUser,
+) -> TopologyExclusionResponse:
+    """Create a new topology exclusion.
+
+    Excludes a folder or application from the user's arc topology view.
+    The excluded entity will not be rendered and will not contribute
+    to dependency aggregations.
+    """
+    # Verify the entity exists
+    entity_name = None
+    if data.entity_type == ExclusionEntityType.FOLDER:
+        folder_result = await db.execute(
+            select(Folder).where(Folder.id == data.entity_id)
+        )
+        folder = folder_result.scalar_one_or_none()
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        entity_name = folder.name
+    elif data.entity_type == ExclusionEntityType.APPLICATION:
+        app_result = await db.execute(
+            select(Application).where(Application.id == data.entity_id)
+        )
+        app = app_result.scalar_one_or_none()
+        if not app:
+            raise HTTPException(status_code=404, detail="Application not found")
+        entity_name = app.name
+
+    # Check if exclusion already exists
+    existing_query = select(TopologyExclusion).where(
+        TopologyExclusion.user_id == user.id,
+        TopologyExclusion.entity_type == data.entity_type.value,
+        TopologyExclusion.entity_id == data.entity_id,
+    )
+    existing_result = await db.execute(existing_query)
+    if existing_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="Exclusion already exists for this entity",
+        )
+
+    # Create the exclusion
+    exclusion = TopologyExclusion(
+        user_id=user.id,
+        entity_type=data.entity_type.value,
+        entity_id=data.entity_id,
+        reason=data.reason,
+    )
+    db.add(exclusion)
+    await db.commit()
+    await db.refresh(exclusion)
+
+    return TopologyExclusionResponse(
+        id=exclusion.id,
+        user_id=exclusion.user_id,
+        entity_type=exclusion.entity_type,
+        entity_id=exclusion.entity_id,
+        entity_name=entity_name,
+        reason=exclusion.reason,
+        created_at=exclusion.created_at,
+    )
+
+
+@router.delete("/exclusions/{exclusion_id}", status_code=204)
+async def delete_exclusion(
+    exclusion_id: UUID,
+    db: DbSession,
+    user: ViewerUser,
+) -> None:
+    """Delete a topology exclusion.
+
+    Removes an exclusion, making the entity visible again in the
+    user's arc topology view.
+    """
+    # Get the exclusion (must belong to the current user)
+    query = select(TopologyExclusion).where(
+        TopologyExclusion.id == exclusion_id,
+        TopologyExclusion.user_id == user.id,
+    )
+    result = await db.execute(query)
+    exclusion = result.scalar_one_or_none()
+
+    if not exclusion:
+        raise HTTPException(status_code=404, detail="Exclusion not found")
+
+    await db.delete(exclusion)
+    await db.commit()

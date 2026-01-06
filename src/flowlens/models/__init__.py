@@ -30,6 +30,7 @@ from flowlens.models.segmentation import (
     SegmentationPolicyRule,
     SegmentationPolicyVersion,
 )
+from flowlens.models.topology_exclusion import ExclusionEntityType, TopologyExclusion
 
 __all__ = [
     "Base",
@@ -71,4 +72,6 @@ __all__ = [
     "RuleAction",
     "User",
     "UserRole",
+    "ExclusionEntityType",
+    "TopologyExclusion",
 ]
