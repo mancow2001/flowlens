@@ -60,6 +60,16 @@ import type {
   PublishVersionRequest,
   PolicyApprovalResponse,
   PolicyStatus,
+  Folder,
+  FolderCreate,
+  FolderUpdate,
+  FolderList,
+  FolderTree,
+  FolderTreeNode,
+  FolderPath,
+  MoveFolderRequest,
+  MoveApplicationRequest,
+  ArcTopologyData,
 } from '../types';
 import { useAuthStore } from '../stores/authStore';
 
@@ -1692,6 +1702,68 @@ export const segmentationApi = {
 
   archive: async (id: string): Promise<PolicyApprovalResponse> => {
     const { data } = await api.post(`/segmentation-policies/${id}/archive`);
+    return data;
+  },
+};
+
+// Folder API endpoints
+export const folderApi = {
+  list: async (parentId?: string | null): Promise<FolderList> => {
+    const { data } = await api.get('/folders', {
+      params: { parent_id: parentId },
+    });
+    return data;
+  },
+
+  getTree: async (): Promise<FolderTree> => {
+    const { data } = await api.get('/folders/tree');
+    return data;
+  },
+
+  get: async (id: string): Promise<Folder> => {
+    const { data } = await api.get(`/folders/${id}`);
+    return data;
+  },
+
+  getContents: async (id: string): Promise<FolderTreeNode> => {
+    const { data } = await api.get(`/folders/${id}/contents`);
+    return data;
+  },
+
+  getPath: async (id: string): Promise<FolderPath> => {
+    const { data } = await api.get(`/folders/${id}/path`);
+    return data;
+  },
+
+  create: async (folder: FolderCreate): Promise<Folder> => {
+    const { data } = await api.post('/folders', folder);
+    return data;
+  },
+
+  update: async (id: string, updates: FolderUpdate): Promise<Folder> => {
+    const { data } = await api.patch(`/folders/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/folders/${id}`);
+  },
+
+  move: async (id: string, request: MoveFolderRequest): Promise<Folder> => {
+    const { data } = await api.post(`/folders/${id}/move`, request);
+    return data;
+  },
+};
+
+// Arc Topology API endpoints
+export const arcTopologyApi = {
+  getData: async (): Promise<ArcTopologyData> => {
+    const { data } = await api.get('/topology/arc');
+    return data;
+  },
+
+  moveApplicationToFolder: async (applicationId: string, request: MoveApplicationRequest): Promise<Application> => {
+    const { data } = await api.post(`/applications/${applicationId}/move`, request);
     return data;
   },
 };

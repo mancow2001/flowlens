@@ -18,6 +18,7 @@ from flowlens.models.base import SoftDeleteModel, TimestampMixin, UUIDMixin, Bas
 if TYPE_CHECKING:
     from flowlens.models.dependency import Dependency
     from flowlens.models.discovery import DiscoveryProvider
+    from flowlens.models.folder import Folder
     from flowlens.models.gateway import AssetGateway
     from flowlens.models.segmentation import SegmentationPolicy
 
@@ -462,7 +463,20 @@ class Application(Base, UUIDMixin, TimestampMixin):
         default=dict,
     )
 
+    # Folder organization (for arc-based topology)
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("folders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
+    folder: Mapped["Folder | None"] = relationship(
+        "Folder",
+        back_populates="applications",
+    )
+
     members: Mapped[list["ApplicationMember"]] = relationship(
         "ApplicationMember",
         back_populates="application",

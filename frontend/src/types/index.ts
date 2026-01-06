@@ -1096,3 +1096,130 @@ export interface PolicyApprovalResponse {
 }
 
 export interface SegmentationPolicyListResponse extends PaginatedResponse<SegmentationPolicySummary> {}
+
+// =============================================================================
+// Folder types (for arc-based topology)
+// =============================================================================
+
+export interface Folder {
+  id: string;
+  name: string;
+  display_name: string | null;
+  description: string | null;
+  parent_id: string | null;
+  color: string | null;
+  icon: string | null;
+  order: number;
+  owner: string | null;
+  team: string | null;
+  tags: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FolderSummary {
+  id: string;
+  name: string;
+  display_name: string | null;
+  color: string | null;
+  icon: string | null;
+  parent_id: string | null;
+}
+
+export interface FolderCreate {
+  name: string;
+  display_name?: string | null;
+  description?: string | null;
+  parent_id?: string | null;
+  color?: string | null;
+  icon?: string | null;
+  order?: number;
+  owner?: string | null;
+  team?: string | null;
+  tags?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface FolderUpdate {
+  name?: string;
+  display_name?: string | null;
+  description?: string | null;
+  color?: string | null;
+  icon?: string | null;
+  order?: number;
+  owner?: string | null;
+  team?: string | null;
+  tags?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface FolderList {
+  items: FolderSummary[];
+  total: number;
+}
+
+export interface MoveFolderRequest {
+  new_parent_id: string | null;
+}
+
+export interface FolderPath {
+  path: FolderSummary[];
+}
+
+export interface ApplicationInFolder {
+  id: string;
+  name: string;
+  display_name: string | null;
+  environment: string | null;
+  criticality: string | null;
+  team: string | null;
+}
+
+export interface FolderTreeNode {
+  id: string;
+  name: string;
+  display_name: string | null;
+  color: string | null;
+  icon: string | null;
+  order: number;
+  parent_id: string | null;
+  team: string | null;
+  children: FolderTreeNode[];
+  applications: ApplicationInFolder[];
+}
+
+export interface FolderTree {
+  roots: FolderTreeNode[];
+  total_folders: number;
+  total_applications: number;
+}
+
+// =============================================================================
+// Arc Topology types
+// =============================================================================
+
+export interface ArcDependency {
+  source_folder_id: string | null;
+  source_app_id: string;
+  source_app_name: string;
+  target_folder_id: string | null;
+  target_app_id: string;
+  target_app_name: string;
+  connection_count: number;
+  bytes_total: number;
+}
+
+export interface ArcTopologyData {
+  hierarchy: FolderTree;
+  dependencies: ArcDependency[];
+  statistics: {
+    total_folders: number;
+    total_applications: number;
+    total_dependencies: number;
+  };
+}
+
+export interface MoveApplicationRequest {
+  folder_id: string | null;
+}

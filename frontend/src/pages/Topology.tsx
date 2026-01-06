@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import Card from '../components/common/Card';
@@ -8,17 +8,20 @@ import { LoadingPage } from '../components/common/Loading';
 import FilterPanel from '../components/topology/FilterPanel';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import CanvasTopologyRenderer from '../components/topology/CanvasTopologyRenderer';
+import { ArcTopologyRenderer } from '../components/topology/ArcTopologyRenderer';
 import TopologySettingsDialog, {
   type TopologySettings,
   type RenderMode,
   DEFAULT_SETTINGS,
 } from '../components/topology/TopologySettings';
 import { useTopologyFilters } from '../hooks/useTopologyFilters';
-import { topologyApi, savedViewsApi, gatewayApi } from '../services/api';
+import { topologyApi, savedViewsApi, gatewayApi, arcTopologyApi } from '../services/api';
 import { getServiceName } from '../utils/network';
 // Static layout algorithms - will be used when layout settings are implemented
 // import { applyLayout, type LayoutType } from '../utils/graphLayouts';
 import type { TopologyNode, TopologyEdge, SavedViewSummary, ViewConfig } from '../types';
+
+type ViewMode = 'arc' | 'force';
 
 // Get edge label text showing port/service info
 function getEdgeLabel(ports: number[] | undefined, targetPort: number): string {
@@ -334,7 +337,12 @@ export default function Topology() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  // View mode state - arc view is the new default
+  const [viewMode, setViewMode] = useState<ViewMode>('arc');
+  const [focusedFolderId, setFocusedFolderId] = useState<string | null>(null);
 
   // Search highlight params from URL (e.g., from header search)
   const highlightSourceId = searchParams.get('source');
@@ -449,6 +457,13 @@ export default function Topology() {
   const { data: savedViews } = useQuery({
     queryKey: ['saved-views'],
     queryFn: () => savedViewsApi.list(),
+  });
+
+  // Fetch arc topology data (for arc view mode)
+  const { data: arcTopologyData, isLoading: isArcLoading } = useQuery({
+    queryKey: ['topology', 'arc'],
+    queryFn: () => arcTopologyApi.getData(),
+    enabled: viewMode === 'arc',
   });
 
   // Save view mutation
@@ -1937,16 +1952,42 @@ export default function Topology() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Show Gateways toggle */}
-          <Button
-            variant={showGateways ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setShowGateways(!showGateways)}
-          >
-            {showGateways ? 'Hide Gateways' : 'Show Gateways'}
-          </Button>
+          {/* View mode toggle */}
+          <div className="flex rounded-lg border border-slate-600 overflow-hidden">
+            <button
+              onClick={() => setViewMode('arc')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === 'arc'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              Arc View
+            </button>
+            <button
+              onClick={() => setViewMode('force')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === 'force'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              Force View
+            </button>
+          </div>
 
-          {/* Time slider toggle */}
+          {/* Show Gateways toggle (only in force view) */}
+          {viewMode === 'force' && (
+            <Button
+              variant={showGateways ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => setShowGateways(!showGateways)}
+            >
+              {showGateways ? 'Hide Gateways' : 'Show Gateways'}
+            </Button>
+          )}
+
+          {/* Time slider toggle (only in force view) */}
           <Button
             variant={showTimeSlider ? 'primary' : 'secondary'}
             size="sm"
@@ -2133,27 +2174,87 @@ export default function Topology() {
       )}
 
       <div className="flex-1 flex gap-4">
-        {/* Filter Panel */}
-        <FilterPanel
-          filters={filters}
-          onFiltersChange={setFilters}
-          onReset={resetFilters}
-          hasActiveFilters={hasActiveFilters()}
-        />
+        {/* Filter Panel - only shown in force view */}
+        {viewMode === 'force' && (
+          <FilterPanel
+            filters={filters}
+            onFiltersChange={setFilters}
+            onReset={resetFilters}
+            hasActiveFilters={hasActiveFilters()}
+          />
+        )}
 
-        {/* Graph Area */}
-        <div
-          ref={containerRef}
-          className="flex-1 bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
-        >
-          {!filteredTopology || filteredTopology.nodes.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-slate-400">
-              {topology && topology.nodes.length > 0
-                ? 'All nodes are hidden. Adjust legend filters to show nodes.'
-                : 'No topology data available'}
-            </div>
-          ) : effectiveRenderMode === 'canvas' ? (
-            <CanvasTopologyRenderer
+        {/* Arc View */}
+        {viewMode === 'arc' && (
+          <div
+            ref={containerRef}
+            className="flex-1 bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
+          >
+            {isArcLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-slate-400">Loading arc topology...</div>
+              </div>
+            ) : arcTopologyData ? (
+              <ArcTopologyRenderer
+                data={arcTopologyData}
+                width={dimensions.width}
+                height={dimensions.height}
+                onFolderClick={(folderId) => {
+                  console.log('Folder clicked:', folderId);
+                }}
+                onApplicationClick={(appId) => {
+                  navigate(`/applications/${appId}`);
+                }}
+                onFolderDoubleClick={(folderId) => {
+                  setFocusedFolderId(focusedFolderId === folderId ? null : folderId);
+                }}
+                focusedFolderId={focusedFolderId}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-slate-400">
+                No arc topology data available. Create folders and organize applications to see the arc view.
+              </div>
+            )}
+
+            {/* Focus breadcrumb */}
+            {focusedFolderId && (
+              <div className="absolute top-4 left-4 bg-slate-900/90 border border-slate-600 rounded-lg px-4 py-2 flex items-center gap-2">
+                <button
+                  onClick={() => setFocusedFolderId(null)}
+                  className="text-primary-400 hover:text-primary-300 text-sm font-medium"
+                >
+                  All Folders
+                </button>
+                <span className="text-slate-500">/</span>
+                <span className="text-slate-300 text-sm">Focused View</span>
+                <button
+                  onClick={() => setFocusedFolderId(null)}
+                  className="ml-2 text-slate-400 hover:text-slate-300"
+                  title="Exit focus mode (Esc)"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Force-directed Graph Area */}
+        {viewMode === 'force' && (
+          <div
+            ref={containerRef}
+            className="flex-1 bg-slate-800 border border-slate-700 rounded-lg overflow-hidden relative"
+          >
+            {!filteredTopology || filteredTopology.nodes.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-slate-400">
+                {topology && topology.nodes.length > 0
+                  ? 'All nodes are hidden. Adjust legend filters to show nodes.'
+                  : 'No topology data available'}
+              </div>
+            ) : effectiveRenderMode === 'canvas' ? (
+              <CanvasTopologyRenderer
               nodes={filteredTopology.nodes}
               edges={filteredTopology.edges}
               width={dimensions.width}
@@ -2199,8 +2300,10 @@ export default function Topology() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Legend and Details Panel */}
+        {/* Legend and Details Panel - only shown in force view */}
+        {viewMode === 'force' && (
         <div className="w-72 space-y-4">
           {/* Legend */}
           <Card title="Legend">
@@ -2475,10 +2578,11 @@ export default function Topology() {
             </div>
           </Card>
         </div>
+        )}
       </div>
 
-      {/* Edge Tooltip */}
-      {hoveredEdge && (
+      {/* Edge Tooltip (only in force view) */}
+      {viewMode === 'force' && hoveredEdge && (
         <EdgeTooltip
           edge={{
             source: {
