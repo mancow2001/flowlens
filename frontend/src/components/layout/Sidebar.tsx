@@ -17,6 +17,7 @@ import {
   CubeTransparentIcon,
   UsersIcon,
   ShieldCheckIcon,
+  ShieldExclamationIcon,
   CloudIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
@@ -29,6 +30,7 @@ const navigation = [
   { name: 'Topology', href: '/topology', icon: ChartBarIcon },
   { name: 'Assets', href: '/assets', icon: ServerStackIcon },
   { name: 'Applications', href: '/applications', icon: CubeTransparentIcon },
+  { name: 'Segmentation', href: '/segmentation-policies', icon: ShieldExclamationIcon },
   { name: 'Dependencies', href: '/dependencies', icon: ArrowsRightLeftIcon },
   { name: 'Alerts', href: '/alerts', icon: BellAlertIcon },
   { name: 'Changes', href: '/changes', icon: ClockIcon },

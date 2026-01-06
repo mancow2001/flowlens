@@ -870,3 +870,229 @@ export interface SyncTriggerResponse {
   message: string;
   provider_id: string;
 }
+
+// Segmentation Policy types
+export type PolicyStance = 'allow_list' | 'deny_list';
+export type PolicyStatus = 'draft' | 'pending_review' | 'approved' | 'active' | 'archived';
+export type RuleType = 'inbound' | 'outbound' | 'internal';
+export type RuleAction = 'allow' | 'deny';
+export type SourceDestType = 'any' | 'app_member' | 'cidr' | 'asset';
+
+export interface SegmentationPolicyRule {
+  id: string;
+  policy_id: string;
+  rule_type: RuleType;
+  source_type: SourceDestType;
+  source_asset_id: string | null;
+  source_cidr: string | null;
+  source_app_id: string | null;
+  source_label: string | null;
+  dest_type: SourceDestType;
+  dest_asset_id: string | null;
+  dest_cidr: string | null;
+  dest_app_id: string | null;
+  dest_label: string | null;
+  port: number | null;
+  port_range_end: number | null;
+  protocol: number;
+  service_label: string | null;
+  action: RuleAction;
+  description: string | null;
+  is_enabled: boolean;
+  priority: number;
+  rule_order: number;
+  is_auto_generated: boolean;
+  generated_from_dependency_id: string | null;
+  generated_from_entry_point_id: string | null;
+  bytes_observed: number | null;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SegmentationPolicyRuleSummary {
+  id: string;
+  rule_type: RuleType;
+  source_label: string | null;
+  dest_label: string | null;
+  port: number | null;
+  protocol: number;
+  service_label: string | null;
+  action: RuleAction;
+  is_enabled: boolean;
+  is_auto_generated: boolean;
+}
+
+export interface SegmentationPolicy {
+  id: string;
+  application_id: string;
+  name: string;
+  description: string | null;
+  stance: PolicyStance;
+  status: PolicyStatus;
+  version: number;
+  is_active: boolean;
+  rule_count: number;
+  inbound_rule_count: number;
+  outbound_rule_count: number;
+  internal_rule_count: number;
+  generated_from_topology_at: string | null;
+  generated_by: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SegmentationPolicySummary {
+  id: string;
+  application_id: string;
+  name: string;
+  stance: PolicyStance;
+  status: PolicyStatus;
+  version: number;
+  is_active: boolean;
+  rule_count: number;
+  created_at: string;
+}
+
+export interface SegmentationPolicyWithRules extends SegmentationPolicy {
+  rules: SegmentationPolicyRule[];
+}
+
+export interface SegmentationPolicyVersion {
+  id: string;
+  policy_id: string;
+  version_number: number;
+  version_label: string | null;
+  stance: PolicyStance;
+  status: PolicyStatus;
+  rules_snapshot: Record<string, unknown>[];
+  rules_added: number;
+  rules_removed: number;
+  rules_modified: number;
+  created_by: string | null;
+  change_reason: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+}
+
+export interface RuleDiff {
+  rule_id: string | null;
+  change_type: 'added' | 'removed' | 'modified' | 'unchanged';
+  rule_data: Record<string, unknown>;
+  previous_data: Record<string, unknown> | null;
+  changed_fields: string[] | null;
+}
+
+export interface PolicyComparisonResponse {
+  policy_id: string;
+  version_a: number | null;
+  version_b: number | null;
+  stance_changed: boolean;
+  rules_added: RuleDiff[];
+  rules_removed: RuleDiff[];
+  rules_modified: RuleDiff[];
+  rules_unchanged: RuleDiff[] | null;
+  summary: string;
+}
+
+export interface FirewallRuleExport {
+  rule_id: string;
+  priority: number;
+  action: RuleAction;
+  source_cidr: string;
+  dest_cidr: string;
+  port: string;
+  protocol: string;
+  description: string;
+  application_name: string;
+  rule_type: RuleType;
+  is_enabled: boolean;
+}
+
+export interface PolicyExportFormat {
+  policy_name: string;
+  application_name: string;
+  stance: PolicyStance;
+  version: number;
+  exported_at: string;
+  rule_count: number;
+  rules: FirewallRuleExport[];
+}
+
+export interface PolicyGenerateRequest {
+  application_id: string;
+  stance?: PolicyStance;
+  include_external_inbound?: boolean;
+  include_internal_communication?: boolean;
+  include_downstream_dependencies?: boolean;
+  max_downstream_depth?: number;
+  min_bytes_threshold?: number;
+}
+
+export interface PolicyRuleCreate {
+  rule_type: RuleType;
+  source_type: SourceDestType;
+  source_asset_id?: string | null;
+  source_cidr?: string | null;
+  source_app_id?: string | null;
+  source_label?: string | null;
+  dest_type: SourceDestType;
+  dest_asset_id?: string | null;
+  dest_cidr?: string | null;
+  dest_app_id?: string | null;
+  dest_label?: string | null;
+  port?: number | null;
+  port_range_end?: number | null;
+  protocol?: number;
+  service_label?: string | null;
+  action?: RuleAction;
+  description?: string | null;
+  is_enabled?: boolean;
+  priority?: number;
+}
+
+export interface PolicyRuleUpdate {
+  priority?: number;
+  is_enabled?: boolean;
+  description?: string | null;
+  action?: RuleAction;
+  source_label?: string | null;
+  dest_label?: string | null;
+  service_label?: string | null;
+}
+
+export interface PolicyCreate {
+  name: string;
+  application_id: string;
+  description?: string | null;
+  stance?: PolicyStance;
+}
+
+export interface PolicyUpdate {
+  name?: string;
+  description?: string | null;
+  stance?: PolicyStance;
+}
+
+export interface PublishVersionRequest {
+  version_label?: string | null;
+  change_reason?: string | null;
+}
+
+export interface PolicyStatusUpdate {
+  status: PolicyStatus;
+  reason?: string | null;
+}
+
+export interface PolicyApprovalResponse {
+  policy_id: string;
+  status: PolicyStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  message: string;
+}
+
+export interface SegmentationPolicyListResponse extends PaginatedResponse<SegmentationPolicySummary> {}

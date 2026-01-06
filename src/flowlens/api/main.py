@@ -214,7 +214,7 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, changes, classification, dependencies, discovery, discovery_providers, gateways, maintenance, saml_providers, saved_views, search, settings as settings_router, tasks, topology, users, ws
+    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, changes, classification, dependencies, discovery, discovery_providers, gateways, maintenance, saml_providers, saved_views, search, segmentation, settings as settings_router, tasks, topology, users, ws
 
     app.include_router(admin.router)
     app.include_router(auth.router, prefix="/api/v1")
@@ -225,6 +225,7 @@ def create_app() -> FastAPI:
     app.include_router(applications.router, prefix="/api/v1")
     app.include_router(asset_classification.router, prefix="/api/v1")  # Behavioral classification
     app.include_router(classification.router, prefix="/api/v1")  # CIDR classification rules
+    app.include_router(segmentation.router, prefix="/api/v1")  # Segmentation policies
     app.include_router(dependencies.router, prefix="/api/v1")
     app.include_router(discovery.router, prefix="/api/v1")
     app.include_router(discovery_providers.router, prefix="/api/v1")

@@ -7,6 +7,8 @@ import Assets from './pages/Assets';
 import AssetDetail from './pages/AssetDetail';
 import Applications from './pages/Applications';
 import ApplicationDetail from './pages/ApplicationDetail';
+import SegmentationPolicies from './pages/SegmentationPolicies';
+import SegmentationPolicyDetail from './pages/SegmentationPolicyDetail';
 import Dependencies from './pages/Dependencies';
 import Alerts from './pages/Alerts';
 import AlertRules from './pages/AlertRules';
@@ -68,6 +70,8 @@ function App() {
                   <Route path="/assets/:id" element={<AssetDetail />} />
                   <Route path="/applications" element={<Applications />} />
                   <Route path="/applications/:id" element={<ApplicationDetail />} />
+                  <Route path="/segmentation-policies" element={<SegmentationPolicies />} />
+                  <Route path="/segmentation-policies/:id" element={<SegmentationPolicyDetail />} />
                   <Route path="/dependencies" element={<Dependencies />} />
                   <Route path="/alerts" element={<Alerts />} />
                   <Route path="/changes" element={<Changes />} />
