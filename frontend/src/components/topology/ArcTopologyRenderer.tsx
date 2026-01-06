@@ -487,10 +487,13 @@ export function ArcTopologyRenderer({
         setTransform(event.transform);
       });
 
-    d3.select(canvas).call(zoom);
+    const selection = d3.select(canvas);
+    selection.call(zoom);
+    // Disable default double-click zoom so our custom handler works
+    selection.on('dblclick.zoom', null);
 
     return () => {
-      d3.select(canvas).on('.zoom', null);
+      selection.on('.zoom', null);
     };
   }, []);
 
