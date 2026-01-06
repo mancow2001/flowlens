@@ -20,6 +20,15 @@ from flowlens.models.flow import FlowAggregate, FlowRecord
 from flowlens.models.gateway import AssetGateway, GatewayObservation, GatewayRole, InferenceMethod
 from flowlens.models.maintenance_window import MaintenanceWindow
 from flowlens.models.saved_view import SavedView
+from flowlens.models.segmentation import (
+    PolicyStance,
+    PolicyStatus,
+    RuleAction,
+    RuleType,
+    SegmentationPolicy,
+    SegmentationPolicyRule,
+    SegmentationPolicyVersion,
+)
 
 __all__ = [
     "Base",
@@ -51,6 +60,13 @@ __all__ = [
     "SAMLProvider",
     "SAMLProviderType",
     "SavedView",
+    "SegmentationPolicy",
+    "SegmentationPolicyRule",
+    "SegmentationPolicyVersion",
+    "PolicyStance",
+    "PolicyStatus",
+    "RuleType",
+    "RuleAction",
     "User",
     "UserRole",
 ]

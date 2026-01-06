@@ -45,6 +45,21 @@ import type {
   DiscoveryProviderCreate,
   DiscoveryProviderUpdate,
   SyncTriggerResponse,
+  SegmentationPolicy,
+  SegmentationPolicyWithRules,
+  SegmentationPolicyRule,
+  SegmentationPolicyVersion,
+  SegmentationPolicyListResponse,
+  PolicyComparisonResponse,
+  PolicyExportFormat,
+  PolicyGenerateRequest,
+  PolicyCreate,
+  PolicyUpdate,
+  PolicyRuleCreate,
+  PolicyRuleUpdate,
+  PublishVersionRequest,
+  PolicyApprovalResponse,
+  PolicyStatus,
 } from '../types';
 import { useAuthStore } from '../stores/authStore';
 
@@ -1543,6 +1558,140 @@ export const discoveryProviderApi = {
 
   sync: async (id: string): Promise<SyncTriggerResponse> => {
     const { data } = await api.post(`/discovery-providers/${id}/sync`);
+    return data;
+  },
+};
+
+// Segmentation Policies API endpoints
+export const segmentationApi = {
+  // Policy CRUD
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    application_id?: string;
+    status?: PolicyStatus;
+    is_active?: boolean;
+  }): Promise<SegmentationPolicyListResponse> => {
+    const { data } = await api.get('/segmentation-policies', { params });
+    return data;
+  },
+
+  get: async (id: string): Promise<SegmentationPolicyWithRules> => {
+    const { data } = await api.get(`/segmentation-policies/${id}`);
+    return data;
+  },
+
+  create: async (policy: PolicyCreate): Promise<SegmentationPolicy> => {
+    const { data } = await api.post('/segmentation-policies', policy);
+    return data;
+  },
+
+  update: async (id: string, updates: PolicyUpdate): Promise<SegmentationPolicy> => {
+    const { data } = await api.patch(`/segmentation-policies/${id}`, updates);
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/segmentation-policies/${id}`);
+  },
+
+  // Generation
+  generate: async (request: PolicyGenerateRequest): Promise<SegmentationPolicyWithRules> => {
+    const { data } = await api.post('/segmentation-policies/generate', request);
+    return data;
+  },
+
+  regenerate: async (id: string, request?: {
+    include_external_inbound?: boolean;
+    include_internal_communication?: boolean;
+    include_downstream_dependencies?: boolean;
+    max_downstream_depth?: number;
+    min_bytes_threshold?: number;
+  }): Promise<SegmentationPolicyWithRules> => {
+    const { data } = await api.post(`/segmentation-policies/${id}/regenerate`, request ?? {});
+    return data;
+  },
+
+  // Rules
+  addRule: async (policyId: string, rule: PolicyRuleCreate): Promise<SegmentationPolicyRule> => {
+    const { data } = await api.post(`/segmentation-policies/${policyId}/rules`, rule);
+    return data;
+  },
+
+  updateRule: async (
+    policyId: string,
+    ruleId: string,
+    updates: PolicyRuleUpdate
+  ): Promise<SegmentationPolicyRule> => {
+    const { data } = await api.patch(`/segmentation-policies/${policyId}/rules/${ruleId}`, updates);
+    return data;
+  },
+
+  deleteRule: async (policyId: string, ruleId: string): Promise<void> => {
+    await api.delete(`/segmentation-policies/${policyId}/rules/${ruleId}`);
+  },
+
+  // Versions
+  listVersions: async (policyId: string): Promise<SegmentationPolicyVersion[]> => {
+    const { data } = await api.get(`/segmentation-policies/${policyId}/versions`);
+    return data;
+  },
+
+  getVersion: async (policyId: string, versionNumber: number): Promise<SegmentationPolicyVersion> => {
+    const { data } = await api.get(`/segmentation-policies/${policyId}/versions/${versionNumber}`);
+    return data;
+  },
+
+  publishVersion: async (policyId: string, request?: PublishVersionRequest): Promise<SegmentationPolicyVersion> => {
+    const { data } = await api.post(`/segmentation-policies/${policyId}/publish`, request ?? {});
+    return data;
+  },
+
+  // Comparison
+  compare: async (policyId: string, versionA: number, versionB: number): Promise<PolicyComparisonResponse> => {
+    const { data } = await api.get(`/segmentation-policies/${policyId}/compare`, {
+      params: { version_a: versionA, version_b: versionB },
+    });
+    return data;
+  },
+
+  compareProposed: async (policyId: string, proposedRules: PolicyRuleCreate[]): Promise<PolicyComparisonResponse> => {
+    const { data } = await api.post(`/segmentation-policies/${policyId}/compare-proposed`, {
+      proposed_rules: proposedRules,
+    });
+    return data;
+  },
+
+  // Export
+  export: async (id: string, format: 'json' | 'csv' = 'json'): Promise<PolicyExportFormat | string> => {
+    const { data } = await api.get(`/segmentation-policies/${id}/export`, {
+      params: { format },
+    });
+    return data;
+  },
+
+  exportUrl: (id: string, format: 'json' | 'csv' = 'json'): string => {
+    return `/segmentation-policies/${id}/export?format=${format}`;
+  },
+
+  // Workflow
+  submitForReview: async (id: string): Promise<PolicyApprovalResponse> => {
+    const { data } = await api.post(`/segmentation-policies/${id}/submit-for-review`);
+    return data;
+  },
+
+  approve: async (id: string): Promise<PolicyApprovalResponse> => {
+    const { data } = await api.post(`/segmentation-policies/${id}/approve`);
+    return data;
+  },
+
+  activate: async (id: string): Promise<PolicyApprovalResponse> => {
+    const { data } = await api.post(`/segmentation-policies/${id}/activate`);
+    return data;
+  },
+
+  archive: async (id: string): Promise<PolicyApprovalResponse> => {
+    const { data } = await api.post(`/segmentation-policies/${id}/archive`);
     return data;
   },
 };

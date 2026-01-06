@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from flowlens.models.dependency import Dependency
     from flowlens.models.discovery import DiscoveryProvider
     from flowlens.models.gateway import AssetGateway
+    from flowlens.models.segmentation import SegmentationPolicy
 
 
 class AssetType(str, Enum):
@@ -464,6 +465,12 @@ class Application(Base, UUIDMixin, TimestampMixin):
     # Relationships
     members: Mapped[list["ApplicationMember"]] = relationship(
         "ApplicationMember",
+        back_populates="application",
+        cascade="all, delete-orphan",
+    )
+
+    policies: Mapped[list["SegmentationPolicy"]] = relationship(
+        "SegmentationPolicy",
         back_populates="application",
         cascade="all, delete-orphan",
     )
