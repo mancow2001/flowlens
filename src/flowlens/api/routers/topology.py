@@ -6,12 +6,22 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select, text
 
+from sqlalchemy.orm import selectinload
+
 from flowlens.api.cache import get_topology_cache
 from flowlens.api.dependencies import DbSession, ViewerUser
 from flowlens.common.config import get_settings
 from flowlens.common.logging import get_logger
-from flowlens.models.asset import Asset
+from flowlens.models.asset import Application, ApplicationMember, Asset
 from flowlens.models.dependency import Dependency
+from flowlens.models.folder import Folder
+from flowlens.schemas.folder import (
+    ApplicationInFolder,
+    ArcDependency,
+    ArcTopologyData,
+    FolderTree,
+    FolderTreeNode,
+)
 from flowlens.schemas.topology import (
     PathResult,
     SubgraphRequest,
@@ -595,3 +605,131 @@ async def get_subgraph(
     )
 
     return await get_topology_graph(filters, db, _user)
+
+
+def build_folder_tree_node(folder: Folder) -> FolderTreeNode:
+    """Recursively build a folder tree node from a Folder model."""
+    return FolderTreeNode(
+        id=folder.id,
+        name=folder.name,
+        display_name=folder.display_name,
+        color=folder.color,
+        icon=folder.icon,
+        order=folder.order,
+        parent_id=folder.parent_id,
+        children=[build_folder_tree_node(child) for child in folder.children],
+        applications=[
+            ApplicationInFolder.model_validate(app) for app in folder.applications
+        ],
+    )
+
+
+@router.get("/arc", response_model=ArcTopologyData)
+async def get_arc_topology(
+    db: DbSession,
+    _user: ViewerUser,
+) -> ArcTopologyData:
+    """Get arc-based topology data with folder hierarchy and dependencies.
+
+    Returns a hierarchical folder structure with applications, plus aggregated
+    dependencies between applications for arc visualization.
+    """
+    from sqlalchemy import func
+
+    # Get all root folders with their children and applications eagerly loaded
+    folder_query = (
+        select(Folder)
+        .where(Folder.parent_id == None)  # noqa: E711
+        .options(
+            selectinload(Folder.children).selectinload(Folder.children),
+            selectinload(Folder.children).selectinload(Folder.applications),
+            selectinload(Folder.applications),
+        )
+        .order_by(Folder.order, Folder.name)
+    )
+
+    folder_result = await db.execute(folder_query)
+    root_folders = folder_result.scalars().all()
+
+    # Count totals
+    folder_count_result = await db.execute(select(func.count(Folder.id)))
+    total_folders = folder_count_result.scalar() or 0
+
+    app_count_result = await db.execute(select(func.count(Application.id)))
+    total_applications = app_count_result.scalar() or 0
+
+    # Build folder tree
+    hierarchy = FolderTree(
+        roots=[build_folder_tree_node(f) for f in root_folders],
+        total_folders=total_folders,
+        total_applications=total_applications,
+    )
+
+    # Get all applications with their folder assignments
+    apps_query = select(Application).options(selectinload(Application.members))
+    apps_result = await db.execute(apps_query)
+    all_apps = apps_result.scalars().all()
+
+    # Build app_id -> app mapping and app_id -> folder_id mapping
+    app_map = {app.id: app for app in all_apps}
+    app_folder_map = {app.id: app.folder_id for app in all_apps}
+
+    # Get asset_id -> application_id mapping
+    asset_to_app: dict[UUID, UUID] = {}
+    for app in all_apps:
+        for member in app.members:
+            asset_to_app[member.asset_id] = app.id
+
+    # Get all active dependencies between assets in applications
+    deps_query = select(Dependency).where(Dependency.valid_to.is_(None))
+    deps_result = await db.execute(deps_query)
+    all_deps = deps_result.scalars().all()
+
+    # Aggregate dependencies by application pair
+    app_deps: dict[tuple[UUID, UUID], dict] = {}
+    for dep in all_deps:
+        source_app_id = asset_to_app.get(dep.source_asset_id)
+        target_app_id = asset_to_app.get(dep.target_asset_id)
+
+        # Only include dependencies where both assets belong to applications
+        if source_app_id and target_app_id and source_app_id != target_app_id:
+            key = (source_app_id, target_app_id)
+            if key not in app_deps:
+                app_deps[key] = {
+                    "connection_count": 0,
+                    "bytes_total": 0,
+                }
+            app_deps[key]["connection_count"] += 1
+            app_deps[key]["bytes_total"] += dep.bytes_total or 0
+
+    # Build dependency list
+    dependencies = []
+    for (source_app_id, target_app_id), agg in app_deps.items():
+        source_app = app_map.get(source_app_id)
+        target_app = app_map.get(target_app_id)
+        if source_app and target_app:
+            dependencies.append(
+                ArcDependency(
+                    source_folder_id=app_folder_map.get(source_app_id),
+                    source_app_id=source_app_id,
+                    source_app_name=source_app.name,
+                    target_folder_id=app_folder_map.get(target_app_id),
+                    target_app_id=target_app_id,
+                    target_app_name=target_app.name,
+                    connection_count=agg["connection_count"],
+                    bytes_total=agg["bytes_total"],
+                )
+            )
+
+    # Sort by bytes descending
+    dependencies.sort(key=lambda d: d.bytes_total, reverse=True)
+
+    return ArcTopologyData(
+        hierarchy=hierarchy,
+        dependencies=dependencies,
+        statistics={
+            "total_folders": total_folders,
+            "total_applications": total_applications,
+            "total_dependencies": len(dependencies),
+        },
+    )

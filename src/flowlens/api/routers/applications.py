@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from flowlens.api.dependencies import AdminUser, AnalystUser, DbSession, Pagination, Sorting, ViewerUser
 from flowlens.common.logging import get_logger
 from flowlens.models.asset import Application, ApplicationMember, Asset, EntryPoint
+from flowlens.models.folder import Folder
 from flowlens.schemas.asset import (
     ApplicationCreate,
     ApplicationEntryPointExport,
@@ -32,6 +33,7 @@ from flowlens.schemas.asset import (
     EntryPointResponse,
     EntryPointUpdate,
 )
+from flowlens.schemas.folder import MoveApplicationRequest
 
 logger = get_logger(__name__)
 
@@ -994,6 +996,60 @@ async def delete_application(
 
     await db.delete(application)
     await db.flush()
+
+
+@router.post("/{application_id}/move", response_model=ApplicationResponse)
+async def move_application_to_folder(
+    application_id: UUID,
+    move_request: MoveApplicationRequest,
+    db: DbSession,
+    _user: AnalystUser,
+) -> ApplicationResponse:
+    """Move an application to a folder.
+
+    Set folder_id to null to remove the application from its current folder.
+    """
+    result = await db.execute(
+        select(Application).where(Application.id == application_id)
+    )
+    application = result.scalar_one_or_none()
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Application {application_id} not found",
+        )
+
+    # Verify folder exists if specified
+    if move_request.folder_id:
+        folder_result = await db.execute(
+            select(Folder).where(Folder.id == move_request.folder_id)
+        )
+        folder = folder_result.scalar_one_or_none()
+        if not folder:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Folder {move_request.folder_id} not found",
+            )
+
+    application.folder_id = move_request.folder_id
+    await db.flush()
+    await db.refresh(application)
+
+    return ApplicationResponse(
+        id=application.id,
+        name=application.name,
+        display_name=application.display_name,
+        description=application.description,
+        owner=application.owner,
+        team=application.team,
+        environment=application.environment,
+        criticality=application.criticality,
+        tags=application.tags,
+        metadata=application.extra_data,
+        created_at=application.created_at,
+        updated_at=application.updated_at,
+    )
 
 
 # =============================================================================
