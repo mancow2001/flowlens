@@ -53,7 +53,9 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
   const createFolderMutation = useMutation({
     mutationFn: (data: FolderCreate) => folderApi.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['folders'] });
+      // Invalidate folder tree to refresh the panel
+      queryClient.invalidateQueries({ queryKey: ['folders', 'tree'] });
+      // Invalidate arc topology to refresh the visualization
       queryClient.invalidateQueries({ queryKey: ['topology', 'arc'] });
       setShowCreateForm(false);
       setNewFolderName('');
@@ -66,7 +68,7 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
   const deleteFolderMutation = useMutation({
     mutationFn: (id: string) => folderApi.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['folders'] });
+      queryClient.invalidateQueries({ queryKey: ['folders', 'tree'] });
       queryClient.invalidateQueries({ queryKey: ['topology', 'arc'] });
     },
   });
@@ -76,7 +78,7 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
     mutationFn: ({ appId, folderId }: { appId: string; folderId: string | null }) =>
       arcTopologyApi.moveApplicationToFolder(appId, { folder_id: folderId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['folders'] });
+      queryClient.invalidateQueries({ queryKey: ['folders', 'tree'] });
       queryClient.invalidateQueries({ queryKey: ['topology', 'arc'] });
       queryClient.invalidateQueries({ queryKey: ['applications'] });
       setShowAssignModal(false);
