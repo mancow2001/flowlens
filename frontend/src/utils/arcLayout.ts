@@ -317,6 +317,62 @@ export function getDescendants(node: d3.HierarchyRectangularNode<ArcNode>): d3.H
 }
 
 /**
+ * Check if a point is near a bezier curve path.
+ * Uses sampling along the curve to find the closest point.
+ */
+export function isPointNearConnection(
+  x: number,
+  y: number,
+  connection: VisualConnection,
+  threshold: number = 8
+): boolean {
+  // Parse the path to get the control points
+  // Path format: "M x1,y1 Q cx,cy x2,y2"
+  const pathMatch = connection.path.match(/M ([-\d.]+),([-\d.]+) Q ([-\d.]+),([-\d.]+) ([-\d.]+),([-\d.]+)/);
+  if (!pathMatch) return false;
+
+  const x1 = parseFloat(pathMatch[1]);
+  const y1 = parseFloat(pathMatch[2]);
+  const cx = parseFloat(pathMatch[3]);
+  const cy = parseFloat(pathMatch[4]);
+  const x2 = parseFloat(pathMatch[5]);
+  const y2 = parseFloat(pathMatch[6]);
+
+  // Sample points along the quadratic bezier curve
+  const samples = 20;
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples;
+    // Quadratic bezier formula: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+    const px = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * cx + t * t * x2;
+    const py = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cy + t * t * y2;
+
+    const dist = Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+    if (dist < threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Find connection at point for hit testing.
+ */
+export function findConnectionAtPoint(
+  x: number,
+  y: number,
+  connections: VisualConnection[],
+  threshold: number = 8
+): VisualConnection | null {
+  // Check connections in reverse order (last drawn = on top)
+  for (let i = connections.length - 1; i >= 0; i--) {
+    if (isPointNearConnection(x, y, connections[i], threshold)) {
+      return connections[i];
+    }
+  }
+  return null;
+}
+
+/**
  * Format bytes to human-readable string.
  */
 export function formatBytes(bytes: number): string {

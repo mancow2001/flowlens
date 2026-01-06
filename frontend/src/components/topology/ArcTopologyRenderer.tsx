@@ -11,8 +11,10 @@ import {
   applyPartitionLayout,
   createArcGenerator,
   findNodeAtPoint,
+  findConnectionAtPoint,
   mapDependenciesToConnections,
   getAncestors,
+  formatBytes,
   type ArcNode,
   type ArcLayoutConfig,
   type VisualConnection,
@@ -122,23 +124,26 @@ export function ArcTopologyRenderer({
     ctx.translate(centerX + transform.x, centerY + transform.y);
     ctx.scale(transform.k, transform.k);
 
-    // Draw connections first (under arcs)
+    // Draw connections only when in focused view
     const { visibleConnections, relevantIds } = focusedData;
 
-    ctx.lineCap = 'round';
-    for (const conn of visibleConnections) {
-      const isHighlighted =
-        hoveredConnection?.id === conn.id ||
-        hoveredNode?.data.id === conn.sourceId ||
-        hoveredNode?.data.id === conn.targetId;
+    // Only show connections when a folder is focused
+    if (focusedFolderId && visibleConnections.length > 0) {
+      ctx.lineCap = 'round';
+      for (const conn of visibleConnections) {
+        const isHighlighted =
+          hoveredConnection?.id === conn.id ||
+          hoveredNode?.data.id === conn.sourceId ||
+          hoveredNode?.data.id === conn.targetId;
 
-      ctx.beginPath();
-      const path2D = new Path2D(conn.path);
-      ctx.strokeStyle = isHighlighted
-        ? 'rgba(59, 130, 246, 0.9)' // Blue highlight
-        : `rgba(100, 116, 139, ${conn.opacity})`;
-      ctx.lineWidth = isHighlighted ? conn.strokeWidth * 1.5 : conn.strokeWidth;
-      ctx.stroke(path2D);
+        ctx.beginPath();
+        const path2D = new Path2D(conn.path);
+        ctx.strokeStyle = isHighlighted
+          ? 'rgba(59, 130, 246, 0.9)' // Blue highlight
+          : `rgba(100, 116, 139, ${conn.opacity})`;
+        ctx.lineWidth = isHighlighted ? conn.strokeWidth * 1.5 : conn.strokeWidth;
+        ctx.stroke(path2D);
+      }
     }
 
     // Draw arcs
@@ -279,9 +284,39 @@ export function ArcTopologyRenderer({
 
       // Find node under mouse
       const node = findNodeAtPoint(mouseX, mouseY, focusedData.visibleNodes, config);
-      setHoveredNode(node);
 
-      // Update tooltip
+      // Check for connection hover (only when in focused view)
+      let connection: VisualConnection | null = null;
+      if (focusedFolderId && !node && focusedData.visibleConnections.length > 0) {
+        connection = findConnectionAtPoint(mouseX, mouseY, focusedData.visibleConnections);
+      }
+
+      setHoveredNode(node);
+      setHoveredConnection(connection);
+
+      // Update tooltip for connection
+      if (connection) {
+        const details: { label: string; value: string }[] = [
+          { label: 'From', value: connection.sourceName },
+          { label: 'To', value: connection.targetName },
+          { label: 'Connections', value: connection.connectionCount.toLocaleString() },
+          { label: 'Data transferred', value: formatBytes(connection.bytesTotal) },
+        ];
+
+        setTooltip({
+          visible: true,
+          x: event.clientX,
+          y: event.clientY,
+          content: {
+            title: 'Dependency',
+            type: 'connection',
+            details,
+          },
+        });
+        return;
+      }
+
+      // Update tooltip for node
       if (node && node.data.type !== 'root') {
         const details: { label: string; value: string }[] = [];
 
@@ -314,9 +349,10 @@ export function ArcTopologyRenderer({
       } else {
         setTooltip({ visible: false, x: 0, y: 0, content: null });
         setHoveredNode(null);
+        setHoveredConnection(null);
       }
     },
-    [focusedData.visibleNodes, config, transform, width, height]
+    [focusedData.visibleNodes, focusedData.visibleConnections, config, transform, width, height, focusedFolderId]
   );
 
   // Handle click
@@ -393,11 +429,15 @@ export function ArcTopologyRenderer({
           }}
         >
           <div className="flex items-center gap-2 mb-2">
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${
-                tooltip.content.type === 'folder' ? 'bg-blue-500' : 'bg-green-500'
-              }`}
-            />
+            {tooltip.content.type === 'connection' ? (
+              <div className="w-4 h-0.5 bg-blue-500 rounded" />
+            ) : (
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  tooltip.content.type === 'folder' ? 'bg-blue-500' : 'bg-green-500'
+                }`}
+              />
+            )}
             <span className="font-medium text-gray-900 dark:text-gray-100">
               {tooltip.content.title}
             </span>
@@ -444,7 +484,8 @@ export function ArcTopologyRenderer({
 
       {/* Instructions */}
       <div className="absolute bottom-4 right-4 text-xs text-gray-500 dark:text-gray-400">
-        <div>Click: Select | Double-click: Focus | Scroll: Zoom</div>
+        <div>Click: Select | Double-click: Focus mode</div>
+        <div className="mt-0.5">Focus mode shows dependencies</div>
       </div>
     </div>
   );
