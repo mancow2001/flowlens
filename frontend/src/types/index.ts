@@ -1199,6 +1199,8 @@ export interface FolderTree {
 // Arc Topology types
 // =============================================================================
 
+export type EdgeDirection = 'in' | 'out' | 'bi';
+
 export interface ArcDependency {
   source_folder_id: string | null;
   source_app_id: string;
@@ -1208,18 +1210,80 @@ export interface ArcDependency {
   target_app_name: string;
   connection_count: number;
   bytes_total: number;
+  bytes_last_24h: number;
+  direction: EdgeDirection;
+}
+
+export interface FolderDependency {
+  source_folder_id: string;
+  source_folder_name: string;
+  target_folder_id: string;
+  target_folder_name: string;
+  direction: EdgeDirection;
+  connection_count: number;
+  bytes_total: number;
+  bytes_last_24h: number;
 }
 
 export interface ArcTopologyData {
   hierarchy: FolderTree;
   dependencies: ArcDependency[];
+  folder_dependencies: FolderDependency[];
   statistics: {
     total_folders: number;
     total_applications: number;
     total_dependencies: number;
+    total_folder_dependencies?: number;
   };
 }
 
 export interface MoveApplicationRequest {
   folder_id: string | null;
+}
+
+// Application Dependency Details (for details pane)
+export interface ApplicationDependencySummary {
+  counterparty_id: string;
+  counterparty_name: string;
+  counterparty_folder_id: string | null;
+  counterparty_folder_name: string | null;
+  direction: EdgeDirection;
+  connection_count: number;
+  bytes_total: number;
+  bytes_last_24h: number;
+  last_seen: string | null;
+}
+
+export interface ApplicationDependencyList {
+  app_id: string;
+  app_name: string;
+  direction_filter: string;
+  dependencies: ApplicationDependencySummary[];
+  total_connections: number;
+  total_bytes: number;
+  total_bytes_24h: number;
+}
+
+// Topology Exclusion types
+export type ExclusionEntityType = 'folder' | 'application';
+
+export interface TopologyExclusionCreate {
+  entity_type: ExclusionEntityType;
+  entity_id: string;
+  reason?: string;
+}
+
+export interface TopologyExclusion {
+  id: string;
+  user_id: string;
+  entity_type: ExclusionEntityType;
+  entity_id: string;
+  entity_name: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface TopologyExclusionList {
+  items: TopologyExclusion[];
+  total: number;
 }

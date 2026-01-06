@@ -7,13 +7,19 @@ import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import * as d3 from 'd3';
 import type { ArcTopologyData, FolderTreeNode } from '../../types';
 import {
-  buildArcHierarchy,
+  buildFolderOnlyHierarchy,
+  buildExpandableHierarchy,
   applyPartitionLayout,
   createArcGenerator,
   findNodeAtPoint,
   findConnectionAtPoint,
   mapDependenciesToConnections,
+  mapFolderDependenciesToConnections,
   getAncestors,
+  getRelatedNodeIds,
+  getRelatedConnections,
+  computeNodeOpacity,
+  computeConnectionOpacity,
   formatBytes,
   type ArcNode,
   type ArcLayoutConfig,
@@ -26,8 +32,11 @@ interface ArcTopologyRendererProps {
   height: number;
   onFolderClick?: (folderId: string) => void;
   onApplicationClick?: (appId: string) => void;
+  onApplicationSelect?: (appId: string | null) => void;
   onFolderDoubleClick?: (folderId: string) => void;
   focusedFolderId?: string | null;
+  expandedFolderIds?: Set<string>;
+  selectedAppId?: string | null;
 }
 
 interface TooltipState {
@@ -47,8 +56,11 @@ export function ArcTopologyRenderer({
   height,
   onFolderClick,
   onApplicationClick,
+  onApplicationSelect,
   onFolderDoubleClick,
   focusedFolderId,
+  expandedFolderIds = new Set(),
+  selectedAppId = null,
 }: ArcTopologyRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredNode, setHoveredNode] = useState<d3.HierarchyRectangularNode<ArcNode> | null>(null);
@@ -68,29 +80,66 @@ export function ArcTopologyRenderer({
   }, [width, height]);
 
   // Build hierarchy and layout
-  const { nodes, connections, arcGenerator } = useMemo(() => {
-    const hierarchy = buildArcHierarchy(data);
+  // By default, show only folders. When a folder is expanded, show its applications.
+  const { nodes, connections, arcGenerator, folderConnections } = useMemo(() => {
+    const hasExpandedFolders = expandedFolderIds.size > 0;
+
+    let hierarchy;
+    if (hasExpandedFolders) {
+      // Build hierarchy with only expanded folders showing applications
+      hierarchy = buildExpandableHierarchy(data, expandedFolderIds);
+    } else {
+      // Default: folder-only view
+      hierarchy = buildFolderOnlyHierarchy(data);
+    }
+
     const root = applyPartitionLayout(hierarchy, config);
     const allNodes = root.descendants();
     const arcGen = createArcGenerator(config);
-    const conns = mapDependenciesToConnections(data.dependencies, allNodes, config);
+
+    // Map connections based on what's visible
+    // For expanded folders, show app-level dependencies for those apps
+    // Always show folder-level dependencies between collapsed folders
+    const appConns = hasExpandedFolders
+      ? mapDependenciesToConnections(data.dependencies, allNodes, config)
+      : [];
+    const folderConns = mapFolderDependenciesToConnections(
+      data.folder_dependencies || [],
+      allNodes,
+      config
+    );
 
     return {
       nodes: allNodes,
-      connections: conns,
+      connections: appConns,
+      folderConnections: folderConns,
       arcGenerator: arcGen,
     };
-  }, [data, config]);
+  }, [data, config, expandedFolderIds]);
 
   // Get focused node and related nodes
   const focusedData = useMemo(() => {
+    // Merge app-level and folder-level connections based on view mode
+    const hasExpandedFolders = expandedFolderIds.size > 0;
+    const activeConnections = hasExpandedFolders
+      ? [...folderConnections, ...connections]
+      : folderConnections;
+
     if (!focusedFolderId) {
-      return { visibleNodes: nodes, visibleConnections: connections, relevantIds: undefined };
+      return {
+        visibleNodes: nodes,
+        visibleConnections: activeConnections,
+        relevantIds: undefined,
+      };
     }
 
     const focusNode = nodes.find(n => n.data.id === focusedFolderId);
     if (!focusNode) {
-      return { visibleNodes: nodes, visibleConnections: connections, relevantIds: undefined };
+      return {
+        visibleNodes: nodes,
+        visibleConnections: activeConnections,
+        relevantIds: undefined,
+      };
     }
 
     const descendants = new Set(focusNode.descendants().map(n => n.data.id));
@@ -98,12 +147,33 @@ export function ArcTopologyRenderer({
     const relevantIds = new Set([...descendants, ...ancestors]);
 
     const visibleNodes = nodes;
-    const visibleConnections = connections.filter(
+    const visibleConnections = activeConnections.filter(
       c => descendants.has(c.sourceId) || descendants.has(c.targetId)
     );
 
     return { visibleNodes, visibleConnections, relevantIds };
-  }, [focusedFolderId, nodes, connections]);
+  }, [focusedFolderId, nodes, connections, folderConnections, expandedFolderIds]);
+
+  // Compute selection-related data for filtering/dimming
+  const selectionData = useMemo(() => {
+    if (!selectedAppId) {
+      return { relatedNodeIds: null, relatedConnectionIds: null };
+    }
+
+    const relatedNodeIds = getRelatedNodeIds(
+      selectedAppId,
+      data.dependencies,
+      data.folder_dependencies || [],
+      nodes
+    );
+
+    const relatedConnectionIds = getRelatedConnections(
+      selectedAppId,
+      focusedData.visibleConnections
+    );
+
+    return { relatedNodeIds, relatedConnectionIds };
+  }, [selectedAppId, data.dependencies, data.folder_dependencies, nodes, focusedData.visibleConnections]);
 
   // Render function
   const render = useCallback(() => {
@@ -124,11 +194,56 @@ export function ArcTopologyRenderer({
     ctx.translate(centerX + transform.x, centerY + transform.y);
     ctx.scale(transform.k, transform.k);
 
-    // Draw connections only when in focused view
+    // Draw connections (folder-level always visible, app-level when expanded)
     const { visibleConnections, relevantIds } = focusedData;
 
-    // Only show connections when a folder is focused
-    if (focusedFolderId && visibleConnections.length > 0) {
+    // Helper function to draw arrow head at a point along the bezier curve
+    const drawArrowHead = (
+      ctx: CanvasRenderingContext2D,
+      pathStr: string,
+      t: number, // position along curve (0-1)
+      size: number,
+      color: string
+    ) => {
+      // Parse bezier path: M x1,y1 Q cx,cy x2,y2
+      const pathMatch = pathStr.match(/M\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*Q\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*([-\d.e+]+)[,\s]+([-\d.e+]+)/i);
+      if (!pathMatch) return;
+
+      const x1 = parseFloat(pathMatch[1]);
+      const y1 = parseFloat(pathMatch[2]);
+      const cx = parseFloat(pathMatch[3]);
+      const cy = parseFloat(pathMatch[4]);
+      const x2 = parseFloat(pathMatch[5]);
+      const y2 = parseFloat(pathMatch[6]);
+
+      // Calculate point at t on quadratic bezier
+      const px = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * cx + t * t * x2;
+      const py = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cy + t * t * y2;
+
+      // Calculate tangent direction at t
+      const dx = 2 * (1 - t) * (cx - x1) + 2 * t * (x2 - cx);
+      const dy = 2 * (1 - t) * (cy - y1) + 2 * t * (y2 - cy);
+      const angle = Math.atan2(dy, dx);
+
+      // Draw arrow head
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(size, 0);
+      ctx.lineTo(-size * 0.6, -size * 0.5);
+      ctx.lineTo(-size * 0.6, size * 0.5);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    };
+
+    // Always show connections (folder-level by default, app-level when folders expanded)
+    // Get selection-related IDs for connection filtering
+    const { relatedConnectionIds: selRelatedConns } = selectionData;
+
+    if (visibleConnections.length > 0) {
       ctx.lineCap = 'round';
       for (const conn of visibleConnections) {
         const isHighlighted =
@@ -136,9 +251,14 @@ export function ArcTopologyRenderer({
           hoveredNode?.data.id === conn.sourceId ||
           hoveredNode?.data.id === conn.targetId;
 
+        // Compute selection-based opacity for connections
+        const connOpacity = computeConnectionOpacity(conn, selectedAppId, selRelatedConns);
+        const isRelatedToSelection = !selectedAppId || (selRelatedConns && selRelatedConns.has(conn.id));
+
         ctx.beginPath();
         const path2D = new Path2D(conn.path);
 
+        let strokeColor: string;
         if (isHighlighted) {
           // Draw a glow effect for highlighted connections
           ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
@@ -148,21 +268,76 @@ export function ArcTopologyRenderer({
           ctx.strokeStyle = 'rgba(59, 130, 246, 1)';
           ctx.lineWidth = conn.strokeWidth * 1.5;
           ctx.stroke(path2D);
+          strokeColor = 'rgba(59, 130, 246, 1)';
         } else {
-          // Make base connections more visible
-          ctx.strokeStyle = `rgba(100, 116, 139, ${Math.max(conn.opacity, 0.5)})`;
-          ctx.lineWidth = Math.max(conn.strokeWidth, 2);
+          // Apply selection-based opacity
+          const effectiveOpacity = Math.max(connOpacity, 0.1);
+          strokeColor = `rgba(100, 116, 139, ${effectiveOpacity})`;
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = Math.max(conn.strokeWidth, isRelatedToSelection ? 2 : 1);
           ctx.stroke(path2D);
+        }
+
+        // Draw direction arrows based on edge direction (only if not dimmed)
+        if (isRelatedToSelection || isHighlighted) {
+          const arrowSize = isHighlighted ? 8 : 6;
+          const arrowColor = isHighlighted ? 'rgba(59, 130, 246, 1)' : `rgba(100, 116, 139, ${Math.max(connOpacity + 0.2, 0.7)})`;
+
+          if (conn.direction === 'out' || conn.direction === 'bi') {
+            // Arrow pointing toward target (at t=0.75 along curve)
+            drawArrowHead(ctx, conn.path, 0.75, arrowSize, arrowColor);
+          }
+          if (conn.direction === 'in' || conn.direction === 'bi') {
+            // Arrow pointing toward source (at t=0.25, flipped)
+            // For 'in' direction, we draw at 0.25 but need to flip the arrow
+            const pathMatch = conn.path.match(/M\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*Q\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*([-\d.e+]+)[,\s]+([-\d.e+]+)/i);
+            if (pathMatch) {
+              const x1 = parseFloat(pathMatch[1]);
+              const y1 = parseFloat(pathMatch[2]);
+              const cx = parseFloat(pathMatch[3]);
+              const cy = parseFloat(pathMatch[4]);
+              const x2 = parseFloat(pathMatch[5]);
+              const y2 = parseFloat(pathMatch[6]);
+
+              const t = 0.25;
+              const px = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * cx + t * t * x2;
+              const py = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * cy + t * t * y2;
+
+              // Calculate tangent direction at t (pointing toward source = reverse direction)
+              const dx = 2 * (1 - t) * (cx - x1) + 2 * t * (x2 - cx);
+              const dy = 2 * (1 - t) * (cy - y1) + 2 * t * (y2 - cy);
+              const angle = Math.atan2(dy, dx) + Math.PI; // Flip by 180 degrees
+
+              ctx.save();
+              ctx.translate(px, py);
+              ctx.rotate(angle);
+              ctx.beginPath();
+              ctx.moveTo(arrowSize, 0);
+              ctx.lineTo(-arrowSize * 0.6, -arrowSize * 0.5);
+              ctx.lineTo(-arrowSize * 0.6, arrowSize * 0.5);
+              ctx.closePath();
+              ctx.fillStyle = arrowColor;
+              ctx.fill();
+              ctx.restore();
+            }
+          }
         }
       }
     }
 
     // Draw arcs
+    const { relatedNodeIds } = selectionData;
+
     for (const node of focusedData.visibleNodes) {
       if (node.data.type === 'root') continue;
 
       const isHovered = hoveredNode?.data.id === node.data.id;
-      const isDimmed = focusedFolderId && !relevantIds?.has(node.data.id);
+      const isSelected = node.data.id === selectedAppId;
+      const isFocusDimmed = focusedFolderId && !relevantIds?.has(node.data.id);
+
+      // Compute selection-based opacity
+      const selectionOpacity = computeNodeOpacity(node.data.id, selectedAppId, relatedNodeIds);
+      const isSelectionDimmed = selectedAppId && selectionOpacity < 0.5;
 
       // Generate arc path
       const arcPath = arcGenerator(node);
@@ -178,10 +353,11 @@ export function ArcTopologyRenderer({
         fillColor = d3.color(fillColor)?.brighter(0.3)?.formatHex() || fillColor;
       }
 
-      // Apply opacity based on state
-      let opacity = 1;
-      if (isDimmed) opacity = 0.2;
-      if (isHovered) opacity = 1;
+      // Apply opacity based on state (selection takes precedence, then focus, then hover)
+      let opacity = selectionOpacity;
+      if (isFocusDimmed && !selectedAppId) opacity = 0.2;
+      if (isHovered) opacity = Math.max(opacity, 0.9);
+      if (isSelected) opacity = 1;
 
       const rgbColor = d3.color(fillColor);
       if (rgbColor) {
@@ -192,13 +368,16 @@ export function ArcTopologyRenderer({
       }
       ctx.fill(path2D);
 
-      // Stroke
-      ctx.strokeStyle = isHovered
+      // Stroke - highlight selected/hovered nodes
+      const isDimmed = isFocusDimmed || isSelectionDimmed;
+      ctx.strokeStyle = isSelected
+        ? 'rgba(234, 179, 8, 1)' // yellow for selected
+        : isHovered
         ? 'rgba(59, 130, 246, 1)'
         : isDimmed
         ? 'rgba(226, 232, 240, 0.3)'
         : 'rgba(226, 232, 240, 0.8)';
-      ctx.lineWidth = isHovered ? 2 : 1;
+      ctx.lineWidth = isSelected ? 3 : isHovered ? 2 : 1;
       ctx.stroke(path2D);
 
       // Labels (only for larger arcs)
@@ -244,7 +423,8 @@ export function ArcTopologyRenderer({
     config,
     width,
     height,
-    focusedFolderId,
+    selectionData,
+    selectedAppId,
   ]);
 
   // Set up canvas and rendering
@@ -296,9 +476,9 @@ export function ArcTopologyRenderer({
       // Find node under mouse
       const node = findNodeAtPoint(mouseX, mouseY, focusedData.visibleNodes, config);
 
-      // Check for connection hover (only when in focused view)
+      // Check for connection hover (always check since connections are always visible)
       let connection: VisualConnection | null = null;
-      if (focusedFolderId && !node && focusedData.visibleConnections.length > 0) {
+      if (!node && focusedData.visibleConnections.length > 0) {
         // Adjust threshold based on zoom level - when zoomed out, need larger threshold
         const adjustedThreshold = 20 / transform.k;
         connection = findConnectionAtPoint(mouseX, mouseY, focusedData.visibleConnections, adjustedThreshold);
@@ -309,11 +489,20 @@ export function ArcTopologyRenderer({
 
       // Update tooltip for connection
       if (connection) {
+        // Format direction for display
+        const directionLabel = connection.direction === 'bi'
+          ? 'Bi-directional'
+          : connection.direction === 'out'
+          ? 'Outgoing'
+          : 'Incoming';
+
         const details: { label: string; value: string }[] = [
           { label: 'From', value: connection.sourceName },
           { label: 'To', value: connection.targetName },
+          { label: 'Direction', value: directionLabel },
           { label: 'Connections', value: connection.connectionCount.toLocaleString() },
           { label: 'Data transferred', value: formatBytes(connection.bytesTotal) },
+          { label: 'Last 24h', value: formatBytes(connection.bytesLast24h) },
         ];
 
         setTooltip({
@@ -365,7 +554,7 @@ export function ArcTopologyRenderer({
         setHoveredConnection(null);
       }
     },
-    [focusedData.visibleNodes, focusedData.visibleConnections, config, transform, width, height, focusedFolderId]
+    [focusedData.visibleNodes, focusedData.visibleConnections, config, transform, width, height]
   );
 
   // Handle click
@@ -383,14 +572,33 @@ export function ArcTopologyRenderer({
 
       const node = findNodeAtPoint(mouseX, mouseY, focusedData.visibleNodes, config);
       if (node) {
-        if (node.data.type === 'folder' && onFolderClick) {
-          onFolderClick(node.data.id);
-        } else if (node.data.type === 'application' && onApplicationClick) {
-          onApplicationClick(node.data.id);
+        if (node.data.type === 'folder') {
+          // Clear app selection when clicking a folder
+          if (onApplicationSelect) {
+            onApplicationSelect(null);
+          }
+          if (onFolderClick) {
+            onFolderClick(node.data.id);
+          }
+        } else if (node.data.type === 'application') {
+          // Toggle application selection
+          if (onApplicationSelect) {
+            const newSelection = selectedAppId === node.data.id ? null : node.data.id;
+            onApplicationSelect(newSelection);
+          }
+          // Also trigger the navigation callback if provided
+          if (onApplicationClick) {
+            onApplicationClick(node.data.id);
+          }
+        }
+      } else {
+        // Clicked on empty space - clear selection
+        if (onApplicationSelect) {
+          onApplicationSelect(null);
         }
       }
     },
-    [focusedData.visibleNodes, config, transform, width, height, onFolderClick, onApplicationClick]
+    [focusedData.visibleNodes, config, transform, width, height, onFolderClick, onApplicationClick, onApplicationSelect, selectedAppId]
   );
 
   // Handle double click
@@ -477,11 +685,22 @@ export function ArcTopologyRenderer({
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
             <div className="w-3 h-3 rounded-sm bg-blue-300" />
-            <span>Application (Map)</span>
+            <span>Application</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-            <div className="w-6 h-0.5 bg-gray-400" />
-            <span>Dependency</span>
+            <div className="flex items-center">
+              <div className="w-4 h-0.5 bg-gray-400" />
+              <div className="w-0 h-0 border-t-2 border-b-2 border-l-4 border-transparent border-l-gray-400" />
+            </div>
+            <span>One-way flow</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+            <div className="flex items-center">
+              <div className="w-0 h-0 border-t-2 border-b-2 border-r-4 border-transparent border-r-gray-400" />
+              <div className="w-3 h-0.5 bg-gray-400" />
+              <div className="w-0 h-0 border-t-2 border-b-2 border-l-4 border-transparent border-l-gray-400" />
+            </div>
+            <span>Bi-directional</span>
           </div>
         </div>
       </div>
@@ -497,8 +716,8 @@ export function ArcTopologyRenderer({
 
       {/* Instructions */}
       <div className="absolute bottom-4 right-4 text-xs text-gray-500 dark:text-gray-400">
-        <div>Click: Select | Double-click: Focus mode</div>
-        <div className="mt-0.5">Focus mode shows dependencies</div>
+        <div>Click: Select | Double-click: Expand folder</div>
+        <div className="mt-0.5">Hover over edges for details</div>
       </div>
     </div>
   );

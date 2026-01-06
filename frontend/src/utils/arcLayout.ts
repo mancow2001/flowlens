@@ -9,6 +9,8 @@ import type {
   FolderTreeNode,
   ApplicationInFolder,
   ArcDependency,
+  FolderDependency,
+  EdgeDirection,
 } from '../types';
 
 // Types for arc layout
@@ -60,6 +62,7 @@ const DEFAULT_FOLDER_COLORS = [
 
 /**
  * Convert folder tree to flat arc node structure for D3.
+ * Includes all folders and all applications.
  */
 export function buildArcHierarchy(data: ArcTopologyData): d3.HierarchyNode<ArcNode> {
   // Create root node
@@ -130,6 +133,97 @@ export function buildArcHierarchy(data: ArcTopologyData): d3.HierarchyNode<ArcNo
   // Create D3 hierarchy
   const hierarchy = d3.hierarchy(root)
     .sum(d => d.type === 'application' ? 1 : 0)
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+  return hierarchy;
+}
+
+/**
+ * Build a hierarchy with selectively expanded folders.
+ * Only folders in expandedFolderIds will show their applications.
+ * Other folders appear as single nodes.
+ */
+export function buildExpandableHierarchy(
+  data: ArcTopologyData,
+  expandedFolderIds: Set<string>
+): d3.HierarchyNode<ArcNode> {
+  // Create root node
+  const root: ArcNode = {
+    id: 'root',
+    name: 'All',
+    displayName: 'All Folders',
+    type: 'root',
+    color: null,
+    depth: 0,
+    parent: null,
+    children: [],
+    data: null,
+  };
+
+  let colorIndex = 0;
+
+  function processFolderNode(
+    folder: FolderTreeNode,
+    parent: ArcNode,
+    depth: number
+  ): ArcNode {
+    const folderColor = folder.color || DEFAULT_FOLDER_COLORS[colorIndex++ % DEFAULT_FOLDER_COLORS.length];
+    const isExpanded = expandedFolderIds.has(String(folder.id));
+
+    const node: ArcNode = {
+      id: String(folder.id),
+      name: folder.name,
+      displayName: folder.display_name,
+      type: 'folder',
+      color: folderColor,
+      depth,
+      parent,
+      children: [],
+      data: folder,
+    };
+
+    // If expanded, add applications as children
+    if (isExpanded) {
+      for (const app of folder.applications) {
+        const appNode: ArcNode = {
+          id: String(app.id),
+          name: app.name,
+          displayName: app.display_name,
+          type: 'application',
+          color: folderColor, // Inherit folder color
+          depth: depth + 1,
+          parent: node,
+          children: [],
+          data: app,
+        };
+        node.children.push(appNode);
+      }
+
+      // Also include child folders if expanded
+      for (const child of folder.children) {
+        const childNode = processFolderNode(child, node, depth + 1);
+        node.children.push(childNode);
+      }
+    }
+
+    return node;
+  }
+
+  // Process root folders
+  for (const folder of data.hierarchy.roots) {
+    const folderNode = processFolderNode(folder, root, 1);
+    root.children.push(folderNode);
+  }
+
+  // Create D3 hierarchy
+  // When a folder is collapsed, it gets value=1
+  // When expanded, value = sum of applications
+  const hierarchy = d3.hierarchy(root)
+    .sum(d => {
+      if (d.type === 'application') return 1;
+      if (d.type === 'folder' && d.children.length === 0) return 1; // Collapsed folder
+      return 0; // Expanded folder (value comes from children)
+    })
     .sort((a, b) => (b.value || 0) - (a.value || 0));
 
   return hierarchy;
@@ -249,6 +343,8 @@ export interface VisualConnection {
   targetName: string;
   connectionCount: number;
   bytesTotal: number;
+  bytesLast24h: number;
+  direction: EdgeDirection;
   path: string;
   opacity: number;
   strokeWidth: number;
@@ -288,6 +384,103 @@ export function mapDependenciesToConnections(
         targetName: dep.target_app_name,
         connectionCount: dep.connection_count,
         bytesTotal: dep.bytes_total,
+        bytesLast24h: dep.bytes_last_24h,
+        direction: dep.direction,
+        path,
+        opacity,
+        strokeWidth,
+      };
+    })
+    .filter((c): c is VisualConnection => c !== null);
+}
+
+/**
+ * Build a folder-only hierarchy (no applications) for the default ARC view.
+ * Only includes root folders, not their child applications.
+ */
+export function buildFolderOnlyHierarchy(data: ArcTopologyData): d3.HierarchyNode<ArcNode> {
+  // Create root node
+  const root: ArcNode = {
+    id: 'root',
+    name: 'All',
+    displayName: 'All Folders',
+    type: 'root',
+    color: null,
+    depth: 0,
+    parent: null,
+    children: [],
+    data: null,
+  };
+
+  let colorIndex = 0;
+
+  // Process only root folders (no applications)
+  for (const folder of data.hierarchy.roots) {
+    const folderColor = folder.color || DEFAULT_FOLDER_COLORS[colorIndex++ % DEFAULT_FOLDER_COLORS.length];
+
+    const node: ArcNode = {
+      id: folder.id,
+      name: folder.name,
+      displayName: folder.display_name,
+      type: 'folder',
+      color: folderColor,
+      depth: 1,
+      parent: root,
+      children: [], // No children in folder-only mode
+      data: folder,
+    };
+
+    root.children.push(node);
+  }
+
+  // Create D3 hierarchy - each folder gets equal weight (value = 1)
+  const hierarchy = d3.hierarchy(root)
+    .sum(d => d.type === 'folder' ? 1 : 0)
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+  return hierarchy;
+}
+
+/**
+ * Map folder-level dependencies to visual connections.
+ * Used for the default view showing only folder-to-folder edges.
+ */
+export function mapFolderDependenciesToConnections(
+  folderDependencies: FolderDependency[],
+  nodes: d3.HierarchyRectangularNode<ArcNode>[],
+  config: ArcLayoutConfig
+): VisualConnection[] {
+  const nodeMap = new Map<string, d3.HierarchyRectangularNode<ArcNode>>();
+  nodes.forEach(n => nodeMap.set(n.data.id, n));
+
+  const maxBytes = Math.max(...folderDependencies.map(d => d.bytes_total), 1);
+
+  return folderDependencies
+    .map(dep => {
+      const sourceNode = nodeMap.get(dep.source_folder_id);
+      const targetNode = nodeMap.get(dep.target_folder_id);
+
+      if (!sourceNode || !targetNode) return null;
+
+      const sourceCentroid = getArcCentroid(sourceNode, config);
+      const targetCentroid = getArcCentroid(targetNode, config);
+      const path = createConnectionPath(sourceCentroid, targetCentroid);
+
+      // Scale stroke width by bytes (2-6 range for folder-level, thicker than app-level)
+      const normalizedBytes = dep.bytes_total / maxBytes;
+      const strokeWidth = 2 + normalizedBytes * 4;
+      const opacity = 0.4 + normalizedBytes * 0.4;
+
+      return {
+        id: `folder-${dep.source_folder_id}-${dep.target_folder_id}`,
+        sourceId: dep.source_folder_id,
+        targetId: dep.target_folder_id,
+        sourceName: dep.source_folder_name,
+        targetName: dep.target_folder_name,
+        connectionCount: dep.connection_count,
+        bytesTotal: dep.bytes_total,
+        bytesLast24h: dep.bytes_last_24h,
+        direction: dep.direction,
         path,
         opacity,
         strokeWidth,
@@ -396,4 +589,115 @@ export function getProtocolName(protocol: number): string {
     case 1: return 'ICMP';
     default: return `Proto ${protocol}`;
   }
+}
+
+/**
+ * Get all node IDs related to a selected application through dependencies.
+ * Returns the selected app, its direct counterparties, and their parent folders.
+ */
+export function getRelatedNodeIds(
+  selectedAppId: string,
+  dependencies: ArcDependency[],
+  folderDependencies: FolderDependency[],
+  nodes: d3.HierarchyRectangularNode<ArcNode>[]
+): Set<string> {
+  const relatedIds = new Set<string>();
+
+  // Add the selected app itself
+  relatedIds.add(selectedAppId);
+
+  // Find direct dependencies involving this app
+  for (const dep of dependencies) {
+    if (String(dep.source_app_id) === selectedAppId) {
+      relatedIds.add(String(dep.target_app_id));
+      if (dep.target_folder_id) {
+        relatedIds.add(String(dep.target_folder_id));
+      }
+    }
+    if (String(dep.target_app_id) === selectedAppId) {
+      relatedIds.add(String(dep.source_app_id));
+      if (dep.source_folder_id) {
+        relatedIds.add(String(dep.source_folder_id));
+      }
+    }
+  }
+
+  // Find the parent folder of the selected app
+  const selectedNode = nodes.find(n => n.data.id === selectedAppId);
+  if (selectedNode?.parent) {
+    relatedIds.add(selectedNode.parent.data.id);
+
+    // Also check folder-level dependencies for the parent folder
+    const parentFolderId = selectedNode.parent.data.id;
+    for (const dep of folderDependencies) {
+      if (String(dep.source_folder_id) === parentFolderId) {
+        relatedIds.add(String(dep.target_folder_id));
+      }
+      if (String(dep.target_folder_id) === parentFolderId) {
+        relatedIds.add(String(dep.source_folder_id));
+      }
+    }
+  }
+
+  return relatedIds;
+}
+
+/**
+ * Get connections related to a selected application.
+ */
+export function getRelatedConnections(
+  selectedAppId: string,
+  connections: VisualConnection[]
+): Set<string> {
+  const relatedConnectionIds = new Set<string>();
+
+  for (const conn of connections) {
+    if (conn.sourceId === selectedAppId || conn.targetId === selectedAppId) {
+      relatedConnectionIds.add(conn.id);
+    }
+  }
+
+  return relatedConnectionIds;
+}
+
+/**
+ * Compute opacity for a node based on selection state.
+ */
+export function computeNodeOpacity(
+  nodeId: string,
+  selectedAppId: string | null,
+  relatedIds: Set<string> | null
+): number {
+  if (!selectedAppId || !relatedIds) {
+    return 1.0; // No selection, full opacity
+  }
+
+  if (nodeId === selectedAppId) {
+    return 1.0; // Selected node
+  }
+
+  if (relatedIds.has(nodeId)) {
+    return 0.8; // Related node
+  }
+
+  return 0.25; // Unrelated node (dimmed)
+}
+
+/**
+ * Compute opacity for a connection based on selection state.
+ */
+export function computeConnectionOpacity(
+  connection: VisualConnection,
+  selectedAppId: string | null,
+  relatedConnectionIds: Set<string> | null
+): number {
+  if (!selectedAppId || !relatedConnectionIds) {
+    return connection.opacity; // No selection, use default opacity
+  }
+
+  if (relatedConnectionIds.has(connection.id)) {
+    return Math.min(connection.opacity + 0.3, 1.0); // Highlight related connections
+  }
+
+  return 0.1; // Dim unrelated connections
 }

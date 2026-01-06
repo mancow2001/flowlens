@@ -1,9 +1,18 @@
 """Pydantic schemas for Folder API endpoints and arc topology view."""
 
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class EdgeDirection(str, Enum):
+    """Direction of a dependency edge."""
+
+    IN = "in"
+    OUT = "out"
+    BI = "bi"
 
 
 class FolderBase(BaseModel):
@@ -152,14 +161,29 @@ class FolderTree(BaseModel):
 class ArcDependency(BaseModel):
     """Aggregated dependency between applications for arc view."""
 
-    source_folder_id: UUID | None = None
+    source_folder_id: UUID | str | None = None
     source_app_id: UUID
     source_app_name: str
-    target_folder_id: UUID | None = None
+    target_folder_id: UUID | str | None = None
     target_app_id: UUID
     target_app_name: str
     connection_count: int
     bytes_total: int
+    bytes_last_24h: int = 0
+    direction: EdgeDirection = EdgeDirection.OUT
+
+
+class FolderDependency(BaseModel):
+    """Aggregated dependency between folders for arc view (folder-level edges)."""
+
+    source_folder_id: UUID | str
+    source_folder_name: str
+    target_folder_id: UUID | str
+    target_folder_name: str
+    direction: EdgeDirection
+    connection_count: int
+    bytes_total: int
+    bytes_last_24h: int
 
 
 class ArcTopologyData(BaseModel):
@@ -167,6 +191,7 @@ class ArcTopologyData(BaseModel):
 
     hierarchy: FolderTree
     dependencies: list[ArcDependency]
+    folder_dependencies: list[FolderDependency] = Field(default_factory=list)
     statistics: dict
 
 
@@ -174,6 +199,78 @@ class MoveApplicationRequest(BaseModel):
     """Request to move an application to a folder."""
 
     folder_id: UUID | None = None  # None = remove from folder
+
+
+# =============================================================================
+# Application Dependency Details (for details pane)
+# =============================================================================
+
+
+class ApplicationDependencySummary(BaseModel):
+    """Summary of a single dependency counterparty for the details pane."""
+
+    counterparty_id: UUID
+    counterparty_name: str
+    counterparty_folder_id: UUID | str | None = None
+    counterparty_folder_name: str | None = None
+    direction: EdgeDirection
+    connection_count: int
+    bytes_total: int
+    bytes_last_24h: int
+    last_seen: str | None = None
+
+
+class ApplicationDependencyList(BaseModel):
+    """List of dependencies for an application."""
+
+    app_id: UUID
+    app_name: str
+    direction_filter: str  # "incoming", "outgoing", or "both"
+    dependencies: list[ApplicationDependencySummary]
+    total_connections: int
+    total_bytes: int
+    total_bytes_24h: int
+
+
+# =============================================================================
+# Topology Exclusions (for hiding entities from arc view)
+# =============================================================================
+
+
+class ExclusionEntityType(str, Enum):
+    """Type of entity being excluded."""
+
+    FOLDER = "folder"
+    APPLICATION = "application"
+
+
+class TopologyExclusionCreate(BaseModel):
+    """Schema for creating a topology exclusion."""
+
+    entity_type: ExclusionEntityType
+    entity_id: UUID
+    reason: str | None = Field(None, max_length=500)
+
+
+class TopologyExclusionResponse(BaseModel):
+    """Schema for topology exclusion response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    entity_type: str
+    entity_id: UUID
+    entity_name: str | None = None  # Populated from folder/application name
+    reason: str | None = None
+    created_at: datetime
+
+
+class TopologyExclusionList(BaseModel):
+    """List of topology exclusions."""
+
+    items: list[TopologyExclusionResponse]
+    total: int
 
 
 # Rebuild model for forward reference
