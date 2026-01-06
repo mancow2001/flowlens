@@ -658,17 +658,40 @@ async def get_arc_topology(
     app_count_result = await db.execute(select(func.count(Application.id)))
     total_applications = app_count_result.scalar() or 0
 
-    # Build folder tree
-    hierarchy = FolderTree(
-        roots=[build_folder_tree_node(f) for f in root_folders],
-        total_folders=total_folders,
-        total_applications=total_applications,
-    )
-
     # Get all applications with their folder assignments
     apps_query = select(Application).options(selectinload(Application.members))
     apps_result = await db.execute(apps_query)
     all_apps = apps_result.scalars().all()
+
+    # Find unassigned applications (not in any folder)
+    unassigned_apps = [app for app in all_apps if app.folder_id is None]
+
+    # Build folder tree roots
+    tree_roots = [build_folder_tree_node(f) for f in root_folders]
+
+    # Add "Unassigned" virtual folder if there are unassigned apps
+    if unassigned_apps:
+        unassigned_folder = FolderTreeNode(
+            id="unassigned",
+            name="Unassigned",
+            display_name="Unassigned Applications",
+            color="#64748b",  # Slate color
+            icon=None,
+            order=9999,
+            parent_id=None,
+            children=[],
+            applications=[
+                ApplicationInFolder.model_validate(app) for app in unassigned_apps
+            ],
+        )
+        tree_roots.append(unassigned_folder)
+
+    # Build folder tree
+    hierarchy = FolderTree(
+        roots=tree_roots,
+        total_folders=total_folders,
+        total_applications=total_applications,
+    )
 
     # Build app_id -> app mapping and app_id -> folder_id mapping
     app_map = {app.id: app for app in all_apps}

@@ -9,6 +9,7 @@ import FilterPanel from '../components/topology/FilterPanel';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import CanvasTopologyRenderer from '../components/topology/CanvasTopologyRenderer';
 import { ArcTopologyRenderer } from '../components/topology/ArcTopologyRenderer';
+import { FolderPanel } from '../components/topology/FolderPanel';
 import TopologySettingsDialog, {
   type TopologySettings,
   type RenderMode,
@@ -2182,6 +2183,18 @@ export default function Topology() {
             onReset={resetFilters}
             hasActiveFilters={hasActiveFilters()}
           />
+        )}
+
+        {/* Folder Panel - only shown in arc view */}
+        {viewMode === 'arc' && (
+          <div className="w-72 shrink-0">
+            <FolderPanel
+              onFolderSelect={(folderId) => {
+                setFocusedFolderId(folderId);
+              }}
+              selectedFolderId={focusedFolderId}
+            />
+          </div>
         )}
 
         {/* Arc View */}

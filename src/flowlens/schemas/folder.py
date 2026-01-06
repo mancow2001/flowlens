@@ -124,13 +124,14 @@ class FolderTreeNode(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
+    id: UUID | str  # Allow string for virtual folders like "unassigned"
     name: str
     display_name: str | None = None
     color: str | None = None
     icon: str | None = None
     order: int = 0
     parent_id: UUID | None = None
+    team: str | None = None
     children: list["FolderTreeNode"] = Field(default_factory=list)
     applications: list[ApplicationInFolder] = Field(default_factory=list)
 
