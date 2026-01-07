@@ -592,6 +592,7 @@ export interface ClassificationRuleSummary {
   id: string;
   name: string;
   cidr: string;
+  priority: number;
   environment: string | null;
   datacenter: string | null;
   location: string | null;
