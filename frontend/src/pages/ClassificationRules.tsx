@@ -352,7 +352,7 @@ export default function ClassificationRules() {
                 <tr key={rule.id} className="text-slate-200">
                   <td className="py-3 font-medium">{rule.name}</td>
                   <td className="py-3 font-mono text-sm">{rule.cidr}</td>
-                  <td className="py-3">{/* Priority not in summary, show dash */}-</td>
+                  <td className="py-3">{rule.priority}</td>
                   <td className="py-3">{rule.environment || '-'}</td>
                   <td className="py-3">{rule.datacenter || '-'}</td>
                   <td className="py-3">{rule.location || '-'}</td>

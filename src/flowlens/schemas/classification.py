@@ -108,6 +108,7 @@ class ClassificationRuleSummary(BaseModel):
     id: UUID
     name: str
     cidr: str
+    priority: int
     environment: str | None
     datacenter: str | None
     location: str | None
