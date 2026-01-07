@@ -233,6 +233,10 @@ class PrivateIPClassifier:
         """
         try:
             if isinstance(ip_address, str):
+                # Strip CIDR notation if present (e.g., "10.0.0.1/32" -> "10.0.0.1")
+                # PostgreSQL inet type includes CIDR suffix which IPv4Address can't parse
+                if "/" in ip_address:
+                    ip_address = ip_address.split("/")[0]
                 ip_address = IPv4Address(ip_address)
 
             if isinstance(ip_address, IPv6Address):
@@ -265,6 +269,10 @@ class PrivateIPClassifier:
         """
         try:
             if isinstance(ip_address, str):
+                # Strip CIDR notation if present (e.g., "10.0.0.1/32" -> "10.0.0.1")
+                # PostgreSQL inet type includes CIDR suffix which IPv4Address can't parse
+                if "/" in ip_address:
+                    ip_address = ip_address.split("/")[0]
                 ip_address = IPv4Address(ip_address)
 
             if isinstance(ip_address, IPv6Address):
