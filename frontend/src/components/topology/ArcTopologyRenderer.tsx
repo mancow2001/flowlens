@@ -84,29 +84,10 @@ export function ArcTopologyRenderer({
   const { nodes, connections, arcGenerator, folderConnections } = useMemo(() => {
     const hasExpandedFolders = expandedFolderIds.size > 0;
 
-    // Debug: log expanded folders
-    if (hasExpandedFolders) {
-      console.log('[ArcRenderer] Expanded folder IDs:', Array.from(expandedFolderIds));
-    }
-
     let hierarchy;
     if (hasExpandedFolders) {
-      // Build hierarchy with only expanded folders showing applications
+      // Build hierarchy with expanded folders replaced by their applications
       hierarchy = buildExpandableHierarchy(data, expandedFolderIds);
-      // Debug: log hierarchy structure
-      console.log('[ArcRenderer] Hierarchy with expanded folders:', {
-        totalNodes: hierarchy.descendants().length,
-        folders: hierarchy.descendants().filter(n => n.data.type === 'folder').length,
-        applications: hierarchy.descendants().filter(n => n.data.type === 'application').length,
-        expandedFolderData: hierarchy.descendants()
-          .filter(n => expandedFolderIds.has(n.data.id))
-          .map(n => ({
-            id: n.data.id,
-            name: n.data.name,
-            childrenCount: n.children?.length ?? 0,
-            dataApplications: (n.data.data as any)?.applications?.length ?? 0,
-          })),
-      });
     } else {
       // Default: folder-only view
       hierarchy = buildFolderOnlyHierarchy(data);
@@ -115,22 +96,6 @@ export function ArcTopologyRenderer({
     const root = applyPartitionLayout(hierarchy, config);
     const allNodes = root.descendants();
     const arcGen = createArcGenerator(config);
-
-    // Debug: log partition results
-    if (hasExpandedFolders) {
-      console.log('[ArcRenderer] After partition layout:', {
-        totalNodes: allNodes.length,
-        applicationNodes: allNodes.filter(n => n.data.type === 'application').map(n => ({
-          id: n.data.id,
-          name: n.data.name,
-          x0: n.x0,
-          x1: n.x1,
-          y0: n.y0,
-          y1: n.y1,
-          value: n.value,
-        })),
-      });
-    }
 
     // Map connections based on what's visible
     // For expanded folders, show app-level dependencies for those apps
