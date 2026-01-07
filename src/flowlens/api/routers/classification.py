@@ -184,6 +184,7 @@ async def list_classification_rules(
             id=r.id,
             name=r.name,
             cidr=str(r.cidr),
+            priority=r.priority,
             environment=r.environment,
             datacenter=r.datacenter,
             location=r.location,
