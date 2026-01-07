@@ -24,6 +24,9 @@ export interface ArcNode {
   parent: ArcNode | null;
   children: ArcNode[];
   data: FolderTreeNode | ApplicationInFolder | null;
+  // For expanded folder applications, track the parent folder
+  parentFolderId?: string;
+  parentFolderName?: string;
   // D3 partition layout values (set after layout)
   x0?: number;
   x1?: number;
@@ -162,76 +165,73 @@ export function buildExpandableHierarchy(
 
   let colorIndex = 0;
 
-  function processFolderNode(
-    folder: FolderTreeNode,
+  // When a folder is expanded, we replace it with its applications at the same level
+  // This keeps applications in the same radial position as the folder was
+  function processFolderNodes(
+    folders: FolderTreeNode[],
     parent: ArcNode,
     depth: number
-  ): ArcNode {
-    const folderColor = folder.color || DEFAULT_FOLDER_COLORS[colorIndex++ % DEFAULT_FOLDER_COLORS.length];
-    const isExpanded = expandedFolderIds.has(String(folder.id));
+  ): ArcNode[] {
+    const nodes: ArcNode[] = [];
 
-    const node: ArcNode = {
-      id: String(folder.id),
-      name: folder.name,
-      displayName: folder.display_name,
-      type: 'folder',
-      color: folderColor,
-      depth,
-      parent,
-      children: [],
-      data: folder,
-    };
+    for (const folder of folders) {
+      const folderColor = folder.color || DEFAULT_FOLDER_COLORS[colorIndex++ % DEFAULT_FOLDER_COLORS.length];
+      const isExpanded = expandedFolderIds.has(String(folder.id));
 
-    // If expanded, add applications as children
-    if (isExpanded) {
-      console.log('[buildExpandableHierarchy] Expanding folder:', {
-        folderId: folder.id,
-        folderName: folder.name,
-        applicationsCount: folder.applications?.length ?? 0,
-        applications: folder.applications?.map(a => ({ id: a.id, name: a.name })) ?? [],
-      });
+      if (isExpanded) {
+        // Expanded folder: replace with its applications at the same level
+        // Add applications directly at this level (replacing the folder)
+        for (const app of folder.applications) {
+          const appNode: ArcNode = {
+            id: String(app.id),
+            name: app.name,
+            displayName: app.display_name,
+            type: 'application',
+            color: folderColor, // Inherit folder color
+            depth,
+            parent,
+            children: [],
+            data: app,
+            // Store parent folder info for reference
+            parentFolderId: String(folder.id),
+            parentFolderName: folder.name,
+          };
+          nodes.push(appNode);
+        }
 
-      for (const app of folder.applications) {
-        const appNode: ArcNode = {
-          id: String(app.id),
-          name: app.name,
-          displayName: app.display_name,
-          type: 'application',
-          color: folderColor, // Inherit folder color
-          depth: depth + 1,
-          parent: node,
+        // Also process child folders at this level if the parent is expanded
+        const childNodes = processFolderNodes(folder.children, parent, depth);
+        nodes.push(...childNodes);
+      } else {
+        // Collapsed folder: add as a single node
+        const folderNode: ArcNode = {
+          id: String(folder.id),
+          name: folder.name,
+          displayName: folder.display_name,
+          type: 'folder',
+          color: folderColor,
+          depth,
+          parent,
           children: [],
-          data: app,
+          data: folder,
         };
-        node.children.push(appNode);
+        nodes.push(folderNode);
       }
-
-      // Also include child folders if expanded
-      for (const child of folder.children) {
-        const childNode = processFolderNode(child, node, depth + 1);
-        node.children.push(childNode);
-      }
-
-      console.log('[buildExpandableHierarchy] After expansion, node.children:', node.children.length);
     }
 
-    return node;
+    return nodes;
   }
 
   // Process root folders
-  for (const folder of data.hierarchy.roots) {
-    const folderNode = processFolderNode(folder, root, 1);
-    root.children.push(folderNode);
-  }
+  root.children = processFolderNodes(data.hierarchy.roots, root, 1);
 
   // Create D3 hierarchy
-  // When a folder is collapsed, it gets value=1
-  // When expanded, value = sum of applications
+  // All visible nodes (collapsed folders and applications) get value=1
   const hierarchy = d3.hierarchy(root)
     .sum(d => {
       if (d.type === 'application') return 1;
-      if (d.type === 'folder' && d.children.length === 0) return 1; // Collapsed folder
-      return 0; // Expanded folder (value comes from children)
+      if (d.type === 'folder') return 1; // Collapsed folder
+      return 0; // Root
     })
     .sort((a, b) => (b.value || 0) - (a.value || 0));
 
