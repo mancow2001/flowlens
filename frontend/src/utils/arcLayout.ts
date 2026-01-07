@@ -266,6 +266,7 @@ export function createArcGenerator(config: ArcLayoutConfig) {
 
 /**
  * Calculate arc centroid for connection endpoints.
+ * @deprecated Use getArcInnerPoint for connections inside the hole
  */
 export function getArcCentroid(
   node: d3.HierarchyRectangularNode<ArcNode>,
@@ -273,6 +274,23 @@ export function getArcCentroid(
 ): [number, number] {
   const angle = (node.x0! + node.x1!) / 2;
   const radius = config.innerRadius + (node.y0! + node.y1!) / 2;
+  return [
+    Math.cos(angle - Math.PI / 2) * radius,
+    Math.sin(angle - Math.PI / 2) * radius,
+  ];
+}
+
+/**
+ * Calculate point on the inner edge of an arc for connection endpoints.
+ * This places connections inside the "hole" of the arc ring.
+ */
+export function getArcInnerPoint(
+  node: d3.HierarchyRectangularNode<ArcNode>,
+  config: ArcLayoutConfig
+): [number, number] {
+  const angle = (node.x0! + node.x1!) / 2;
+  // Use the inner radius of the arc (just inside the arc's inner edge)
+  const radius = config.innerRadius + node.y0! - 2; // Slightly inside the inner edge
   return [
     Math.cos(angle - Math.PI / 2) * radius,
     Math.sin(angle - Math.PI / 2) * radius,
@@ -376,9 +394,9 @@ export function mapDependenciesToConnections(
 
       if (!sourceNode || !targetNode) return null;
 
-      const sourceCentroid = getArcCentroid(sourceNode, config);
-      const targetCentroid = getArcCentroid(targetNode, config);
-      const path = createConnectionPath(sourceCentroid, targetCentroid);
+      const sourcePoint = getArcInnerPoint(sourceNode, config);
+      const targetPoint = getArcInnerPoint(targetNode, config);
+      const path = createConnectionPath(sourcePoint, targetPoint);
 
       // Scale stroke width by bytes (1-5 range)
       const normalizedBytes = dep.bytes_total / maxBytes;
@@ -471,9 +489,9 @@ export function mapFolderDependenciesToConnections(
 
       if (!sourceNode || !targetNode) return null;
 
-      const sourceCentroid = getArcCentroid(sourceNode, config);
-      const targetCentroid = getArcCentroid(targetNode, config);
-      const path = createConnectionPath(sourceCentroid, targetCentroid);
+      const sourcePoint = getArcInnerPoint(sourceNode, config);
+      const targetPoint = getArcInnerPoint(targetNode, config);
+      const path = createConnectionPath(sourcePoint, targetPoint);
 
       // Scale stroke width by bytes (2-6 range for folder-level, thicker than app-level)
       const normalizedBytes = dep.bytes_total / maxBytes;
