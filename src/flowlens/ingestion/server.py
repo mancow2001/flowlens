@@ -17,6 +17,7 @@ from flowlens.common.metrics import (
 )
 from flowlens.ingestion.backpressure import BackpressureQueue
 from flowlens.ingestion.parsers.base import FlowParser, FlowRecord
+from flowlens.ingestion.parsers.ipfix import IPFIXParser
 from flowlens.ingestion.parsers.netflow_v5 import NetFlowV5Parser
 from flowlens.ingestion.parsers.netflow_v9 import NetFlowV9Parser
 from flowlens.ingestion.parsers.sflow import SFlowParser
@@ -127,6 +128,7 @@ class FlowCollector:
         self._parsers: dict[str, FlowParser] = {
             "netflow_v5": NetFlowV5Parser(),
             "netflow_v9": NetFlowV9Parser(),
+            "ipfix": IPFIXParser(),
             "sflow": SFlowParser(),
         }
 
@@ -297,7 +299,13 @@ class FlowCollector:
                 FLOWS_PARSED.labels(protocol="netflow_v9").inc(len(records))
                 return records
 
-        # TODO: Add IPFIX (version 10) parser
+        if version == 10:
+            parser = self._parsers.get("ipfix")
+            if parser:
+                records = parser.parse(data, IPv4Address(exporter_ip))
+                FLOWS_PARSED.labels(protocol="ipfix").inc(len(records))
+                return records
+
         raise ValueError(f"Unsupported flow version: {version}")
 
     @property
