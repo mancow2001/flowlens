@@ -433,6 +433,8 @@ async def restore_backup(
                     errors.append(f"Error restoring {table_name} record: {e}")
 
             if restored_count > 0:
+                # Flush after each table to ensure FK order is respected
+                await db.flush()
                 tables_restored.append(table_name)
                 rows_restored[table_name] = restored_count
 
