@@ -111,7 +111,7 @@ async def save_layout(
             layout.positions = {k: {"x": v.x, "y": v.y} for k, v in data.positions.items()}
         if data.viewport is not None:
             layout.viewport = data.viewport.model_dump()
-        layout.modified_by = user.email if hasattr(user, 'email') else str(user.id)
+        layout.modified_by = user.sub
     else:
         # Create new layout
         positions = {}
@@ -127,7 +127,7 @@ async def save_layout(
             hop_depth=hop_depth,
             positions=positions,
             viewport=viewport,
-            modified_by=user.email if hasattr(user, 'email') else str(user.id),
+            modified_by=user.sub,
         )
         db.add(layout)
 
@@ -177,14 +177,14 @@ async def update_positions(
         existing_positions = layout.positions or {}
         existing_positions.update(new_positions)
         layout.positions = existing_positions
-        layout.modified_by = user.email if hasattr(user, 'email') else str(user.id)
+        layout.modified_by = user.sub
     else:
         # Create new layout with these positions
         layout = ApplicationLayout(
             application_id=application_id,
             hop_depth=hop_depth,
             positions=new_positions,
-            modified_by=user.email if hasattr(user, 'email') else str(user.id),
+            modified_by=user.sub,
         )
         db.add(layout)
 
@@ -262,7 +262,7 @@ async def create_group(
             application_id=application_id,
             hop_depth=hop_depth,
             positions={},
-            modified_by=user.email if hasattr(user, 'email') else str(user.id),
+            modified_by=user.sub,
         )
         db.add(layout)
         await db.flush()
@@ -345,7 +345,7 @@ async def update_group(
         select(ApplicationLayout).where(ApplicationLayout.id == group.layout_id)
     )
     layout = result.scalar_one()
-    layout.modified_by = user.email if hasattr(user, 'email') else str(user.id)
+    layout.modified_by = user.sub
 
     await db.commit()
     await db.refresh(group)
