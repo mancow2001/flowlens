@@ -406,17 +406,12 @@ async def restore_backup(
             restored_count = 0
             for record in records:
                 try:
-                    # Convert UUID strings back to UUID objects
+                    # Process record values - only convert datetimes
+                    # Leave UUID strings as-is; SQLAlchemy handles type coercion
                     processed_record: dict[str, Any] = {}
                     for key, value in record.items():
-                        # Check if it's a UUID string
-                        if isinstance(value, str) and len(value) == 36 and value.count("-") == 4:
-                            try:
-                                processed_record[key] = UUID(value)
-                            except ValueError:
-                                processed_record[key] = value
                         # Handle datetime strings
-                        elif isinstance(value, str) and "T" in value and (":" in value or "Z" in value):
+                        if isinstance(value, str) and "T" in value and (":" in value or "Z" in value):
                             try:
                                 processed_record[key] = datetime.fromisoformat(
                                     value.replace("Z", "+00:00")
