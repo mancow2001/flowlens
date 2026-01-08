@@ -6,7 +6,6 @@ import {
   ArrowLeftIcon,
   InformationCircleIcon,
   UsersIcon,
-  CpuChipIcon,
   PencilIcon,
   ArrowPathIcon,
   Squares2X2Icon,
@@ -17,14 +16,11 @@ import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
 import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
-import ApplicationDetailCanvas from '../components/topology/ApplicationDetailCanvas';
 import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
 import { applicationsApi, layoutApi } from '../services/api';
 import { getProtocolName, formatProtocolPort, formatBytes, getEdgeLabelForPort } from '../utils/network';
 import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
-
-type RenderMode = 'auto' | 'svg' | 'canvas';
 
 // Entry point in topology data
 interface TopologyEntryPointInfo {
@@ -132,7 +128,6 @@ export default function ApplicationDetail() {
   } | null>(null);
   const [showExternal, setShowExternal] = useState(false);
   const [maxDepth, setMaxDepth] = useState(1);
-  const [renderMode, setRenderMode] = useState<RenderMode>('auto');
   const [hideInfrastructureOnly, setHideInfrastructureOnly] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
@@ -457,20 +452,6 @@ export default function ApplicationDetail() {
     return { nodes: simNodes, links: simLinks };
   }, [topology, dimensions, maxDepth, hideInfrastructureOnly, savedLayout]);
 
-  // Determine effective render mode based on graph size
-  const effectiveRenderMode = useMemo((): 'svg' | 'canvas' => {
-    if (renderMode !== 'auto') {
-      return renderMode;
-    }
-    // Auto mode: use Canvas for larger graphs
-    const nodeCount = nodes.length;
-    const edgeCount = links.length;
-    return nodeCount > 50 || edgeCount > 100 ? 'canvas' : 'svg';
-  }, [renderMode, nodes.length, links.length]);
-
-  // Check if graph is large enough to recommend Canvas
-  const isLargeGraph = nodes.length > 50 || links.length > 100;
-
   // Handle container resize
   useEffect(() => {
     if (!containerRef.current) return;
@@ -512,9 +493,9 @@ export default function ApplicationDetail() {
     };
   }, []);
 
-  // D3 force simulation with hierarchical layout (only for SVG mode)
+  // D3 force simulation with hierarchical layout
   useEffect(() => {
-    if (!svgRef.current || nodes.length === 0 || effectiveRenderMode === 'canvas') return;
+    if (!svgRef.current || nodes.length === 0) return;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
@@ -1280,7 +1261,7 @@ export default function ApplicationDetail() {
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
+  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
 
   if (isLoading || isLayoutLoading) {
     return <LoadingPage />;
@@ -1344,18 +1325,6 @@ export default function ApplicationDetail() {
             Hide infrastructure-only
           </label>
           <div className="flex items-center gap-2 border-l border-slate-700 pl-4">
-            <CpuChipIcon className="h-4 w-4 text-slate-400" />
-            <select
-              value={renderMode}
-              onChange={(e) => setRenderMode(e.target.value as RenderMode)}
-              className="bg-slate-700 text-slate-300 text-sm rounded px-2 py-1 border-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="auto">Auto</option>
-              <option value="svg">SVG</option>
-              <option value="canvas">Canvas</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2 border-l border-slate-700 pl-4">
             <button
               onClick={() => setEditMode(!editMode)}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition-colors ${
@@ -1411,40 +1380,11 @@ export default function ApplicationDetail() {
         {/* Topology Visualization */}
         <div className="lg:col-span-3 bg-slate-900 rounded-lg overflow-hidden relative min-h-[500px] h-full">
           <div ref={containerRef} className="absolute inset-0 w-full h-full">
-            {effectiveRenderMode === 'canvas' ? (
-              <ApplicationDetailCanvas
-                nodes={nodes}
-                links={links}
-                width={dimensions.width}
-                height={dimensions.height}
-                onNodeHover={setHoveredNode}
-                onEdgeHover={(edge, position) => {
-                  if (edge) {
-                    setHoveredEdge({ edge, position });
-                  } else {
-                    setHoveredEdge(null);
-                  }
-                }}
-                comparisonResult={comparisonResult}
-              />
-            ) : (
-              <svg
-                ref={svgRef}
-                className="w-full h-full bg-slate-900"
-              />
-            )}
+            <svg
+              ref={svgRef}
+              className="w-full h-full bg-slate-900"
+            />
           </div>
-
-          {/* Render mode indicator */}
-          {isLargeGraph && (
-            <div className="absolute bottom-4 left-4 bg-slate-900/80 rounded-lg px-3 py-1.5 text-xs text-slate-300 flex items-center gap-2 pointer-events-none">
-              <span className={effectiveRenderMode === 'canvas' ? 'text-green-400' : 'text-amber-400'}>
-                {effectiveRenderMode === 'canvas' ? 'Canvas' : 'SVG'}
-              </span>
-              <span className="text-slate-500">|</span>
-              <span>{nodes.length} nodes, {links.length} edges</span>
-            </div>
-          )}
 
           {/* Baseline comparison mode indicator */}
           {comparisonResult && (
