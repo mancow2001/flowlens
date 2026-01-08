@@ -107,6 +107,16 @@ services:
       CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
       LOG_LEVEL: INFO
       LOG_FORMAT: json
+      # AI/LLM Configuration (optional) - for AI-powered layout suggestions
+      # Providers: anthropic, openai, or openai_compatible (Ollama, LM Studio, etc.)
+      # LLM_PROVIDER: "openai_compatible"
+      # LLM_API_KEY: ""  # Required for anthropic/openai, optional for local providers
+      # LLM_MODEL: "llama3.2"  # Model name (defaults: claude-sonnet-4-20250514, gpt-4o, llama3.2)
+      # LLM_BASE_URL: "http://host.docker.internal:11434/v1"  # For Ollama on Docker Desktop
+      # Note: On Linux without Docker Desktop, use extra_hosts below or network_mode: host
+    # Uncomment for Linux to access Ollama/LM Studio on host:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:
