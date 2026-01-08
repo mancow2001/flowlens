@@ -1039,6 +1039,10 @@ export default function ApplicationDetail() {
       const addedDepsSet = new Set(
         comparisonResult.dependencies_added.map(d => `${d.source_asset_id}-${d.target_asset_id}-${d.target_port}`)
       );
+      // Also create a set for added deps by target (entry point) and port - for client summary matching
+      const addedDepsToEntryPointSet = new Set(
+        comparisonResult.dependencies_added.map(d => `${d.target_asset_id}-${d.target_port}`)
+      );
       const addedMembersSet = new Set(comparisonResult.members_added.map(m => m.asset_id));
       const removedMembersSet = new Set(comparisonResult.members_removed.map(m => m.asset_id));
 
@@ -1047,7 +1051,18 @@ export default function ApplicationDetail() {
         .filter((d) => {
           const sourceId = typeof d.source === 'string' ? d.source : (d.source as SimNode).id;
           const targetId = typeof d.target === 'string' ? d.target : (d.target as SimNode).id;
-          return addedDepsSet.has(`${sourceId}-${targetId}-${d.target_port}`);
+
+          // Direct match for regular edges
+          if (addedDepsSet.has(`${sourceId}-${targetId}-${d.target_port}`)) {
+            return true;
+          }
+
+          // For client summary edges, check if there's an added dep to this entry point/port
+          if (d.is_from_client_summary) {
+            return addedDepsToEntryPointSet.has(`${targetId}-${d.target_port}`);
+          }
+
+          return false;
         })
         .attr('stroke', '#22c55e')
         .attr('stroke-width', 4)
