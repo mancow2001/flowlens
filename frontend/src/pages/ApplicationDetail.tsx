@@ -10,6 +10,8 @@ import {
   ArrowPathIcon,
   Squares2X2Icon,
   XMarkIcon,
+  LockClosedIcon,
+  LockOpenIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -130,6 +132,7 @@ export default function ApplicationDetail() {
   const [maxDepth, setMaxDepth] = useState(1);
   const [hideInfrastructureOnly, setHideInfrastructureOnly] = useState(true);
   const [editMode, setEditMode] = useState(false);
+  const [layoutFrozen, setLayoutFrozen] = useState(false);
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [comparisonResult, setComparisonResult] = useState<BaselineComparisonResult | null>(null);
@@ -571,6 +574,15 @@ export default function ApplicationDetail() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#eab308');
 
+    // In edit mode or frozen mode, fix all nodes in place
+    const shouldFreeze = editMode || layoutFrozen;
+    if (shouldFreeze) {
+      nodes.forEach(node => {
+        if (node.x !== undefined) node.fx = node.x;
+        if (node.y !== undefined) node.fy = node.y;
+      });
+    }
+
     // Create simulation with horizontal force to push members right
     const simulation = d3
       .forceSimulation<SimNode>(nodes)
@@ -580,22 +592,28 @@ export default function ApplicationDetail() {
           .forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
           .distance(120)
-          .strength(0.3) // Weaker links to allow position forces to work
+          .strength(shouldFreeze ? 0 : 0.3) // Disable forces when frozen
       )
-      .force('charge', d3.forceManyBody().strength(-300))
-      .force('collision', d3.forceCollide().radius(45))
+      .force('charge', d3.forceManyBody().strength(shouldFreeze ? 0 : -300))
+      .force('collision', d3.forceCollide().radius(45).strength(shouldFreeze ? 0 : 1))
       // Push non-fixed nodes towards the right side
       .force('x', d3.forceX<SimNode>()
         .x((d) => {
           if (d.fx !== undefined && d.fx !== null) return d.fx; // Fixed nodes stay
           return LAYOUT.memberX + 100; // Members pulled right
         })
-        .strength(0.3)
+        .strength(shouldFreeze ? 0 : 0.3)
       )
       .force('y', d3.forceY<SimNode>()
         .y(height / 2)
-        .strength(0.05) // Weak vertical centering
-      );
+        .strength(shouldFreeze ? 0 : 0.05) // Weak vertical centering
+      )
+      .alphaDecay(0.05); // Faster settling (default is 0.0228)
+
+    // Stop simulation immediately if frozen
+    if (shouldFreeze) {
+      simulation.stop();
+    }
 
     // Draw links
     const linksGroup = g.append('g').attr('class', 'links');
@@ -1276,7 +1294,7 @@ export default function ApplicationDetail() {
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
+  }, [nodes, links, dimensions, editMode, layoutFrozen, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
 
   if (isLoading || isLayoutLoading) {
     return <LoadingPage />;
@@ -1339,6 +1357,22 @@ export default function ApplicationDetail() {
             />
             Hide infrastructure-only
           </label>
+          <button
+            onClick={() => setLayoutFrozen(!layoutFrozen)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition-colors ${
+              layoutFrozen
+                ? 'bg-amber-600 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+            title={layoutFrozen ? 'Unfreeze layout (allow force simulation)' : 'Freeze layout (stop all movement)'}
+          >
+            {layoutFrozen ? (
+              <LockClosedIcon className="h-4 w-4" />
+            ) : (
+              <LockOpenIcon className="h-4 w-4" />
+            )}
+            {layoutFrozen ? 'Frozen' : 'Freeze'}
+          </button>
           <div className="flex items-center gap-2 border-l border-slate-700 pl-4">
             <button
               onClick={() => setEditMode(!editMode)}
@@ -1743,6 +1777,7 @@ export default function ApplicationDetail() {
               )}
               <p>Scroll to zoom, drag background to pan.</p>
               <p>Hover over edges to see connection details.</p>
+              <p>Use "Freeze" to stop force simulation movement.</p>
             </div>
           </Card>
         </div>
