@@ -14,31 +14,30 @@ from flowlens.schemas.ai_layout import (
 if TYPE_CHECKING:
     pass
 
-LAYOUT_PROMPT = """You are a graph layout optimizer for network topology visualization. Given a network topology, suggest optimal X,Y positions for each node.
+LAYOUT_PROMPT = """You are a graph layout calculator. Output JSON coordinates for network nodes.
 
-TOPOLOGY DATA:
-{topology_json}
+NODES:
+{nodes_list}
 
-CANVAS SIZE: {width}x{height} pixels
+EDGES:
+{edges_list}
 
-OPTIMIZATION GOALS:
-1. Minimize edge crossings for visual clarity
-2. Maintain left-to-right flow (entry points on left, downstream dependencies on right)
-3. Group related/connected nodes closer together
-4. Distribute nodes evenly to use available space
-5. Keep minimum 80px spacing between nodes to prevent overlap
+CANVAS: {width}x{height} pixels
 
-POSITIONING CONSTRAINTS:
-- Client summary nodes (hop_distance=-1): X should be between 50-100
-- Entry point nodes (hop_distance=0): X should be between 150-250
-- Each subsequent hop level should progress rightward by approximately 150-180px
-- Y positions should be between 50 and {max_y}
-- Nodes at the same hop level should be vertically distributed
+RULES:
+- X position by hop_distance: -1→75, 0→200, 1→400, 2→600, 3→800
+- Y positions: spread nodes at same hop level vertically, 80px minimum gap
+- Y range: 50 to {max_y}
+- Center nodes vertically within their hop column
 
-Return ONLY a valid JSON object (no markdown, no explanation) mapping node IDs to positions:
-{{"node_id_1": {{"x": 200, "y": 100}}, "node_id_2": {{"x": 350, "y": 150}}, ...}}
+EXAMPLE:
+Nodes: A(hop=0), B(hop=1), C(hop=1)
+Edges: A→B, A→C
+Output: {{"A":{{"x":200,"y":250}},"B":{{"x":400,"y":150}},"C":{{"x":400,"y":350}}}}
 
-Include ALL nodes from the input in your response."""
+OUTPUT: Return ONLY valid JSON mapping node IDs to {{"x":number,"y":number}}. No text, no markdown.
+
+JSON:"""
 
 
 async def suggest_layout(
@@ -47,6 +46,7 @@ async def suggest_layout(
     api_key: str,
     model: str | None = None,
     base_url: str | None = None,
+    temperature: float = 0.3,
 ) -> AIArrangeResponse:
     """Call LLM to suggest optimal layout positions.
 
@@ -56,28 +56,37 @@ async def suggest_layout(
         api_key: API key for the provider
         model: Optional model override (defaults to provider's best model)
         base_url: Custom base URL for OpenAI-compatible APIs (Ollama, LM Studio, etc.)
+        temperature: Sampling temperature (0.0-1.0, lower = more deterministic)
 
     Returns:
         AIArrangeResponse with suggested positions for each node
     """
-    topology_data = {
-        "nodes": [n.model_dump() for n in request.nodes],
-        "edges": [e.model_dump() for e in request.edges],
-    }
+    # Format nodes as a simple list for the prompt
+    nodes_list = "\n".join(
+        f"- {n.id}: name={n.name}, type={n.node_type}, hop={n.hop_distance}"
+        for n in request.nodes
+    )
+
+    # Format edges as a simple list
+    edges_list = "\n".join(
+        f"- {e.source_id} → {e.target_id}" + (f" ({e.dependency_type})" if e.dependency_type else "")
+        for e in request.edges
+    )
 
     prompt = LAYOUT_PROMPT.format(
-        topology_json=json.dumps(topology_data, indent=2),
+        nodes_list=nodes_list,
+        edges_list=edges_list,
         width=int(request.canvas_width),
         height=int(request.canvas_height),
         max_y=int(request.canvas_height - 50),
     )
 
     if provider == LLMProvider.ANTHROPIC:
-        response_text = await _call_anthropic(prompt, api_key, model)
+        response_text = await _call_anthropic(prompt, api_key, model, temperature)
     elif provider == LLMProvider.OPENAI_COMPATIBLE:
-        response_text = await _call_openai_compatible(prompt, api_key, model, base_url)
+        response_text = await _call_openai_compatible(prompt, api_key, model, base_url, temperature)
     else:
-        response_text = await _call_openai(prompt, api_key, model)
+        response_text = await _call_openai(prompt, api_key, model, temperature)
 
     # Parse JSON from response (handle potential markdown code blocks)
     positions = _parse_json_response(response_text)
@@ -118,7 +127,9 @@ def _parse_json_response(response_text: str) -> dict:
     raise ValueError(f"Could not parse JSON from LLM response: {response_text[:500]}")
 
 
-async def _call_anthropic(prompt: str, api_key: str, model: str | None = None) -> str:
+async def _call_anthropic(
+    prompt: str, api_key: str, model: str | None = None, temperature: float = 0.3
+) -> str:
     """Call Anthropic Claude API."""
     try:
         from anthropic import Anthropic
@@ -132,12 +143,15 @@ async def _call_anthropic(prompt: str, api_key: str, model: str | None = None) -
     message = client.messages.create(
         model=model or "claude-sonnet-4-20250514",
         max_tokens=4096,
+        temperature=temperature,
         messages=[{"role": "user", "content": prompt}],
     )
     return message.content[0].text
 
 
-async def _call_openai(prompt: str, api_key: str, model: str | None = None) -> str:
+async def _call_openai(
+    prompt: str, api_key: str, model: str | None = None, temperature: float = 0.3
+) -> str:
     """Call OpenAI API."""
     try:
         from openai import OpenAI
@@ -151,6 +165,7 @@ async def _call_openai(prompt: str, api_key: str, model: str | None = None) -> s
     response = client.chat.completions.create(
         model=model or "gpt-4o",
         messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
         response_format={"type": "json_object"},
     )
     return response.choices[0].message.content or "{}"
@@ -161,6 +176,7 @@ async def _call_openai_compatible(
     api_key: str,
     model: str | None = None,
     base_url: str | None = None,
+    temperature: float = 0.3,
 ) -> str:
     """Call OpenAI-compatible API (Ollama, LM Studio, etc.)."""
     try:
@@ -188,5 +204,6 @@ async def _call_openai_compatible(
     response = client.chat.completions.create(
         model=model or "llama3.2",  # Default to a common Ollama model
         messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
     )
     return response.choices[0].message.content or "{}"

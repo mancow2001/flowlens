@@ -1650,6 +1650,16 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
                 env_var="LLM_MODEL",
                 required=False,
             ),
+            FieldMetadata(
+                name="temperature",
+                label="Temperature",
+                description="Sampling temperature (0.0-1.0). Lower values are more deterministic, higher values are more creative.",
+                field_type=FieldType.FLOAT,
+                env_var="LLM_TEMPERATURE",
+                default=0.3,
+                min_value=0.0,
+                max_value=1.0,
+            ),
         ],
     ),
 ]

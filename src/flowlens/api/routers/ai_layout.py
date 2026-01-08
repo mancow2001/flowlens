@@ -39,6 +39,7 @@ async def ai_arrange_layout(
     api_key = settings.llm.api_key
     model = settings.llm.model
     base_url = settings.llm.base_url
+    temperature = settings.llm.temperature
 
     # API key is required for cloud providers, optional for local ones
     if provider_str != "openai_compatible" and not api_key:
@@ -63,7 +64,7 @@ async def ai_arrange_layout(
         )
 
     try:
-        return await suggest_layout(request, provider, api_key, model, base_url)
+        return await suggest_layout(request, provider, api_key, model, base_url, temperature)
     except ImportError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -486,6 +486,7 @@ class LLMSettings(BaseSettings):
     api_key: str | None = None
     model: str | None = None  # Optional model override (uses provider default if not set)
     base_url: str | None = None  # Custom base URL for OpenAI-compatible APIs (Ollama, LM Studio, etc.)
+    temperature: float = 0.3  # Sampling temperature (0.0-1.0, lower = more deterministic)
 
 
 class NotificationSettings(BaseSettings):
