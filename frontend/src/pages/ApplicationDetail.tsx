@@ -141,11 +141,12 @@ export default function ApplicationDetail() {
   const queryClient = useQueryClient();
 
   // Fetch saved layout for this application and hop depth
-  const { data: savedLayout } = useQuery({
+  const { data: savedLayout, isLoading: isLayoutLoading } = useQuery({
     queryKey: ['application-layout', id, maxDepth],
     queryFn: () => layoutApi.getLayout(id!, maxDepth),
     enabled: !!id,
-    staleTime: 30000, // Cache for 30 seconds
+    staleTime: 0, // Always fetch fresh data
+    refetchOnMount: 'always', // Refetch when component mounts
   });
 
   // Mutation to save positions on drag end
@@ -168,8 +169,9 @@ export default function ApplicationDetail() {
   const createGroupMutation = useMutation({
     mutationFn: (data: { name: string; color: string; asset_ids: string[] }) =>
       layoutApi.createGroup(id!, maxDepth, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
+    onSuccess: async () => {
+      // Refetch to get the new group data
+      await queryClient.refetchQueries({ queryKey: ['application-layout', id, maxDepth] });
       setSelectedNodes(new Set());
       setShowGroupModal(false);
     },
@@ -178,8 +180,9 @@ export default function ApplicationDetail() {
   // Delete asset group
   const deleteGroupMutation = useMutation({
     mutationFn: (groupId: string) => layoutApi.deleteGroup(id!, maxDepth, groupId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
+    onSuccess: async () => {
+      // Refetch to remove the deleted group
+      await queryClient.refetchQueries({ queryKey: ['application-layout', id, maxDepth] });
     },
   });
 
@@ -1133,7 +1136,7 @@ export default function ApplicationDetail() {
     };
   }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation]);
 
-  if (isLoading) {
+  if (isLoading || isLayoutLoading) {
     return <LoadingPage />;
   }
 
