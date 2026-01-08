@@ -1254,11 +1254,23 @@ export interface ApplicationDependencySummary {
   last_seen: string | null;
 }
 
+export interface ConnectionDetail {
+  source_ip: string;
+  destination_ip: string;
+  destination_port: number;
+  protocol: number;
+  direction: EdgeDirection;
+  bytes_total: number;
+  bytes_last_24h: number;
+  last_seen: string | null;
+}
+
 export interface ApplicationDependencyList {
   app_id: string;
   app_name: string;
   direction_filter: string;
   dependencies: ApplicationDependencySummary[];
+  top_connections: ConnectionDetail[];
   total_connections: number;
   total_bytes: number;
   total_bytes_24h: number;

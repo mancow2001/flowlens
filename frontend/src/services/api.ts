@@ -1781,18 +1781,14 @@ export const arcTopologyApi = {
     return data;
   },
 
-  exportAppDependencies: async (
-    appId: string,
-    direction: 'incoming' | 'outgoing' | 'both' = 'both'
-  ): Promise<void> => {
+  exportAppDependencies: async (appId: string): Promise<void> => {
     const response = await api.get(`/topology/arc/app/${appId}/dependencies/export`, {
-      params: { direction },
       responseType: 'blob',
     });
 
     // Get filename from response header or generate one
     const contentDisposition = response.headers['content-disposition'];
-    let filename = `dependencies_${direction}.csv`;
+    let filename = `connections.csv`;
     if (contentDisposition) {
       const match = contentDisposition.match(/filename="?(.+?)"?$/);
       if (match) {

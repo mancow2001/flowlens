@@ -9,7 +9,7 @@ import { XMarkIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
 import { arcTopologyApi } from '../../services/api';
 import { formatBytes } from '../../utils/arcLayout';
-import type { ApplicationDependencySummary, EdgeDirection } from '../../types';
+import type { ApplicationDependencySummary, ConnectionDetail, EdgeDirection } from '../../types';
 
 interface ApplicationDetailsSlideOverProps {
   appId: string | null;
@@ -39,6 +39,76 @@ function DirectionBadge({ direction }: { direction: EdgeDirection }) {
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${colors[direction]}`}>
       {labels[direction]}
     </span>
+  );
+}
+
+const PROTOCOL_NAMES: Record<number, string> = {
+  1: 'ICMP',
+  6: 'TCP',
+  17: 'UDP',
+};
+
+function TopConnectionsTable({
+  connections,
+  direction,
+  isLoading,
+}: {
+  connections: ConnectionDetail[];
+  direction: 'incoming' | 'outgoing';
+  isLoading: boolean;
+}) {
+  // Filter connections by direction
+  const filteredConnections = useMemo(() => {
+    const directionFilter = direction === 'incoming' ? 'in' : 'out';
+    return connections.filter((c) => c.direction === directionFilter).slice(0, 10);
+  }, [connections, direction]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  if (filteredConnections.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4">
+      <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">
+        Top {filteredConnections.length} Connections
+      </h4>
+      <div className="overflow-x-auto bg-slate-900/30 rounded-lg">
+        <table className="min-w-full divide-y divide-slate-700/50">
+          <thead>
+            <tr>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-slate-500">
+                {direction === 'incoming' ? 'Source IP' : 'Dest IP'}
+              </th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-slate-500">
+                Port
+              </th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-slate-500">
+                Data (24h)
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700/30">
+            {filteredConnections.map((conn, idx) => (
+              <tr key={idx} className="hover:bg-slate-700/20">
+                <td className="px-2 py-1.5 text-xs font-mono text-slate-300">
+                  {direction === 'incoming' ? conn.source_ip : conn.destination_ip}
+                </td>
+                <td className="px-2 py-1.5 text-xs text-slate-300">
+                  {conn.destination_port}/{PROTOCOL_NAMES[conn.protocol] || conn.protocol}
+                </td>
+                <td className="px-2 py-1.5 text-right text-xs text-slate-300">
+                  {formatBytes(conn.bytes_last_24h)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -133,17 +203,25 @@ export function ApplicationDetailsSlideOver({
     enabled: !!appId && isOpen,
   });
 
+  // Fetch both to get all top_connections for display
+  const { data: bothData } = useQuery({
+    queryKey: ['app-dependencies', appId, 'both'],
+    queryFn: () => arcTopologyApi.getAppDependencies(appId!, 'both'),
+    enabled: !!appId && isOpen,
+  });
+
   const handleExport = useCallback(async () => {
     if (!appId) return;
     setIsExporting(true);
     try {
-      await arcTopologyApi.exportAppDependencies(appId, selectedTab);
+      // Export always exports all connections (both directions)
+      await arcTopologyApi.exportAppDependencies(appId);
     } catch (error) {
       console.error('Export failed:', error);
     } finally {
       setIsExporting(false);
     }
-  }, [appId, selectedTab]);
+  }, [appId]);
 
   const displayName = useMemo(
     () => appName || incomingData?.app_name || outgoingData?.app_name || 'Application',
@@ -289,8 +367,19 @@ export function ApplicationDetailsSlideOver({
                       </Tab.Group>
                     </div>
 
-                    {/* Dependency List */}
+                    {/* Dependency List with Top Connections */}
                     <div className="flex-1 px-6 py-4 overflow-y-auto">
+                      {/* Top Connections Table */}
+                      <TopConnectionsTable
+                        connections={bothData?.top_connections ?? []}
+                        direction={selectedTab}
+                        isLoading={isLoading}
+                      />
+
+                      {/* Counterparty Summary Table */}
+                      <h4 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">
+                        {selectedTab === 'incoming' ? 'Incoming' : 'Outgoing'} Counterparties
+                      </h4>
                       <DependencyTable
                         dependencies={currentData?.dependencies ?? []}
                         isLoading={isLoading}
@@ -301,11 +390,11 @@ export function ApplicationDetailsSlideOver({
                     <div className="px-6 py-4 border-t border-slate-700 bg-slate-900/50">
                       <button
                         onClick={handleExport}
-                        disabled={isExporting || !currentData?.dependencies.length}
+                        disabled={isExporting || !bothData?.total_connections}
                         className={classNames(
                           'w-full flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium',
                           'transition-colors duration-150',
-                          currentData?.dependencies.length
+                          bothData?.total_connections
                             ? 'bg-slate-700 text-white hover:bg-slate-600'
                             : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                         )}
@@ -318,7 +407,7 @@ export function ApplicationDetailsSlideOver({
                         ) : (
                           <>
                             <ArrowDownTrayIcon className="h-4 w-4" />
-                            Export {selectedTab === 'incoming' ? 'Incoming' : 'Outgoing'} as CSV
+                            Export All Connections as CSV
                           </>
                         )}
                       </button>

@@ -14,23 +14,10 @@ interface FolderPanelProps {
   selectedFolderId?: string | null;
 }
 
-// Color options for folders
-const FOLDER_COLORS = [
-  { value: '#2563eb', label: 'Blue' },
-  { value: '#16a34a', label: 'Green' },
-  { value: '#dc2626', label: 'Red' },
-  { value: '#9333ea', label: 'Purple' },
-  { value: '#ea580c', label: 'Orange' },
-  { value: '#0891b2', label: 'Cyan' },
-  { value: '#4f46e5', label: 'Indigo' },
-  { value: '#be185d', label: 'Pink' },
-];
-
 export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelProps) {
   const queryClient = useQueryClient();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[0].value);
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -59,7 +46,6 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
       queryClient.invalidateQueries({ queryKey: ['topology', 'arc'] });
       setShowCreateForm(false);
       setNewFolderName('');
-      setNewFolderColor(FOLDER_COLORS[0].value);
       setNewFolderParentId(null);
     },
   });
@@ -98,9 +84,9 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
 
   const handleCreateFolder = () => {
     if (!newFolderName.trim()) return;
+    // Color is auto-assigned by the backend
     createFolderMutation.mutate({
       name: newFolderName.trim(),
-      color: newFolderColor,
       parent_id: newFolderParentId,
     });
   };
@@ -256,33 +242,18 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
             autoFocus
           />
 
-          <div className="flex gap-2">
-            <select
-              value={newFolderParentId || ''}
-              onChange={(e) => setNewFolderParentId(e.target.value || null)}
-              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-              <option value="">Root level</option>
-              {flatFolders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {'  '.repeat(f.depth)}{f.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={newFolderColor}
-              onChange={(e) => setNewFolderColor(e.target.value)}
-              className="w-24 px-2 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              style={{ backgroundColor: newFolderColor + '40' }}
-            >
-              {FOLDER_COLORS.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select
+            value={newFolderParentId || ''}
+            onChange={(e) => setNewFolderParentId(e.target.value || null)}
+            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">Root level</option>
+            {flatFolders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {'  '.repeat(f.depth)}{f.name}
+              </option>
+            ))}
+          </select>
 
           <div className="flex gap-2">
             <Button
