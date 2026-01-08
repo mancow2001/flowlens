@@ -21,7 +21,12 @@ def upgrade() -> None:
     # Create application_baselines table
     op.create_table(
         "application_baselines",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column(
             "application_id",
             postgresql.UUID(as_uuid=True),
@@ -35,14 +40,14 @@ def upgrade() -> None:
             "captured_at",
             sa.DateTime(timezone=True),
             nullable=False,
-            server_default=sa.func.now(),
+            server_default=sa.text("now()"),
         ),
         sa.Column("created_by", sa.String(255), nullable=True),
         sa.Column(
             "snapshot",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="{}",
+            server_default=sa.text("'{}'::jsonb"),
         ),
         sa.Column("dependency_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("member_count", sa.Integer, nullable=False, server_default="0"),
@@ -57,14 +62,13 @@ def upgrade() -> None:
             "created_at",
             sa.DateTime(timezone=True),
             nullable=False,
-            server_default=sa.func.now(),
+            server_default=sa.text("now()"),
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
             nullable=False,
-            server_default=sa.func.now(),
-            onupdate=sa.func.now(),
+            server_default=sa.text("now()"),
         ),
     )
 

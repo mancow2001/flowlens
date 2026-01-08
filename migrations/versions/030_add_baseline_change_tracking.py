@@ -24,7 +24,6 @@ def upgrade() -> None:
         sa.Column(
             "application_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("applications.id", ondelete="SET NULL"),
             nullable=True,
         ),
     )
@@ -35,9 +34,26 @@ def upgrade() -> None:
         sa.Column(
             "baseline_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("application_baselines.id", ondelete="SET NULL"),
             nullable=True,
         ),
+    )
+
+    # Create foreign key constraints
+    op.create_foreign_key(
+        "fk_change_events_application_id",
+        "change_events",
+        "applications",
+        ["application_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "fk_change_events_baseline_id",
+        "change_events",
+        "application_baselines",
+        ["baseline_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
 
     # Create indexes
@@ -57,6 +73,10 @@ def downgrade() -> None:
     # Drop indexes
     op.drop_index("ix_change_events_baseline_id", table_name="change_events")
     op.drop_index("ix_change_events_application_id", table_name="change_events")
+
+    # Drop foreign keys
+    op.drop_constraint("fk_change_events_baseline_id", "change_events", type_="foreignkey")
+    op.drop_constraint("fk_change_events_application_id", "change_events", type_="foreignkey")
 
     # Drop columns
     op.drop_column("change_events", "baseline_id")
