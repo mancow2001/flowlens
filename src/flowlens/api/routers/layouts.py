@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Path, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from flowlens.api.dependencies import DbSession, ViewerUser, AnalystUser
 from flowlens.models.asset import Application
@@ -109,8 +110,10 @@ async def save_layout(
         if data.positions is not None:
             # Convert NodePosition objects to dicts
             layout.positions = {k: {"x": v.x, "y": v.y} for k, v in data.positions.items()}
+            flag_modified(layout, "positions")
         if data.viewport is not None:
             layout.viewport = data.viewport.model_dump()
+            flag_modified(layout, "viewport")
         layout.modified_by = user.sub
     else:
         # Create new layout
@@ -173,11 +176,13 @@ async def update_positions(
     new_positions = {k: {"x": v.x, "y": v.y} for k, v in data.positions.items()}
 
     if layout:
-        # Merge with existing positions
-        existing_positions = layout.positions or {}
-        existing_positions.update(new_positions)
-        layout.positions = existing_positions
+        # Merge with existing positions - create new dict to ensure SQLAlchemy detects change
+        merged_positions = dict(layout.positions or {})
+        merged_positions.update(new_positions)
+        layout.positions = merged_positions
         layout.modified_by = user.sub
+        # Flag the JSONB column as modified to ensure SQLAlchemy saves it
+        flag_modified(layout, "positions")
     else:
         # Create new layout with these positions
         layout = ApplicationLayout(
