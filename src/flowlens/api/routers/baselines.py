@@ -306,7 +306,7 @@ async def compare_baseline_to_current(
         for asset in assets_result.scalars().all():
             asset_map[str(asset.id)] = {
                 "name": asset.display_name or asset.name,
-                "ip": asset.ip_address,
+                "ip": str(asset.ip_address) if asset.ip_address else None,
             }
 
     deps_added = []
@@ -448,7 +448,7 @@ async def compare_two_baselines(
         for asset in assets_result.scalars().all():
             asset_map[str(asset.id)] = {
                 "name": asset.display_name or asset.name,
-                "ip": asset.ip_address,
+                "ip": str(asset.ip_address) if asset.ip_address else None,
             }
 
     deps_added = []
