@@ -368,16 +368,26 @@ export function ArcTopologyRenderer({
       }
       ctx.fill(path2D);
 
-      // Stroke - highlight selected/hovered nodes
+      // Stroke - differentiate folders (black border) from applications (white border)
+      // Selected applications get yellow border, hovered get blue
       const isDimmed = isFocusDimmed || isSelectionDimmed;
-      ctx.strokeStyle = isSelected
-        ? 'rgba(234, 179, 8, 1)' // yellow for selected
-        : isHovered
-        ? 'rgba(59, 130, 246, 1)'
-        : isDimmed
-        ? 'rgba(226, 232, 240, 0.3)'
-        : 'rgba(226, 232, 240, 0.8)';
-      ctx.lineWidth = isSelected ? 3 : isHovered ? 2 : 1;
+      const isApplication = node.data.type === 'application';
+
+      let strokeColor: string;
+      if (isSelected) {
+        strokeColor = 'rgba(234, 179, 8, 1)'; // yellow for selected
+      } else if (isHovered) {
+        strokeColor = 'rgba(59, 130, 246, 1)'; // blue for hovered
+      } else if (isDimmed) {
+        // Dimmed: use faded version of the type-specific color
+        strokeColor = isApplication ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)';
+      } else {
+        // Normal state: white for applications, black for folders
+        strokeColor = isApplication ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.7)';
+      }
+
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = isSelected ? 3 : isHovered ? 2 : 1.5;
       ctx.stroke(path2D);
 
       // Labels (only for larger arcs)
@@ -681,16 +691,20 @@ export function ArcTopologyRenderer({
       {/* Legend */}
       <div className="absolute bottom-4 left-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3">
         <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Legend</div>
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-            <div className="w-3 h-3 rounded-sm bg-blue-500" />
+            <div className="w-4 h-4 rounded-sm bg-blue-500 border-2 border-black" />
             <span>Folder</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-            <div className="w-3 h-3 rounded-sm bg-blue-300" />
+            <div className="w-4 h-4 rounded-sm bg-blue-300 border-2 border-white shadow-sm" />
             <span>Application</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+            <div className="w-4 h-4 rounded-sm bg-blue-400 border-2 border-yellow-400" />
+            <span>Selected</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
             <div className="flex items-center">
               <div className="w-4 h-0.5 bg-gray-400" />
               <div className="w-0 h-0 border-t-2 border-b-2 border-l-4 border-transparent border-l-gray-400" />
