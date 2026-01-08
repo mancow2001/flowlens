@@ -140,6 +140,7 @@ export default function ApplicationDetail() {
   const transformRef = useRef<d3.ZoomTransform | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const nodesRef = useRef<SimNode[]>([]);
+  const currentPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const queryClient = useQueryClient();
 
   // Fetch saved layout for this application and hop depth
@@ -295,8 +296,10 @@ export default function ApplicationDetail() {
     const simNodes: SimNode[] = [];
     const simLinks: SimLink[] = [];
 
-    // Get saved positions from layout
+    // Get saved positions from layout, and also check current positions ref
+    // (current positions take precedence as they reflect user's recent interactions)
     const savedPositions = savedLayout?.positions || {};
+    const currentPositions = currentPositionsRef.current;
 
     // Group nodes by hop distance
     const nodesByHop: Map<number, typeof topology.nodes> = new Map();
@@ -314,20 +317,23 @@ export default function ApplicationDetail() {
 
       nodesAtHop.forEach((node, i) => {
         const defaultYPos = ySpacing * (i + 1);
+        // Check current positions first (from recent interactions), then saved positions
+        const current = currentPositions[node.id];
         const saved = savedPositions[node.id];
+        const hasPosition = current || saved;
 
-        // Use saved position if available, otherwise use auto-calculated
-        const xPos = saved?.x ?? defaultXPos;
-        const yPos = saved?.y ?? defaultYPos;
+        // Use current position > saved position > auto-calculated
+        const xPos = current?.x ?? saved?.x ?? defaultXPos;
+        const yPos = current?.y ?? saved?.y ?? defaultYPos;
 
         simNodes.push({
           ...node,
           hop_distance: hopDistance,
           x: xPos,
           y: yPos,
-          // If we have a saved position, fix both X and Y; otherwise just fix X for column layout
-          fx: saved ? xPos : defaultXPos,
-          fy: saved ? yPos : undefined,
+          // If we have any position, fix both X and Y; otherwise just fix X for column layout
+          fx: hasPosition ? xPos : defaultXPos,
+          fy: hasPosition ? yPos : undefined,
         });
       });
     });
@@ -344,10 +350,11 @@ export default function ApplicationDetail() {
         const defaultXPos = getLayoutX(-1); // -1 for client summary column
         const defaultYPos = clientYSpacing * (summaryIndex + 1);
 
-        // Check for saved position
+        // Check current positions first, then saved positions
+        const current = currentPositions[clientNodeId];
         const saved = savedPositions[clientNodeId];
-        const xPos = saved?.x ?? defaultXPos;
-        const yPos = saved?.y ?? defaultYPos;
+        const xPos = current?.x ?? saved?.x ?? defaultXPos;
+        const yPos = current?.y ?? saved?.y ?? defaultYPos;
 
         simNodes.push({
           id: clientNodeId,
@@ -1286,6 +1293,15 @@ export default function ApplicationDetail() {
     }
 
     return () => {
+      // Save current positions before cleanup so they can be restored on next render
+      const positions: Record<string, { x: number; y: number }> = {};
+      nodesRef.current.forEach(node => {
+        if (node.x !== undefined && node.y !== undefined && !isNaN(node.x) && !isNaN(node.y)) {
+          positions[node.id] = { x: node.x, y: node.y };
+        }
+      });
+      currentPositionsRef.current = positions;
+
       simulation.stop();
       simulationRef.current = null;
     };
@@ -1297,16 +1313,14 @@ export default function ApplicationDetail() {
     const currentNodes = nodesRef.current;
     if (!simulation || currentNodes.length === 0) return;
 
-    const shouldFreeze = layoutFrozen || editMode;
-
-    if (shouldFreeze) {
-      // Fix all nodes at their current positions
+    if (layoutFrozen) {
+      // Fix all nodes at their current positions (only if they have valid positions)
       currentNodes.forEach(node => {
-        if (node.x !== undefined) node.fx = node.x;
-        if (node.y !== undefined) node.fy = node.y;
+        if (node.x !== undefined && !isNaN(node.x)) node.fx = node.x;
+        if (node.y !== undefined && !isNaN(node.y)) node.fy = node.y;
       });
-      // Stop the simulation
-      simulation.stop();
+      // Restart with tiny alpha to trigger one render cycle, then it will stop
+      simulation.alpha(0.001).restart();
     } else {
       // Unfreeze: release nodes that aren't entry points or client summaries
       currentNodes.forEach(node => {
@@ -1319,7 +1333,7 @@ export default function ApplicationDetail() {
       // Restart simulation with low alpha to gently settle
       simulation.alpha(0.1).restart();
     }
-  }, [layoutFrozen, editMode]);
+  }, [layoutFrozen]);
 
   if (isLoading || isLayoutLoading) {
     return <LoadingPage />;
