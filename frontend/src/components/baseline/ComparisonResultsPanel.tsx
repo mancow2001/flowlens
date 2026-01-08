@@ -71,8 +71,8 @@ export default function ComparisonResultsPanel({ result }: ComparisonResultsPane
                 >
                   <PlusCircleIcon className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />
                   <span className="text-green-300 truncate">
-                    {dep.source_name || dep.source_asset_id.slice(0, 8)} →{' '}
-                    {dep.target_name || dep.target_asset_id.slice(0, 8)}
+                    {dep.source_ip || dep.source_name || dep.source_asset_id.slice(0, 8)} →{' '}
+                    {dep.target_ip || dep.target_name || dep.target_asset_id.slice(0, 8)}
                     <span className="text-green-400/70 ml-1">
                       :{dep.target_port}/{getProtocolName(dep.protocol)}
                     </span>
@@ -86,8 +86,8 @@ export default function ComparisonResultsPanel({ result }: ComparisonResultsPane
                 >
                   <MinusCircleIcon className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
                   <span className="text-red-300 truncate">
-                    {dep.source_name || dep.source_asset_id.slice(0, 8)} →{' '}
-                    {dep.target_name || dep.target_asset_id.slice(0, 8)}
+                    {dep.source_ip || dep.source_name || dep.source_asset_id.slice(0, 8)} →{' '}
+                    {dep.target_ip || dep.target_name || dep.target_asset_id.slice(0, 8)}
                     <span className="text-red-400/70 ml-1">
                       :{dep.target_port}/{getProtocolName(dep.protocol)}
                     </span>

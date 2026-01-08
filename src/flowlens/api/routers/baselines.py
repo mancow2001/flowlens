@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from flowlens.api.dependencies import DbSession, ViewerUser, AnalystUser
-from flowlens.models.asset import Application, ApplicationMember, EntryPoint
+from flowlens.models.asset import Application, ApplicationMember, Asset, EntryPoint
 from flowlens.models.baseline import ApplicationBaseline
 from flowlens.models.dependency import Dependency
 from flowlens.models.layout import ApplicationLayout
@@ -283,30 +283,68 @@ async def compare_baseline_to_current(
     baseline_deps = {d["id"]: d for d in baseline.snapshot.get("dependencies", [])}
     current_deps = {d["id"]: d for d in current_snapshot["dependencies"]}
 
+    # Find changed dependencies and collect all asset IDs we need to look up
+    added_dep_ids = set(current_deps.keys()) - set(baseline_deps.keys())
+    removed_dep_ids = set(baseline_deps.keys()) - set(current_deps.keys())
+
+    asset_ids_to_lookup: set[uuid.UUID] = set()
+    for dep_id in added_dep_ids:
+        dep = current_deps[dep_id]
+        asset_ids_to_lookup.add(uuid.UUID(dep["source_asset_id"]))
+        asset_ids_to_lookup.add(uuid.UUID(dep["target_asset_id"]))
+    for dep_id in removed_dep_ids:
+        dep = baseline_deps[dep_id]
+        asset_ids_to_lookup.add(uuid.UUID(dep["source_asset_id"]))
+        asset_ids_to_lookup.add(uuid.UUID(dep["target_asset_id"]))
+
+    # Look up asset names and IPs
+    asset_map: dict[str, dict[str, str | None]] = {}
+    if asset_ids_to_lookup:
+        assets_result = await db.execute(
+            select(Asset).where(Asset.id.in_(asset_ids_to_lookup))
+        )
+        for asset in assets_result.scalars().all():
+            asset_map[str(asset.id)] = {
+                "name": asset.display_name or asset.name,
+                "ip": asset.ip_address,
+            }
+
     deps_added = []
     deps_removed = []
 
-    for dep_id, dep in current_deps.items():
-        if dep_id not in baseline_deps:
-            deps_added.append(DependencyChange(
-                id=uuid.UUID(dep_id),
-                source_asset_id=uuid.UUID(dep["source_asset_id"]),
-                target_asset_id=uuid.UUID(dep["target_asset_id"]),
-                target_port=dep["target_port"],
-                protocol=dep["protocol"],
-                change_type="added",
-            ))
+    for dep_id in added_dep_ids:
+        dep = current_deps[dep_id]
+        source_info = asset_map.get(dep["source_asset_id"], {})
+        target_info = asset_map.get(dep["target_asset_id"], {})
+        deps_added.append(DependencyChange(
+            id=uuid.UUID(dep_id),
+            source_asset_id=uuid.UUID(dep["source_asset_id"]),
+            source_name=source_info.get("name"),
+            source_ip=source_info.get("ip"),
+            target_asset_id=uuid.UUID(dep["target_asset_id"]),
+            target_name=target_info.get("name"),
+            target_ip=target_info.get("ip"),
+            target_port=dep["target_port"],
+            protocol=dep["protocol"],
+            change_type="added",
+        ))
 
-    for dep_id, dep in baseline_deps.items():
-        if dep_id not in current_deps:
-            deps_removed.append(DependencyChange(
-                id=uuid.UUID(dep_id),
-                source_asset_id=uuid.UUID(dep["source_asset_id"]),
-                target_asset_id=uuid.UUID(dep["target_asset_id"]),
-                target_port=dep["target_port"],
-                protocol=dep["protocol"],
-                change_type="removed",
-            ))
+    for dep_id in removed_dep_ids:
+        dep = baseline_deps[dep_id]
+        source_info = asset_map.get(dep["source_asset_id"], {})
+        target_info = asset_map.get(dep["target_asset_id"], {})
+        deps_removed.append(DependencyChange(
+            id=uuid.UUID(dep_id),
+            source_asset_id=uuid.UUID(dep["source_asset_id"]),
+            source_name=source_info.get("name"),
+            source_ip=source_info.get("ip"),
+            target_asset_id=uuid.UUID(dep["target_asset_id"]),
+            target_name=target_info.get("name"),
+            target_ip=target_info.get("ip"),
+            target_port=dep["target_port"],
+            protocol=dep["protocol"],
+            change_type="removed",
+        ))
 
     # Compare entry points
     baseline_eps = {f"{ep['asset_id']}:{ep['port']}:{ep['protocol']}": ep
@@ -387,30 +425,68 @@ async def compare_two_baselines(
     baseline_a_deps = {d["id"]: d for d in baseline_a.snapshot.get("dependencies", [])}
     baseline_b_deps = {d["id"]: d for d in baseline_b.snapshot.get("dependencies", [])}
 
+    # Find changed dependencies and collect all asset IDs we need to look up
+    added_dep_ids = set(baseline_b_deps.keys()) - set(baseline_a_deps.keys())
+    removed_dep_ids = set(baseline_a_deps.keys()) - set(baseline_b_deps.keys())
+
+    asset_ids_to_lookup: set[uuid.UUID] = set()
+    for dep_id in added_dep_ids:
+        dep = baseline_b_deps[dep_id]
+        asset_ids_to_lookup.add(uuid.UUID(dep["source_asset_id"]))
+        asset_ids_to_lookup.add(uuid.UUID(dep["target_asset_id"]))
+    for dep_id in removed_dep_ids:
+        dep = baseline_a_deps[dep_id]
+        asset_ids_to_lookup.add(uuid.UUID(dep["source_asset_id"]))
+        asset_ids_to_lookup.add(uuid.UUID(dep["target_asset_id"]))
+
+    # Look up asset names and IPs
+    asset_map: dict[str, dict[str, str | None]] = {}
+    if asset_ids_to_lookup:
+        assets_result = await db.execute(
+            select(Asset).where(Asset.id.in_(asset_ids_to_lookup))
+        )
+        for asset in assets_result.scalars().all():
+            asset_map[str(asset.id)] = {
+                "name": asset.display_name or asset.name,
+                "ip": asset.ip_address,
+            }
+
     deps_added = []
     deps_removed = []
 
-    for dep_id, dep in baseline_b_deps.items():
-        if dep_id not in baseline_a_deps:
-            deps_added.append(DependencyChange(
-                id=uuid.UUID(dep_id),
-                source_asset_id=uuid.UUID(dep["source_asset_id"]),
-                target_asset_id=uuid.UUID(dep["target_asset_id"]),
-                target_port=dep["target_port"],
-                protocol=dep["protocol"],
-                change_type="added",
-            ))
+    for dep_id in added_dep_ids:
+        dep = baseline_b_deps[dep_id]
+        source_info = asset_map.get(dep["source_asset_id"], {})
+        target_info = asset_map.get(dep["target_asset_id"], {})
+        deps_added.append(DependencyChange(
+            id=uuid.UUID(dep_id),
+            source_asset_id=uuid.UUID(dep["source_asset_id"]),
+            source_name=source_info.get("name"),
+            source_ip=source_info.get("ip"),
+            target_asset_id=uuid.UUID(dep["target_asset_id"]),
+            target_name=target_info.get("name"),
+            target_ip=target_info.get("ip"),
+            target_port=dep["target_port"],
+            protocol=dep["protocol"],
+            change_type="added",
+        ))
 
-    for dep_id, dep in baseline_a_deps.items():
-        if dep_id not in baseline_b_deps:
-            deps_removed.append(DependencyChange(
-                id=uuid.UUID(dep_id),
-                source_asset_id=uuid.UUID(dep["source_asset_id"]),
-                target_asset_id=uuid.UUID(dep["target_asset_id"]),
-                target_port=dep["target_port"],
-                protocol=dep["protocol"],
-                change_type="removed",
-            ))
+    for dep_id in removed_dep_ids:
+        dep = baseline_a_deps[dep_id]
+        source_info = asset_map.get(dep["source_asset_id"], {})
+        target_info = asset_map.get(dep["target_asset_id"], {})
+        deps_removed.append(DependencyChange(
+            id=uuid.UUID(dep_id),
+            source_asset_id=uuid.UUID(dep["source_asset_id"]),
+            source_name=source_info.get("name"),
+            source_ip=source_info.get("ip"),
+            target_asset_id=uuid.UUID(dep["target_asset_id"]),
+            target_name=target_info.get("name"),
+            target_ip=target_info.get("ip"),
+            target_port=dep["target_port"],
+            protocol=dep["protocol"],
+            change_type="removed",
+        ))
 
     # Compare entry points
     eps_a = {f"{ep['asset_id']}:{ep['port']}:{ep['protocol']}": ep

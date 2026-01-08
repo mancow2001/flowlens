@@ -1443,8 +1443,10 @@ export interface DependencyChange {
   id: string;
   source_asset_id: string;
   source_name: string | null;
+  source_ip: string | null;
   target_asset_id: string;
   target_name: string | null;
+  target_ip: string | null;
   target_port: number;
   protocol: number;
   change_type: 'added' | 'removed';

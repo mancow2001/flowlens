@@ -109,8 +109,10 @@ class DependencyChange(BaseModel):
     id: UUID
     source_asset_id: UUID
     source_name: str | None = None
+    source_ip: str | None = None
     target_asset_id: UUID
     target_name: str | None = None
+    target_ip: str | None = None
     target_port: int
     protocol: int
     change_type: str  # "added", "removed"
