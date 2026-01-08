@@ -46,14 +46,16 @@ async def suggest_layout(
     provider: LLMProvider,
     api_key: str,
     model: str | None = None,
+    base_url: str | None = None,
 ) -> AIArrangeResponse:
     """Call LLM to suggest optimal layout positions.
 
     Args:
         request: The layout arrangement request with nodes, edges, and canvas size
-        provider: The LLM provider to use (anthropic or openai)
+        provider: The LLM provider to use (anthropic, openai, or openai_compatible)
         api_key: API key for the provider
         model: Optional model override (defaults to provider's best model)
+        base_url: Custom base URL for OpenAI-compatible APIs (Ollama, LM Studio, etc.)
 
     Returns:
         AIArrangeResponse with suggested positions for each node
@@ -72,6 +74,8 @@ async def suggest_layout(
 
     if provider == LLMProvider.ANTHROPIC:
         response_text = await _call_anthropic(prompt, api_key, model)
+    elif provider == LLMProvider.OPENAI_COMPATIBLE:
+        response_text = await _call_openai_compatible(prompt, api_key, model, base_url)
     else:
         response_text = await _call_openai(prompt, api_key, model)
 
@@ -148,5 +152,41 @@ async def _call_openai(prompt: str, api_key: str, model: str | None = None) -> s
         model=model or "gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
+    )
+    return response.choices[0].message.content or "{}"
+
+
+async def _call_openai_compatible(
+    prompt: str,
+    api_key: str,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> str:
+    """Call OpenAI-compatible API (Ollama, LM Studio, etc.)."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise ImportError(
+            "openai package is required for OpenAI-compatible provider. "
+            "Install with: pip install openai"
+        )
+
+    if not base_url:
+        raise ValueError(
+            "base_url is required for OpenAI-compatible provider. "
+            "Set it in System Settings (e.g., http://localhost:11434/v1 for Ollama)."
+        )
+
+    # For local providers, api_key might be optional or a placeholder
+    client = OpenAI(
+        api_key=api_key or "not-needed",
+        base_url=base_url,
+    )
+
+    # Note: Some local models may not support response_format, so we don't use it here
+    # The prompt already instructs the model to return JSON only
+    response = client.chat.completions.create(
+        model=model or "llama3.2",  # Default to a common Ollama model
+        messages=[{"role": "user", "content": prompt}],
     )
     return response.choices[0].message.content or "{}"
