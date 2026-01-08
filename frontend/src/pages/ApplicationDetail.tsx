@@ -672,6 +672,12 @@ export default function ApplicationDetail() {
     const nodePositionMap = new Map<string, SimNode>();
     nodes.forEach(n => nodePositionMap.set(n.id, n));
 
+    // Create a set of all grouped asset IDs for quick lookup
+    const groupedAssetIds = new Set<string>();
+    assetGroups.forEach(group => {
+      group.asset_ids.forEach(id => groupedAssetIds.add(id));
+    });
+
     // Function to calculate group bounds based on member nodes
     const calculateGroupBounds = (group: { asset_ids: string[] }) => {
       const memberNodes = group.asset_ids
@@ -691,6 +697,60 @@ export default function ApplicationDetail() {
         height: Math.max(...ys) - Math.min(...ys) + padding * 2,
       };
     };
+
+    // Push non-member nodes outside of group bounds
+    const pushNonMembersOutsideGroups = () => {
+      assetGroups.forEach(group => {
+        const bounds = calculateGroupBounds(group);
+        if (!bounds) return;
+
+        const groupMemberIds = new Set(group.asset_ids);
+
+        nodes.forEach(node => {
+          // Skip if node is a member of this group or if position is undefined
+          if (groupMemberIds.has(node.id) || node.x === undefined || node.y === undefined) return;
+
+          const nodeX = node.x;
+          const nodeY = node.y;
+          const nodeRadius = node.is_entry_point ? 18 : (node.is_client_summary ? 30 : 14);
+
+          // Check if node is inside the group bounds (with some margin)
+          const margin = nodeRadius + 10;
+          const insideX = nodeX > bounds.x - margin && nodeX < bounds.x + bounds.width + margin;
+          const insideY = nodeY > bounds.y - margin && nodeY < bounds.y + bounds.height + margin;
+
+          if (insideX && insideY) {
+            // Calculate distances to each edge
+            const distToLeft = nodeX - (bounds.x - margin);
+            const distToRight = (bounds.x + bounds.width + margin) - nodeX;
+            const distToTop = nodeY - (bounds.y - margin);
+            const distToBottom = (bounds.y + bounds.height + margin) - nodeY;
+
+            // Find the shortest distance and push in that direction
+            const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
+
+            if (minDist === distToLeft) {
+              node.x = bounds.x - margin - nodeRadius;
+              node.fx = node.x;
+            } else if (minDist === distToRight) {
+              node.x = bounds.x + bounds.width + margin + nodeRadius;
+              node.fx = node.x;
+            } else if (minDist === distToTop) {
+              node.y = bounds.y - margin - nodeRadius;
+              node.fy = node.y;
+            } else {
+              node.y = bounds.y + bounds.height + margin + nodeRadius;
+              node.fy = node.y;
+            }
+          }
+        });
+      });
+    };
+
+    // Apply collision avoidance once at start
+    if (assetGroups.length > 0) {
+      pushNonMembersOutsideGroups();
+    }
 
     const groupElements = groupsGroup
       .selectAll<SVGGElement, typeof assetGroups[number]>('g.asset-group')
