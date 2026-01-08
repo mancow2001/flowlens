@@ -38,6 +38,15 @@ class ChangeType(str, Enum):
     NEW_EXTERNAL_CONNECTION = "new_external_connection"
     CRITICAL_PATH_CHANGE = "critical_path_change"
 
+    # Baseline deviation changes
+    BASELINE_DEPENDENCY_ADDED = "baseline_dependency_added"
+    BASELINE_DEPENDENCY_REMOVED = "baseline_dependency_removed"
+    BASELINE_TRAFFIC_DEVIATION = "baseline_traffic_deviation"
+    BASELINE_ENTRY_POINT_ADDED = "baseline_entry_point_added"
+    BASELINE_ENTRY_POINT_REMOVED = "baseline_entry_point_removed"
+    BASELINE_MEMBER_ADDED = "baseline_member_added"
+    BASELINE_MEMBER_REMOVED = "baseline_member_removed"
+
 
 class ChangeEvent(Base, UUIDMixin, TimestampMixin):
     """Record of a detected change in the dependency graph.
@@ -94,6 +103,21 @@ class ChangeEvent(Base, UUIDMixin, TimestampMixin):
 
     target_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+
+    # For baseline-related changes
+    application_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("applications.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    baseline_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("application_baselines.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
