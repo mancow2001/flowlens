@@ -79,6 +79,12 @@ scale = [
     "flowlens[kafka,redis]",
 ]
 
+# AI/LLM features (for AI-powered layout suggestions)
+ai = [
+    "anthropic>=0.18.0",
+    "openai>=1.12.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=7.4.0",
@@ -103,7 +109,7 @@ docs = [
 ]
 
 all = [
-    "flowlens[scale,dev,docs]",
+    "flowlens[scale,ai,dev,docs]",
 ]
 
 [project.scripts]
@@ -192,6 +198,8 @@ module = [
     "maxminddb",
     "aiokafka",
     "confluent_kafka",
+    "anthropic",
+    "openai",
 ]
 ignore_missing_imports = true
 

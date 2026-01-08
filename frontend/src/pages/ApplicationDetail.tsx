@@ -12,6 +12,7 @@ import {
   XMarkIcon,
   LockClosedIcon,
   LockOpenIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -136,6 +137,9 @@ export default function ApplicationDetail() {
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [comparisonResult, setComparisonResult] = useState<BaselineComparisonResult | null>(null);
+  const [isArranging, setIsArranging] = useState(false);
+  const [showArrangeConfirm, setShowArrangeConfirm] = useState(false);
+  const [preArrangePositions, setPreArrangePositions] = useState<Record<string, { x: number; y: number }> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const transformRef = useRef<d3.ZoomTransform | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
@@ -463,6 +467,111 @@ export default function ApplicationDetail() {
 
     return { nodes: simNodes, links: simLinks };
   }, [topology, dimensions, maxDepth, hideInfrastructureOnly, savedLayout]);
+
+  // AI-powered layout arrangement handlers
+  const handleAIArrange = useCallback(async () => {
+    if (!id || !dimensions.width || !dimensions.height) return;
+    setIsArranging(true);
+
+    // Save current positions for potential revert
+    const currentPositions: Record<string, { x: number; y: number }> = {};
+    nodesRef.current.forEach(node => {
+      if (node.x !== undefined && node.y !== undefined) {
+        currentPositions[node.id] = { x: node.x, y: node.y };
+      }
+    });
+    setPreArrangePositions(currentPositions);
+
+    try {
+      // Prepare data for LLM using current nodes from ref
+      const currentNodes = nodesRef.current;
+      const nodeData = currentNodes.map(n => ({
+        id: n.id,
+        name: n.display_name || n.name,
+        node_type: n.is_entry_point ? 'entry_point' : n.is_client_summary ? 'client_summary' : n.is_external ? 'external' : 'member',
+        hop_distance: n.hop_distance ?? 0,
+        is_critical: n.is_critical,
+      }));
+
+      // Build edge data from the links array
+      const edgeData = links.map(l => {
+        const sourceId = typeof l.source === 'object' && l.source !== null ? (l.source as SimNode).id : String(l.source);
+        const targetId = typeof l.target === 'object' && l.target !== null ? (l.target as SimNode).id : String(l.target);
+        return {
+          source_id: sourceId,
+          target_id: targetId,
+          dependency_type: l.dependency_type,
+        };
+      });
+
+      const result = await layoutApi.aiArrange(id, maxDepth, {
+        nodes: nodeData,
+        edges: edgeData,
+        canvas_width: dimensions.width,
+        canvas_height: dimensions.height,
+      });
+
+      // Apply new positions with animation
+      nodesRef.current.forEach(node => {
+        const newPos = result.positions[node.id];
+        if (newPos) {
+          node.fx = newPos.x;
+          node.fy = newPos.y;
+        }
+      });
+
+      // Restart simulation briefly to animate
+      simulationRef.current?.alpha(0.3).restart();
+
+      // Show confirmation dialog
+      setShowArrangeConfirm(true);
+    } catch (error) {
+      console.error('AI arrange failed:', error);
+      // Revert on error
+      if (currentPositions && Object.keys(currentPositions).length > 0) {
+        nodesRef.current.forEach(node => {
+          const oldPos = currentPositions[node.id];
+          if (oldPos) {
+            node.fx = oldPos.x;
+            node.fy = oldPos.y;
+          }
+        });
+        simulationRef.current?.alpha(0.3).restart();
+      }
+      setPreArrangePositions(null);
+    } finally {
+      setIsArranging(false);
+    }
+  }, [id, maxDepth, links, dimensions]);
+
+  const handleKeepArrangement = useCallback(async () => {
+    // Save the new positions to backend
+    const positions: Record<string, NodePosition> = {};
+    nodesRef.current.forEach(node => {
+      if (node.fx !== undefined && node.fx !== null && node.fy !== undefined && node.fy !== null) {
+        positions[node.id] = { x: node.fx, y: node.fy };
+      }
+    });
+    await savePositionsMutation.mutateAsync(positions);
+    setShowArrangeConfirm(false);
+    setPreArrangePositions(null);
+  }, [savePositionsMutation]);
+
+  const handleDiscardArrangement = useCallback(() => {
+    // Revert to previous positions
+    if (preArrangePositions) {
+      nodesRef.current.forEach(node => {
+        const oldPos = preArrangePositions[node.id];
+        if (oldPos) {
+          node.fx = oldPos.x;
+          node.fy = oldPos.y;
+        }
+      });
+      simulationRef.current?.alpha(0.3).restart();
+    }
+    setShowArrangeConfirm(false);
+    setPreArrangePositions(null);
+  }, [preArrangePositions]);
 
   // Handle container resize
   useEffect(() => {
@@ -1449,6 +1558,17 @@ export default function ApplicationDetail() {
                 Group
               </button>
             )}
+            {editMode && (
+              <button
+                onClick={handleAIArrange}
+                disabled={isArranging}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+                title="Use AI to suggest optimal arrangement"
+              >
+                <SparklesIcon className={`h-4 w-4 ${isArranging ? 'animate-pulse' : ''}`} />
+                {isArranging ? 'Arranging...' : 'Suggest Arrangement'}
+              </button>
+            )}
             {editMode && savedLayout && (
               <button
                 onClick={() => resetLayoutMutation.mutate()}
@@ -1829,6 +1949,37 @@ export default function ApplicationDetail() {
         onSave={handleCreateGroup}
         title="Create Asset Group"
       />
+
+      {/* AI Arrangement Confirmation Dialog */}
+      {showArrangeConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 max-w-sm shadow-xl border border-slate-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 rounded-full bg-indigo-600/20">
+                <SparklesIcon className="h-6 w-6 text-indigo-400" />
+              </div>
+              <h3 className="text-lg font-medium text-white">Keep this arrangement?</h3>
+            </div>
+            <p className="text-slate-400 text-sm mb-6">
+              The AI has suggested a new layout for your topology. Would you like to keep it or discard the changes?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={handleDiscardArrangement}
+                className="px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+              >
+                Discard
+              </button>
+              <button
+                onClick={handleKeepArrangement}
+                className="px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+              >
+                Keep
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
