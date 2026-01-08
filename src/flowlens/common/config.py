@@ -482,9 +482,10 @@ class LLMSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
-    provider: Literal["anthropic", "openai"] = "anthropic"
+    provider: Literal["anthropic", "openai", "openai_compatible"] = "anthropic"
     api_key: str | None = None
     model: str | None = None  # Optional model override (uses provider default if not set)
+    base_url: str | None = None  # Custom base URL for OpenAI-compatible APIs (Ollama, LM Studio, etc.)
 
 
 class NotificationSettings(BaseSettings):

@@ -23,8 +23,8 @@ async def ai_arrange_layout(
     """Use LLM to suggest optimal node arrangement for the topology.
 
     This endpoint sends the current topology structure to a configured LLM
-    (Anthropic Claude or OpenAI GPT) and returns suggested X,Y positions
-    for each node that optimize for:
+    (Anthropic Claude, OpenAI GPT, or OpenAI-compatible local models like Ollama/LM Studio)
+    and returns suggested X,Y positions for each node that optimize for:
     - Minimal edge crossings
     - Clear hierarchical left-to-right flow
     - Logical grouping of related nodes
@@ -38,11 +38,20 @@ async def ai_arrange_layout(
     provider_str = settings.llm.provider
     api_key = settings.llm.api_key
     model = settings.llm.model
+    base_url = settings.llm.base_url
 
-    if not api_key:
+    # API key is required for cloud providers, optional for local ones
+    if provider_str != "openai_compatible" and not api_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="LLM API key not configured. Set it in System Settings → AI/LLM Configuration.",
+        )
+
+    # Base URL is required for openai_compatible provider
+    if provider_str == "openai_compatible" and not base_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Base URL is required for OpenAI-compatible provider. Set it in System Settings → AI/LLM Configuration.",
         )
 
     try:
@@ -50,11 +59,11 @@ async def ai_arrange_layout(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid LLM provider: {provider_str}. Must be 'anthropic' or 'openai'.",
+            detail=f"Invalid LLM provider: {provider_str}. Must be 'anthropic', 'openai', or 'openai_compatible'.",
         )
 
     try:
-        return await suggest_layout(request, provider, api_key, model)
+        return await suggest_layout(request, provider, api_key, model, base_url)
     except ImportError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

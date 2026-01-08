@@ -10,6 +10,7 @@ class LLMProvider(str, Enum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    OPENAI_COMPATIBLE = "openai_compatible"  # Ollama, LM Studio, etc.
 
 
 class NodeInfo(BaseModel):
