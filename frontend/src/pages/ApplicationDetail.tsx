@@ -695,6 +695,67 @@ export default function ApplicationDetail() {
       .join('g')
       .attr('class', 'asset-group');
 
+    // Track group drag state
+    let groupDragStartPositions: Map<string, { x: number; y: number }> = new Map();
+
+    // Add drag behavior to groups in edit mode
+    if (editMode) {
+      groupElements.call(
+        d3.drag<SVGGElement, typeof assetGroups[number]>()
+          .on('start', (event, d) => {
+            event.sourceEvent.stopPropagation();
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+
+            // Record starting positions of all member nodes
+            groupDragStartPositions.clear();
+            d.asset_ids.forEach(assetId => {
+              const node = nodePositionMap.get(assetId);
+              if (node && node.x !== undefined && node.y !== undefined) {
+                groupDragStartPositions.set(assetId, { x: node.x, y: node.y });
+              }
+            });
+          })
+          .on('drag', (event, d) => {
+            // Calculate delta from drag start
+            const dx = event.dx;
+            const dy = event.dy;
+
+            // Move all member nodes by delta
+            d.asset_ids.forEach(assetId => {
+              const node = nodePositionMap.get(assetId);
+              if (node) {
+                node.x = (node.x ?? 0) + dx;
+                node.y = (node.y ?? 0) + dy;
+                node.fx = node.x;
+                node.fy = node.y;
+              }
+            });
+
+            // Force simulation tick to update positions
+            simulation.alpha(0.3).restart();
+          })
+          .on('end', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0);
+
+            // Collect all node positions for saving
+            const positionsToSave: Record<string, { x: number; y: number }> = {};
+            d.asset_ids.forEach(assetId => {
+              const node = nodePositionMap.get(assetId);
+              if (node && node.fx != null && node.fy != null) {
+                positionsToSave[assetId] = { x: node.fx, y: node.fy };
+              }
+            });
+
+            // Save positions
+            if (Object.keys(positionsToSave).length > 0) {
+              savePositionsMutation.mutate(positionsToSave);
+            }
+
+            groupDragStartPositions.clear();
+          })
+      );
+    }
+
     // Group background rectangles
     groupElements
       .append('rect')
@@ -704,7 +765,8 @@ export default function ApplicationDetail() {
       .attr('fill', d => d.color + '15')
       .attr('stroke', d => d.color)
       .attr('stroke-width', 2)
-      .attr('stroke-dasharray', '4,2');
+      .attr('stroke-dasharray', editMode ? '4,2' : 'none')
+      .attr('cursor', editMode ? 'move' : 'default');
 
     // Group labels
     groupElements
@@ -713,6 +775,7 @@ export default function ApplicationDetail() {
       .attr('fill', d => d.color)
       .attr('font-size', 12)
       .attr('font-weight', 'bold')
+      .attr('pointer-events', 'none')
       .text(d => d.name);
 
     // Delete buttons for groups (only in edit mode)
@@ -1068,7 +1131,7 @@ export default function ApplicationDetail() {
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation]);
+  }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation]);
 
   if (isLoading) {
     return <LoadingPage />;
