@@ -148,13 +148,11 @@ export default function ApplicationDetail() {
   });
 
   // Mutation to save positions on drag end
+  // Note: We don't invalidate the query on success to avoid re-rendering the view
+  // The local node positions are already updated via D3 drag
   const savePositionsMutation = useMutation({
     mutationFn: (positions: Record<string, NodePosition>) =>
       layoutApi.updatePositions(id!, maxDepth, { positions }),
-    onSuccess: () => {
-      // Invalidate layout query to refresh
-      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
-    },
   });
 
   // Reset layout to auto-calculated positions
@@ -525,6 +523,11 @@ export default function ApplicationDetail() {
     // Main group for zoom/pan
     const g = svg.append('g');
 
+    // Click on background clears edge tooltip
+    svg.on('click', () => {
+      setHoveredEdge(null);
+    });
+
     // Define arrow markers
     const defs = svg.append('defs');
     defs
@@ -610,7 +613,7 @@ export default function ApplicationDetail() {
       )
       .style('cursor', 'pointer')
       .on('mouseenter', function (event, d) {
-        d3.select(this).attr('stroke-width', 4).attr('stroke-opacity', 1);
+        d3.select(this).attr('stroke-width', 6).attr('stroke-opacity', 1);
         setHoveredEdge({
           edge: d,
           position: { x: event.clientX, y: event.clientY },
@@ -626,6 +629,10 @@ export default function ApplicationDetail() {
           .attr('stroke-width', d.is_from_client_summary ? 3 : 2)
           .attr('stroke-opacity', 0.6);
         setHoveredEdge(null);
+      })
+      .on('click', function (event) {
+        // Prevent click from bubbling to SVG background
+        event.stopPropagation();
       });
 
     // Port labels on edges
@@ -789,6 +796,8 @@ export default function ApplicationDetail() {
           })
       )
       .on('click', function (event, d) {
+        // Prevent click from bubbling to SVG background
+        event.stopPropagation();
         // Handle node selection in edit mode
         handleNodeClick(d.id, event);
       })
