@@ -477,6 +477,16 @@ class ClassificationSettings(BaseSettings):
     ephemeral_port_min: int = Field(default=32768, ge=1024, le=65535)
 
 
+class LLMSettings(BaseSettings):
+    """LLM/AI configuration for AI-powered features."""
+
+    model_config = SettingsConfigDict(env_prefix="LLM_")
+
+    provider: Literal["anthropic", "openai"] = "anthropic"
+    api_key: str | None = None
+    model: str | None = None  # Optional model override (uses provider default if not set)
+
+
 class NotificationSettings(BaseSettings):
     """Notification system configuration."""
 
@@ -531,6 +541,7 @@ class Settings(BaseSettings):
     saml: SAMLSettings = Field(default_factory=SAMLSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
 
     @property
     def is_production(self) -> bool:

@@ -1609,6 +1609,41 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
             ),
         ],
     ),
+    SettingsSectionInfo(
+        key="llm",
+        name="AI/LLM Configuration",
+        description="Configure AI-powered features like layout suggestions",
+        icon="SparklesIcon",
+        restart_required=False,
+        fields=[
+            FieldMetadata(
+                name="provider",
+                label="LLM Provider",
+                description="Select the AI provider for layout suggestions",
+                field_type=FieldType.SELECT,
+                options=["anthropic", "openai"],
+                env_var="LLM_PROVIDER",
+                default="anthropic",
+            ),
+            FieldMetadata(
+                name="api_key",
+                label="API Key",
+                description="Your API key for the selected provider",
+                field_type=FieldType.SECRET,
+                env_var="LLM_API_KEY",
+                required=False,
+                is_secret=True,
+            ),
+            FieldMetadata(
+                name="model",
+                label="Model (Optional)",
+                description="Override the default model (leave empty to use provider default)",
+                field_type=FieldType.STRING,
+                env_var="LLM_MODEL",
+                required=False,
+            ),
+        ],
+    ),
 ]
 
 # Discovery provider sections are hidden from System Settings

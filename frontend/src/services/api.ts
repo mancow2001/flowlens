@@ -1941,6 +1941,36 @@ export const layoutApi = {
   ): Promise<void> => {
     await api.delete(`/applications/${applicationId}/layouts/${hopDepth}/groups/${groupId}`);
   },
+
+  /**
+   * Use AI/LLM to suggest optimal node arrangement
+   */
+  aiArrange: async (
+    applicationId: string,
+    hopDepth: number,
+    data: {
+      nodes: Array<{
+        id: string;
+        name: string;
+        node_type: string;
+        hop_distance: number;
+        is_critical: boolean;
+      }>;
+      edges: Array<{
+        source_id: string;
+        target_id: string;
+        dependency_type: string | null;
+      }>;
+      canvas_width: number;
+      canvas_height: number;
+    }
+  ): Promise<{ positions: Record<string, { x: number; y: number }> }> => {
+    const response = await api.post<{ positions: Record<string, { x: number; y: number }> }>(
+      `/applications/${applicationId}/layouts/${hopDepth}/ai-arrange`,
+      data
+    );
+    return response.data;
+  },
 };
 
 // Application Baselines API
