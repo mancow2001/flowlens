@@ -65,6 +65,7 @@ async def get_layout(
     """Get layout for an application at a specific hop depth.
 
     Returns null if no layout has been saved yet.
+    Groups from lower hop depths are automatically inherited.
     """
     await get_application_or_404(db, application_id)
 
@@ -77,9 +78,62 @@ async def get_layout(
     layout = result.scalar_one_or_none()
 
     if not layout:
+        # Even if no layout at this depth, check for inherited groups from lower depths
+        inherited_groups = await _get_inherited_groups(db, application_id, hop_depth)
+        if inherited_groups:
+            # Return a minimal response with just the inherited groups
+            return ApplicationLayoutResponse(
+                id=None,
+                application_id=application_id,
+                hop_depth=hop_depth,
+                positions={},
+                viewport=None,
+                groups=inherited_groups,
+            )
         return None
 
-    return ApplicationLayoutResponse.from_model(layout)
+    response = ApplicationLayoutResponse.from_model(layout)
+
+    # Add inherited groups from lower hop depths
+    inherited_groups = await _get_inherited_groups(db, application_id, hop_depth)
+    if inherited_groups:
+        # Merge inherited groups, avoiding duplicates by name
+        existing_names = {g.name for g in response.groups}
+        for group in inherited_groups:
+            if group.name not in existing_names:
+                response.groups.append(group)
+
+    return response
+
+
+async def _get_inherited_groups(
+    db: DbSession, application_id: UUID, hop_depth: int
+) -> list[AssetGroupResponse]:
+    """Get groups from layouts at lower hop depths."""
+    if hop_depth <= 1:
+        return []
+
+    # Fetch all layouts at lower hop depths with their groups
+    result = await db.execute(
+        select(ApplicationLayout)
+        .where(ApplicationLayout.application_id == application_id)
+        .where(ApplicationLayout.hop_depth < hop_depth)
+        .options(selectinload(ApplicationLayout.asset_groups))
+        .order_by(ApplicationLayout.hop_depth)
+    )
+    lower_layouts = result.scalars().all()
+
+    inherited_groups: list[AssetGroupResponse] = []
+    seen_names: set[str] = set()
+
+    for layout in lower_layouts:
+        for group in layout.asset_groups:
+            # Use name as unique identifier - later depths override earlier ones
+            if group.name not in seen_names:
+                inherited_groups.append(AssetGroupResponse.model_validate(group))
+                seen_names.add(group.name)
+
+    return inherited_groups
 
 
 @router.put("/{hop_depth}", response_model=ApplicationLayoutResponse)

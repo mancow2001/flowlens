@@ -81,14 +81,14 @@ class ApplicationLayoutResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
+    id: UUID | None = None  # None when returning inherited groups without a real layout
     application_id: UUID
     hop_depth: int
-    positions: dict[str, dict[str, float]]  # {asset_id: {x, y}}
+    positions: dict[str, dict[str, float]] = {}  # {asset_id: {x, y}}
     viewport: dict | None = None  # {scale, x, y}
     modified_by: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     groups: list[AssetGroupResponse] = []
 
     @classmethod

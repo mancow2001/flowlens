@@ -1347,14 +1347,14 @@ export interface AssetGroupUpdate {
 }
 
 export interface ApplicationLayout {
-  id: string;
+  id: string | null;  // null when returning inherited groups without a real layout
   application_id: string;
   hop_depth: number;
   positions: Record<string, NodePosition>;
   viewport: Viewport | null;
   modified_by: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
   groups: AssetGroup[];
 }
 
