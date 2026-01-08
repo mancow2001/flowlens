@@ -10,6 +10,7 @@ import {
   PencilIcon,
   ArrowPathIcon,
   Squares2X2Icon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -21,7 +22,7 @@ import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
 import { applicationsApi, layoutApi } from '../services/api';
 import { getProtocolName, formatProtocolPort, formatBytes, getEdgeLabelForPort } from '../utils/network';
-import type { AssetType, InboundSummary, NodePosition } from '../types';
+import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
 
 type RenderMode = 'auto' | 'svg' | 'canvas';
 
@@ -136,6 +137,7 @@ export default function ApplicationDetail() {
   const [editMode, setEditMode] = useState(false);
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [comparisonResult, setComparisonResult] = useState<BaselineComparisonResult | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const transformRef = useRef<d3.ZoomTransform | null>(null);
   const queryClient = useQueryClient();
@@ -1049,6 +1051,71 @@ export default function ApplicationDetail() {
       .attr('font-size', 9)
       .text((d) => formatProtocolPort(d.entry_point_protocol ?? 6, d.entry_point_port!));
 
+    // Baseline comparison diff overlay
+    let removedDepsInView: DependencyChange[] = [];
+    if (comparisonResult && comparisonResult.total_changes > 0) {
+      // Create sets for quick lookup
+      const addedDepsSet = new Set(
+        comparisonResult.dependencies_added.map(d => `${d.source_asset_id}-${d.target_asset_id}-${d.target_port}`)
+      );
+      const addedMembersSet = new Set(comparisonResult.members_added.map(m => m.asset_id));
+      const removedMembersSet = new Set(comparisonResult.members_removed.map(m => m.asset_id));
+
+      // Highlight added dependencies with green stroke
+      linkElements
+        .filter((d) => {
+          const sourceId = typeof d.source === 'string' ? d.source : (d.source as SimNode).id;
+          const targetId = typeof d.target === 'string' ? d.target : (d.target as SimNode).id;
+          return addedDepsSet.has(`${sourceId}-${targetId}-${d.target_port}`);
+        })
+        .attr('stroke', '#22c55e')
+        .attr('stroke-width', 4)
+        .attr('stroke-opacity', 0.9);
+
+      // Draw phantom lines for removed dependencies (between nodes that still exist)
+      const nodeIdSet = new Set(nodes.map(n => n.id));
+      removedDepsInView = comparisonResult.dependencies_removed.filter(
+        d => nodeIdSet.has(d.source_asset_id) && nodeIdSet.has(d.target_asset_id)
+      );
+
+      if (removedDepsInView.length > 0) {
+        const diffLinksGroup = g.append('g').attr('class', 'diff-removed-deps');
+        diffLinksGroup
+          .selectAll('path')
+          .data(removedDepsInView)
+          .join('path')
+          .attr('fill', 'none')
+          .attr('stroke', '#ef4444')
+          .attr('stroke-width', 3)
+          .attr('stroke-opacity', 0.8)
+          .attr('stroke-dasharray', '8,4')
+          .attr('class', 'removed-dep-line');
+      }
+
+      // Add green rings for added members
+      nodeElements
+        .filter((d) => addedMembersSet.has(d.id))
+        .insert('circle', ':first-child')
+        .attr('class', 'added-member-ring')
+        .attr('r', (d) => (d.is_client_summary ? 0 : d.is_entry_point ? 26 : 22))
+        .attr('fill', 'none')
+        .attr('stroke', '#22c55e')
+        .attr('stroke-width', 3)
+        .attr('stroke-opacity', 0.8);
+
+      // Add red rings for removed members that somehow still exist in view
+      nodeElements
+        .filter((d) => removedMembersSet.has(d.id))
+        .insert('circle', ':first-child')
+        .attr('class', 'removed-member-ring')
+        .attr('r', (d) => (d.is_client_summary ? 0 : d.is_entry_point ? 26 : 22))
+        .attr('fill', 'none')
+        .attr('stroke', '#ef4444')
+        .attr('stroke-width', 3)
+        .attr('stroke-dasharray', '6,3')
+        .attr('stroke-opacity', 0.8);
+    }
+
     // Build edge grouping map for spreading labels of edges with same source-target
     const edgeGroupMap = new Map<string, { count: number; indexMap: Map<string, number> }>();
     links.forEach((link) => {
@@ -1080,6 +1147,25 @@ export default function ApplicationDetail() {
         const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
         return `M${source.x},${source.y}A${dr},${dr} 0 0,1 ${target.x},${target.y}`;
       });
+
+      // Update removed dependency phantom lines positions
+      if (removedDepsInView.length > 0) {
+        g.selectAll<SVGPathElement, DependencyChange>('path.removed-dep-line')
+          .attr('d', (d) => {
+            const sourceNode = nodePositionMap.get(d.source_asset_id);
+            const targetNode = nodePositionMap.get(d.target_asset_id);
+            if (!sourceNode || !targetNode) return '';
+            const sx = sourceNode.x ?? 0;
+            const sy = sourceNode.y ?? 0;
+            const tx = targetNode.x ?? 0;
+            const ty = targetNode.y ?? 0;
+            // Draw curved line similar to regular edges
+            const dx = tx - sx;
+            const dy = ty - sy;
+            const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
+            return `M${sx},${sy}A${dr},${dr} 0 0,1 ${tx},${ty}`;
+          });
+      }
 
       edgeLabels
         .attr('x', (d) => {
@@ -1194,7 +1280,7 @@ export default function ApplicationDetail() {
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation]);
+  }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
 
   if (isLoading || isLayoutLoading) {
     return <LoadingPage />;
@@ -1359,6 +1445,66 @@ export default function ApplicationDetail() {
             </div>
           )}
 
+          {/* Baseline comparison mode indicator */}
+          {comparisonResult && (
+            <div className="absolute top-4 left-4 bg-slate-800/95 border border-slate-600 rounded-lg p-3 shadow-lg max-w-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                  <span className="text-sm font-medium text-white">
+                    Comparing to: {comparisonResult.baseline_name}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setComparisonResult(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700"
+                  title="Clear comparison"
+                >
+                  <XMarkIcon className="h-4 w-4" />
+                </button>
+              </div>
+              {comparisonResult.total_changes > 0 && (
+                <div className="mt-2 pt-2 border-t border-slate-700 text-xs space-y-1">
+                  <div className="flex items-center gap-4">
+                    {comparisonResult.dependencies_added.length > 0 && (
+                      <span className="flex items-center gap-1">
+                        <div className="w-3 h-0.5 bg-green-500 rounded" />
+                        <span className="text-green-400">{comparisonResult.dependencies_added.length} added</span>
+                      </span>
+                    )}
+                    {comparisonResult.dependencies_removed.length > 0 && (
+                      <span className="flex items-center gap-1">
+                        <div className="w-3 h-0.5 bg-red-500 rounded border-dashed" style={{ borderStyle: 'dashed' }} />
+                        <span className="text-red-400">{comparisonResult.dependencies_removed.length} removed</span>
+                      </span>
+                    )}
+                  </div>
+                  {(comparisonResult.members_added.length > 0 || comparisonResult.members_removed.length > 0) && (
+                    <div className="flex items-center gap-4">
+                      {comparisonResult.members_added.length > 0 && (
+                        <span className="flex items-center gap-1">
+                          <div className="w-2 h-2 border-2 border-green-500 rounded-full" />
+                          <span className="text-green-400">{comparisonResult.members_added.length} new members</span>
+                        </span>
+                      )}
+                      {comparisonResult.members_removed.length > 0 && (
+                        <span className="flex items-center gap-1">
+                          <div className="w-2 h-2 border-2 border-red-500 rounded-full border-dashed" />
+                          <span className="text-red-400">{comparisonResult.members_removed.length} removed</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {comparisonResult.total_changes === 0 && (
+                <div className="mt-2 pt-2 border-t border-slate-700 text-xs text-green-400">
+                  ✓ No changes since baseline
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Node hover tooltip */}
           {hoveredNode && (
             <div className="absolute top-4 right-4 bg-slate-800 rounded-lg p-4 shadow-lg max-w-xs">
@@ -1471,6 +1617,7 @@ export default function ApplicationDetail() {
           <BaselinePanel
             applicationId={id!}
             hopDepth={maxDepth}
+            onCompare={(result) => setComparisonResult(result || null)}
           />
 
           {/* Inbound Traffic Summary */}
