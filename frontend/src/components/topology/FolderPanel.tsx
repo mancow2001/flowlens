@@ -2,7 +2,7 @@
  * Folder management panel for organizing applications into folders.
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { folderApi, arcTopologyApi, applicationsApi } from '../../services/api';
 import type { FolderTreeNode, FolderCreate, Application } from '../../types';
@@ -14,6 +14,20 @@ interface FolderPanelProps {
   selectedFolderId?: string | null;
 }
 
+// Helper to collect all assigned application IDs from folder tree
+function collectAssignedAppIds(folders: FolderTreeNode[]): Set<string> {
+  const assignedIds = new Set<string>();
+  for (const folder of folders) {
+    for (const app of folder.applications) {
+      assignedIds.add(app.id);
+    }
+    // Recursively check children
+    const childIds = collectAssignedAppIds(folder.children);
+    childIds.forEach(id => assignedIds.add(id));
+  }
+  return assignedIds;
+}
+
 export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelProps) {
   const queryClient = useQueryClient();
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -22,6 +36,9 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignToFolderId, setAssignToFolderId] = useState<string | null>(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [moveAppId, setMoveAppId] = useState<string | null>(null);
+  const [moveAppName, setMoveAppName] = useState<string>('');
 
   // Fetch folder tree
   const { data: folderTree, isLoading: isLoadingFolders } = useQuery({
@@ -69,8 +86,23 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
       queryClient.invalidateQueries({ queryKey: ['applications'] });
       setShowAssignModal(false);
       setAssignToFolderId(null);
+      setShowMoveModal(false);
+      setMoveAppId(null);
+      setMoveAppName('');
     },
   });
+
+  // Compute set of app IDs already assigned to any folder
+  const assignedAppIds = useMemo(() => {
+    if (!folderTree) return new Set<string>();
+    return collectAssignedAppIds(folderTree.roots);
+  }, [folderTree]);
+
+  // Filter applications to only show unassigned ones in assign modal
+  const unassignedApps = useMemo(() => {
+    if (!applications) return [];
+    return applications.items.filter((app: Application) => !assignedAppIds.has(app.id));
+  }, [applications, assignedAppIds]);
 
   const toggleExpanded = (folderId: string) => {
     const newExpanded = new Set(expandedFolders);
@@ -186,14 +218,49 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
             {folder.applications.map((app) => (
               <div
                 key={app.id}
-                className="flex items-center gap-2 px-2 py-1 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-700/30 rounded cursor-pointer"
+                className="group/app flex items-center gap-2 px-2 py-1 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-700/30 rounded"
                 style={{ paddingLeft: `${(depth + 1) * 16 + 24}px` }}
-                onClick={() => window.location.href = `/applications/${app.id}`}
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span className="truncate">{app.display_name || app.name}</span>
+                <span
+                  className="flex-1 truncate cursor-pointer hover:underline"
+                  onClick={() => window.location.href = `/applications/${app.id}`}
+                >
+                  {app.display_name || app.name}
+                </span>
+                {/* Move/Remove buttons */}
+                <div className="flex items-center gap-1 opacity-0 group-hover/app:opacity-100">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMoveAppId(app.id);
+                      setMoveAppName(app.display_name || app.name);
+                      setShowMoveModal(true);
+                    }}
+                    className="text-slate-400 hover:text-blue-400 p-0.5"
+                    title="Move to another folder"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Remove "${app.display_name || app.name}" from this folder?`)) {
+                        moveAppMutation.mutate({ appId: app.id, folderId: null });
+                      }
+                    }}
+                    className="text-slate-400 hover:text-red-400 p-0.5"
+                    title="Remove from folder"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -312,7 +379,7 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-1">
-              {applications?.items.map((app: Application) => (
+              {unassignedApps.map((app: Application) => (
                 <button
                   key={app.id}
                   onClick={() => moveAppMutation.mutate({ appId: app.id, folderId: assignToFolderId })}
@@ -328,9 +395,61 @@ export function FolderPanel({ onFolderSelect, selectedFolderId }: FolderPanelPro
                   )}
                 </button>
               ))}
-              {(!applications || applications.items.length === 0) && (
+              {unassignedApps.length === 0 && (
                 <div className="text-slate-400 text-sm text-center py-4">
-                  No applications found
+                  {applications?.items.length === 0
+                    ? 'No applications found'
+                    : 'All applications are already assigned to folders'}
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Move application to different folder modal */}
+      {showMoveModal && moveAppId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-96 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Move Application</h3>
+              <button
+                onClick={() => {
+                  setShowMoveModal(false);
+                  setMoveAppId(null);
+                  setMoveAppName('');
+                }}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-400 mb-4">
+              Select a folder for <span className="text-white">{moveAppName}</span>:
+            </p>
+
+            <div className="flex-1 overflow-y-auto space-y-1">
+              {flatFolders.map((folder) => (
+                <button
+                  key={folder.id}
+                  onClick={() => moveAppMutation.mutate({ appId: moveAppId, folderId: folder.id })}
+                  disabled={moveAppMutation.isPending}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700 rounded-lg disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <span className="flex-1 truncate">
+                    {'  '.repeat(folder.depth)}{folder.name}
+                  </span>
+                </button>
+              ))}
+              {flatFolders.length === 0 && (
+                <div className="text-slate-400 text-sm text-center py-4">
+                  No folders available
                 </div>
               )}
             </div>
