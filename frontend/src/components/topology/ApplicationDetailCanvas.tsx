@@ -13,7 +13,7 @@
 import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import { formatProtocolPort, getEdgeLabelForPort } from '../../utils/network';
-import type { AssetType } from '../../types';
+import type { AssetType, BaselineComparisonResult } from '../../types';
 
 // Entry point in topology data
 interface TopologyEntryPointInfo {
@@ -80,6 +80,7 @@ interface ApplicationDetailCanvasProps {
   height: number;
   onNodeHover?: (node: SimNode | null) => void;
   onEdgeHover?: (edge: SimLink | null, position: { x: number; y: number }) => void;
+  comparisonResult?: BaselineComparisonResult | null;
 }
 
 // Colors matching the SVG version
@@ -94,6 +95,8 @@ const NODE_COLORS = {
 const EDGE_COLORS = {
   default: '#64748b',
   client_summary: '#10b981',
+  added: '#22c55e',     // Green for added dependencies
+  removed: '#ef4444',   // Red for removed dependencies
 };
 
 // LOD thresholds - set low for high quality rendering
@@ -159,6 +162,7 @@ export default function ApplicationDetailCanvas({
   height,
   onNodeHover,
   onEdgeHover,
+  comparisonResult,
 }: ApplicationDetailCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef<Transform>({ x: 30, y: 30, k: 0.85 });
@@ -319,12 +323,26 @@ export default function ApplicationDetailCanvas({
     const simplifyEdges = transform.k < LOD.simplifyEdges;
     const showArrows = transform.k >= LOD.showArrows;
 
+    // Build baseline comparison lookup sets
+    const addedDepsSet = new Set<string>();
+    const addedMembersSet = new Set<string>();
+    const removedMembersSet = new Set<string>();
+
+    if (comparisonResult && comparisonResult.total_changes > 0) {
+      comparisonResult.dependencies_added.forEach(d => {
+        addedDepsSet.add(`${d.source_asset_id}-${d.target_asset_id}-${d.target_port}`);
+      });
+      comparisonResult.members_added.forEach(m => addedMembersSet.add(m.asset_id));
+      comparisonResult.members_removed.forEach(m => removedMembersSet.add(m.asset_id));
+    }
+
     // Render edges
     ctx.lineWidth = 2 / transform.k;
 
     // Group edges by type for batched rendering
     const clientEdges: SimLink[] = [];
     const regularEdges: SimLink[] = [];
+    const addedEdges: SimLink[] = [];
 
     renderLinks.forEach(link => {
       const source = link.source as SimNode;
@@ -340,7 +358,13 @@ export default function ApplicationDetailCanvas({
       if (link.is_from_client_summary) {
         clientEdges.push(link);
       } else {
-        regularEdges.push(link);
+        // Check if this edge is an added dependency
+        const edgeKey = `${source.id}-${target.id}-${link.target_port}`;
+        if (addedDepsSet.has(edgeKey)) {
+          addedEdges.push(link);
+        } else {
+          regularEdges.push(link);
+        }
       }
     });
 
@@ -376,6 +400,69 @@ export default function ApplicationDetailCanvas({
       if (showArrows && !simplifyEdges) {
         ctx.fillStyle = EDGE_COLORS.default;
         regularEdges.forEach(edge => {
+          const source = edge.source as SimNode;
+          const target = edge.target as SimNode;
+          const sx = source.x ?? 0;
+          const sy = source.y ?? 0;
+          const tx = target.x ?? 0;
+          const ty = target.y ?? 0;
+
+          const dx = tx - sx;
+          const dy = ty - sy;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len < 50) return;
+
+          const nodeRadius = (target.is_entry_point ? 18 : 14) + 5;
+          const arrowX = tx - (dx / len) * nodeRadius;
+          const arrowY = ty - (dy / len) * nodeRadius;
+          const angle = Math.atan2(dy, dx);
+
+          ctx.save();
+          ctx.translate(arrowX, arrowY);
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-8, -4);
+          ctx.lineTo(-8, 4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        });
+      }
+    }
+
+    // Render added edges (green, thicker) for baseline comparison
+    if (addedEdges.length > 0) {
+      ctx.strokeStyle = EDGE_COLORS.added;
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 4 / transform.k;
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      addedEdges.forEach(edge => {
+        const source = edge.source as SimNode;
+        const target = edge.target as SimNode;
+        const sx = source.x ?? 0;
+        const sy = source.y ?? 0;
+        const tx = target.x ?? 0;
+        const ty = target.y ?? 0;
+
+        if (simplifyEdges) {
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(tx, ty);
+        } else {
+          ctx.moveTo(sx, sy);
+          const mx = (sx + tx) / 2;
+          const my = (sy + ty) / 2 - 20;
+          ctx.quadraticCurveTo(mx, my, tx, ty);
+        }
+      });
+      ctx.stroke();
+
+      // Draw arrows for added edges
+      if (showArrows && !simplifyEdges) {
+        ctx.fillStyle = EDGE_COLORS.added;
+        addedEdges.forEach(edge => {
           const source = edge.source as SimNode;
           const target = edge.target as SimNode;
           const sx = source.x ?? 0;
@@ -462,6 +549,40 @@ export default function ApplicationDetailCanvas({
           ctx.restore();
         });
       }
+    }
+
+    // Render removed edges (red dashed phantom lines) for baseline comparison
+    if (comparisonResult && comparisonResult.dependencies_removed.length > 0) {
+      // Build a map of node positions by ID for quick lookup
+      const nodePositionMap = new Map<string, { x: number; y: number }>();
+      renderNodes.forEach(n => {
+        nodePositionMap.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
+      });
+
+      ctx.strokeStyle = EDGE_COLORS.removed;
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 3 / transform.k;
+      ctx.setLineDash([8 / transform.k, 4 / transform.k]);
+
+      comparisonResult.dependencies_removed.forEach(dep => {
+        const sourcePos = nodePositionMap.get(dep.source_asset_id);
+        const targetPos = nodePositionMap.get(dep.target_asset_id);
+
+        // Only draw if both nodes still exist in current view
+        if (sourcePos && targetPos) {
+          ctx.beginPath();
+          if (simplifyEdges) {
+            ctx.moveTo(sourcePos.x, sourcePos.y);
+            ctx.lineTo(targetPos.x, targetPos.y);
+          } else {
+            ctx.moveTo(sourcePos.x, sourcePos.y);
+            const mx = (sourcePos.x + targetPos.x) / 2;
+            const my = (sourcePos.y + targetPos.y) / 2 - 20;
+            ctx.quadraticCurveTo(mx, my, targetPos.x, targetPos.y);
+          }
+          ctx.stroke();
+        }
+      });
     }
 
     ctx.setLineDash([]);
@@ -652,6 +773,26 @@ export default function ApplicationDetailCanvas({
         ctx.lineWidth = (isHovered ? 3 : 1.5) / transform.k;
         ctx.stroke();
 
+        // Baseline comparison ring for added/removed members
+        if (addedMembersSet.has(node.id)) {
+          // Green solid ring for added members
+          ctx.strokeStyle = EDGE_COLORS.added;
+          ctx.lineWidth = 3 / transform.k;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (removedMembersSet.has(node.id)) {
+          // Red dashed ring for removed members
+          ctx.strokeStyle = EDGE_COLORS.removed;
+          ctx.lineWidth = 3 / transform.k;
+          ctx.setLineDash([4 / transform.k, 2 / transform.k]);
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
         // Entry point star icon
         if (showIcons && node.is_entry_point) {
           ctx.fillStyle = '#1e293b';
@@ -676,7 +817,7 @@ export default function ApplicationDetailCanvas({
 
     ctx.restore();
     rafRef.current = null;
-  }, [width, height, dpr, usePerformanceOptimizations, isInViewport]);
+  }, [width, height, dpr, usePerformanceOptimizations, isInViewport, comparisonResult]);
 
   // Request animation frame for rendering
   const requestRender = useCallback(() => {

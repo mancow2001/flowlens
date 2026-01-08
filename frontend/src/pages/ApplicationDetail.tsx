@@ -1425,6 +1425,7 @@ export default function ApplicationDetail() {
                     setHoveredEdge(null);
                   }
                 }}
+                comparisonResult={comparisonResult}
               />
             ) : (
               <svg
