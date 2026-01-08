@@ -138,7 +138,6 @@ export default function ApplicationDetail() {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const transformRef = useRef<d3.ZoomTransform | null>(null);
-  const isInitialRenderRef = useRef(true);
   const queryClient = useQueryClient();
 
   // Fetch saved layout for this application and hop depth
