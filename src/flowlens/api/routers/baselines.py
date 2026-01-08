@@ -200,7 +200,7 @@ async def create_baseline(
         name=data.name,
         description=data.description,
         captured_at=datetime.now(timezone.utc),
-        created_by=user.email if hasattr(user, 'email') else str(user.id),
+        created_by=user.sub,
         snapshot=snapshot,
         dependency_count=dep_count,
         member_count=member_count,
