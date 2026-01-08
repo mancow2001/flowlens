@@ -22,6 +22,7 @@ from flowlens.schemas.folder import (
     ApplicationInFolder,
     ArcDependency,
     ArcTopologyData,
+    ConnectionDetail,
     EdgeDirection,
     ExclusionEntityType,
     FolderDependency,
@@ -1071,11 +1072,54 @@ async def get_app_dependencies(
     total_bytes = sum(d.bytes_total for d in dep_summaries)
     total_bytes_24h = sum(d.bytes_last_24h for d in dep_summaries)
 
+    # Build top 10 connections with IP details
+    # Get asset IP addresses for all assets involved
+    all_asset_ids = set()
+    for dep in dependencies:
+        all_asset_ids.add(dep.source_asset_id)
+        all_asset_ids.add(dep.target_asset_id)
+
+    asset_ips: dict[UUID, str] = {}
+    if all_asset_ids:
+        assets_result = await db.execute(
+            select(Asset.id, Asset.ip_address).where(Asset.id.in_(all_asset_ids))
+        )
+        for asset_id, ip_addr in assets_result.fetchall():
+            asset_ips[asset_id] = str(ip_addr) if ip_addr else "unknown"
+
+    # Build connection details and sort by bytes
+    connection_details: list[ConnectionDetail] = []
+    for dep in dependencies:
+        source_ip = asset_ips.get(dep.source_asset_id, "unknown")
+        dest_ip = asset_ips.get(dep.target_asset_id, "unknown")
+
+        # Determine direction from app's perspective
+        if dep.source_asset_id in member_asset_ids:
+            dep_direction = EdgeDirection.OUT
+        else:
+            dep_direction = EdgeDirection.IN
+
+        connection_details.append(ConnectionDetail(
+            source_ip=source_ip,
+            destination_ip=dest_ip,
+            destination_port=dep.target_port,
+            protocol=dep.protocol,
+            direction=dep_direction,
+            bytes_total=dep.bytes_total or 0,
+            bytes_last_24h=dep.bytes_last_24h or 0,
+            last_seen=dep.last_seen.isoformat() if dep.last_seen else None,
+        ))
+
+    # Sort by bytes and take top 10
+    connection_details.sort(key=lambda c: c.bytes_total, reverse=True)
+    top_connections = connection_details[:10]
+
     return ApplicationDependencyList(
         app_id=app_id,
         app_name=app.name,
         direction_filter=direction,
         dependencies=dep_summaries,
+        top_connections=top_connections,
         total_connections=total_connections,
         total_bytes=total_bytes,
         total_bytes_24h=total_bytes_24h,
@@ -1087,57 +1131,101 @@ async def export_app_dependencies(
     app_id: UUID,
     db: DbSession,
     _user: ViewerUser,
-    direction: str = Query(
-        "both",
-        description="Filter by direction: 'incoming', 'outgoing', or 'both'",
-    ),
 ):
     """Export application dependencies as CSV.
 
-    Returns a downloadable CSV file with dependency details.
+    Returns a downloadable CSV file with full connection details for both
+    incoming and outgoing connections, with a Direction column.
     """
     from fastapi.responses import StreamingResponse
     import io
     import csv
 
-    # Get the dependency list using the existing endpoint logic
-    dep_list = await get_app_dependencies(app_id, db, _user, direction)
+    # Always get both directions for unified export
+    dep_list = await get_app_dependencies(app_id, db, _user, "both")
+
+    # Get the application
+    app_result = await db.execute(
+        select(Application).where(Application.id == app_id)
+    )
+    app = app_result.scalar_one_or_none()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    # Get all member asset IDs for this application
+    members_result = await db.execute(
+        select(ApplicationMember.asset_id).where(
+            ApplicationMember.application_id == app_id
+        )
+    )
+    member_asset_ids = {row[0] for row in members_result.fetchall()}
+
+    # Query all dependencies involving this app
+    deps_query = select(Dependency).where(
+        (Dependency.source_asset_id.in_(member_asset_ids))
+        | (Dependency.target_asset_id.in_(member_asset_ids))
+    )
+    deps_result = await db.execute(deps_query)
+    dependencies = deps_result.scalars().all()
+
+    # Get all asset IPs
+    all_asset_ids = set()
+    for dep in dependencies:
+        all_asset_ids.add(dep.source_asset_id)
+        all_asset_ids.add(dep.target_asset_id)
+
+    asset_ips: dict[UUID, str] = {}
+    if all_asset_ids:
+        assets_result = await db.execute(
+            select(Asset.id, Asset.ip_address).where(Asset.id.in_(all_asset_ids))
+        )
+        for asset_id, ip_addr in assets_result.fetchall():
+            asset_ips[asset_id] = str(ip_addr) if ip_addr else "unknown"
 
     # Create CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Write header
+    # Write header with full connection details
     writer.writerow([
-        "Counterparty Name",
-        "Counterparty Folder",
         "Direction",
-        "Connections",
+        "Source IP",
+        "Destination IP",
+        "Destination Port",
+        "Protocol",
         "Total Bytes",
         "Bytes (24h)",
         "Last Seen",
     ])
 
-    # Write data rows
-    for dep in dep_list.dependencies:
-        direction_label = "Bi-directional" if dep.direction == EdgeDirection.BI else (
-            "Outgoing" if dep.direction == EdgeDirection.OUT else "Incoming"
-        )
+    # Write data rows for all connections
+    protocol_names = {1: "ICMP", 6: "TCP", 17: "UDP"}
+    for dep in dependencies:
+        source_ip = asset_ips.get(dep.source_asset_id, "unknown")
+        dest_ip = asset_ips.get(dep.target_asset_id, "unknown")
+
+        # Determine direction from app's perspective
+        if dep.source_asset_id in member_asset_ids:
+            direction_label = "Outgoing"
+        else:
+            direction_label = "Incoming"
+
         writer.writerow([
-            dep.counterparty_name,
-            dep.counterparty_folder_name or "",
             direction_label,
-            dep.connection_count,
-            dep.bytes_total,
-            dep.bytes_last_24h,
-            dep.last_seen or "",
+            source_ip,
+            dest_ip,
+            dep.target_port,
+            protocol_names.get(dep.protocol, str(dep.protocol)),
+            dep.bytes_total or 0,
+            dep.bytes_last_24h or 0,
+            dep.last_seen.isoformat() if dep.last_seen else "",
         ])
 
     # Reset stream position
     output.seek(0)
 
     # Generate filename
-    filename = f"{dep_list.app_name.replace(' ', '_')}_dependencies_{direction}.csv"
+    filename = f"{app.name.replace(' ', '_')}_connections.csv"
 
     return StreamingResponse(
         iter([output.getvalue()]),

@@ -1,5 +1,6 @@
 """Folders API endpoints for organizing applications hierarchically."""
 
+from collections import Counter
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -23,6 +24,68 @@ from flowlens.schemas.folder import (
 )
 
 router = APIRouter(prefix="/folders", tags=["folders"])
+
+# Color palette for automatic folder color assignment
+# These colors are designed to be visually distinct and provide good contrast
+# Ordered to maximize visual difference between consecutively assigned colors
+FOLDER_COLOR_PALETTE = [
+    "#2563eb",  # Blue
+    "#16a34a",  # Green
+    "#dc2626",  # Red
+    "#9333ea",  # Purple
+    "#ea580c",  # Orange
+    "#0891b2",  # Cyan
+    "#4f46e5",  # Indigo
+    "#be185d",  # Pink
+    "#ca8a04",  # Yellow/Gold
+    "#0d9488",  # Teal
+    "#7c3aed",  # Violet
+    "#c2410c",  # Burnt Orange
+    "#0369a1",  # Sky Blue
+    "#15803d",  # Forest Green
+    "#b91c1c",  # Dark Red
+    "#6d28d9",  # Deep Purple
+    "#0e7490",  # Dark Cyan
+    "#a21caf",  # Magenta
+    "#854d0e",  # Brown
+    "#1d4ed8",  # Royal Blue
+]
+
+
+def get_next_available_color(used_colors: list[str | None]) -> str:
+    """Get the next available color from the palette.
+
+    Picks the first color that hasn't been used. If all colors are used,
+    picks the least-used color to ensure visual variety.
+
+    Args:
+        used_colors: List of colors currently in use by folders.
+
+    Returns:
+        A hex color string from the palette.
+    """
+    # Normalize colors to lowercase for comparison
+    used_normalized = [c.lower() if c else None for c in used_colors]
+
+    # First, try to find an unused color
+    for color in FOLDER_COLOR_PALETTE:
+        if color.lower() not in used_normalized:
+            return color
+
+    # All colors are used - pick the least-used one
+    color_counts = Counter(c for c in used_normalized if c)
+    for color in FOLDER_COLOR_PALETTE:
+        if color.lower() not in color_counts:
+            return color
+
+    # Find the color with the minimum usage
+    min_count = min(color_counts.get(c.lower(), 0) for c in FOLDER_COLOR_PALETTE)
+    for color in FOLDER_COLOR_PALETTE:
+        if color_counts.get(color.lower(), 0) == min_count:
+            return color
+
+    # Fallback (should never happen)
+    return FOLDER_COLOR_PALETTE[0]
 
 
 def build_folder_tree_node(folder: Folder) -> FolderTreeNode:
@@ -131,13 +194,21 @@ async def create_folder(
             detail=f"Folder with name '{folder_data.name}' already exists in this location",
         )
 
+    # Auto-assign color if not provided
+    folder_color = folder_data.color
+    if not folder_color:
+        # Get all existing folder colors
+        colors_result = await db.execute(select(Folder.color))
+        used_colors = [row[0] for row in colors_result.fetchall()]
+        folder_color = get_next_available_color(used_colors)
+
     # Create folder
     folder = Folder(
         name=folder_data.name,
         display_name=folder_data.display_name,
         description=folder_data.description,
         parent_id=folder_data.parent_id,
-        color=folder_data.color,
+        color=folder_color,
         icon=folder_data.icon,
         order=folder_data.order,
         owner=folder_data.owner,

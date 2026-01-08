@@ -52,16 +52,56 @@ export interface ArcSegment {
 }
 
 // Default colors for folders without explicit color
+// These match the backend FOLDER_COLOR_PALETTE for consistency
 const DEFAULT_FOLDER_COLORS = [
-  '#2563eb', // blue
-  '#16a34a', // green
-  '#dc2626', // red
-  '#9333ea', // purple
-  '#ea580c', // orange
-  '#0891b2', // cyan
-  '#4f46e5', // indigo
-  '#be185d', // pink
+  '#2563eb', // Blue
+  '#16a34a', // Green
+  '#dc2626', // Red
+  '#9333ea', // Purple
+  '#ea580c', // Orange
+  '#0891b2', // Cyan
+  '#4f46e5', // Indigo
+  '#be185d', // Pink
+  '#ca8a04', // Yellow/Gold
+  '#0d9488', // Teal
+  '#7c3aed', // Violet
+  '#c2410c', // Burnt Orange
+  '#0369a1', // Sky Blue
+  '#15803d', // Forest Green
+  '#b91c1c', // Dark Red
+  '#6d28d9', // Deep Purple
+  '#0e7490', // Dark Cyan
+  '#a21caf', // Magenta
+  '#854d0e', // Brown
+  '#1d4ed8', // Royal Blue
 ];
+
+/**
+ * Calculate relative luminance of a hex color (for WCAG contrast).
+ * Returns value between 0 (black) and 1 (white).
+ */
+function getLuminance(hexColor: string): number {
+  const hex = hexColor.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+  // Convert to linear RGB
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+/**
+ * Get the appropriate text color (black or white) for a given background color.
+ * Uses WCAG luminance formula to ensure readable contrast.
+ */
+export function getContrastTextColor(backgroundColor: string): string {
+  const luminance = getLuminance(backgroundColor);
+  // Use white text on dark backgrounds, black on light backgrounds
+  // Threshold of 0.179 provides good contrast per WCAG guidelines
+  return luminance > 0.179 ? '#000000' : '#ffffff';
+}
 
 /**
  * Convert folder tree to flat arc node structure for D3.

@@ -220,6 +220,19 @@ class ApplicationDependencySummary(BaseModel):
     last_seen: str | None = None
 
 
+class ConnectionDetail(BaseModel):
+    """Individual connection detail for top connections view."""
+
+    source_ip: str
+    destination_ip: str
+    destination_port: int
+    protocol: int  # 6=TCP, 17=UDP, 1=ICMP
+    direction: EdgeDirection  # From perspective of the selected app
+    bytes_total: int
+    bytes_last_24h: int
+    last_seen: str | None = None
+
+
 class ApplicationDependencyList(BaseModel):
     """List of dependencies for an application."""
 
@@ -227,6 +240,7 @@ class ApplicationDependencyList(BaseModel):
     app_name: str
     direction_filter: str  # "incoming", "outgoing", or "both"
     dependencies: list[ApplicationDependencySummary]
+    top_connections: list[ConnectionDetail] = []  # Top 10 raw connections
     total_connections: int
     total_bytes: int
     total_bytes_24h: int
