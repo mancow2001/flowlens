@@ -1299,3 +1299,195 @@ export interface TopologyExclusionList {
   items: TopologyExclusion[];
   total: number;
 }
+
+// Application Layout types
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
+export interface Viewport {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export interface AssetGroup {
+  id: string;
+  layout_id: string;
+  name: string;
+  color: string;
+  asset_ids: string[];
+  position_x: number;
+  position_y: number;
+  width: number | null;
+  height: number | null;
+  is_collapsed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetGroupCreate {
+  name: string;
+  color?: string;
+  asset_ids: string[];
+  position_x?: number;
+  position_y?: number;
+}
+
+export interface AssetGroupUpdate {
+  name?: string;
+  color?: string;
+  asset_ids?: string[];
+  position_x?: number;
+  position_y?: number;
+  width?: number;
+  height?: number;
+  is_collapsed?: boolean;
+}
+
+export interface ApplicationLayout {
+  id: string;
+  application_id: string;
+  hop_depth: number;
+  positions: Record<string, NodePosition>;
+  viewport: Viewport | null;
+  modified_by: string | null;
+  created_at: string;
+  updated_at: string;
+  groups: AssetGroup[];
+}
+
+export interface LayoutPositionsUpdate {
+  positions: Record<string, NodePosition>;
+}
+
+export interface LayoutUpdate {
+  positions?: Record<string, NodePosition>;
+  viewport?: Viewport;
+}
+
+// Application Baseline types
+export interface ApplicationBaseline {
+  id: string;
+  application_id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  captured_at: string;
+  created_by: string | null;
+  dependency_count: number;
+  member_count: number;
+  entry_point_count: number;
+  total_traffic_bytes: number;
+  tags: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApplicationBaselineWithSnapshot extends ApplicationBaseline {
+  snapshot: BaselineSnapshot;
+}
+
+export interface BaselineSnapshot {
+  dependencies: BaselineDependency[];
+  traffic_volumes: Record<string, TrafficVolumeSnapshot>;
+  node_positions: Record<string, NodePosition>;
+  entry_points: BaselineEntryPoint[];
+  member_asset_ids: string[];
+  hop_depth: number;
+}
+
+export interface BaselineDependency {
+  id: string;
+  source_asset_id: string;
+  target_asset_id: string;
+  target_port: number;
+  protocol: number;
+  bytes_total: number;
+  bytes_last_24h: number;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface TrafficVolumeSnapshot {
+  bytes_in_24h: number;
+  bytes_out_24h: number;
+  connections_in: number;
+  connections_out: number;
+}
+
+export interface BaselineEntryPoint {
+  id: string;
+  member_id: string;
+  asset_id: string;
+  port: number;
+  protocol: number;
+  label: string | null;
+}
+
+export interface ApplicationBaselineCreate {
+  name: string;
+  description?: string | null;
+  hop_depth?: number;
+  include_positions?: boolean;
+  tags?: Record<string, unknown> | null;
+}
+
+export interface BaselineComparisonRequest {
+  hop_depth?: number;
+  include_positions?: boolean;
+}
+
+export interface DependencyChange {
+  id: string;
+  source_asset_id: string;
+  source_name: string | null;
+  target_asset_id: string;
+  target_name: string | null;
+  target_port: number;
+  protocol: number;
+  change_type: 'added' | 'removed';
+}
+
+export interface EntryPointChange {
+  port: number;
+  protocol: number;
+  label: string | null;
+  member_id: string;
+  asset_id: string;
+  asset_name: string | null;
+  change_type: 'added' | 'removed';
+}
+
+export interface MemberChange {
+  asset_id: string;
+  asset_name: string | null;
+  ip_address: string | null;
+  change_type: 'added' | 'removed';
+}
+
+export interface TrafficDeviation {
+  asset_id: string;
+  asset_name: string | null;
+  metric: string;
+  baseline_value: number;
+  current_value: number;
+  deviation_percent: number;
+}
+
+export interface BaselineComparisonResult {
+  baseline_id: string;
+  baseline_name: string;
+  captured_at: string;
+  compared_at: string;
+  dependencies_added: DependencyChange[];
+  dependencies_removed: DependencyChange[];
+  traffic_deviations: TrafficDeviation[];
+  entry_points_added: EntryPointChange[];
+  entry_points_removed: EntryPointChange[];
+  members_added: MemberChange[];
+  members_removed: MemberChange[];
+  total_changes: number;
+  change_severity: 'none' | 'low' | 'medium' | 'high';
+}
