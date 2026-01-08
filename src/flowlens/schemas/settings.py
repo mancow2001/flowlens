@@ -1611,9 +1611,18 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
     ),
 ]
 
+# Discovery provider sections are hidden from System Settings
+# since configuration is now managed via Discovery Providers page
+HIDDEN_SECTIONS: set[str] = {"kubernetes", "vcenter", "nutanix"}
+
 
 def get_section_by_key(key: str) -> SettingsSectionInfo | None:
-    """Get a settings section by its key."""
+    """Get a settings section by its key.
+
+    Returns None for hidden sections (discovery providers).
+    """
+    if key in HIDDEN_SECTIONS:
+        return None
     for section in SETTINGS_SECTIONS:
         if section.key == key:
             return section
@@ -1621,5 +1630,9 @@ def get_section_by_key(key: str) -> SettingsSectionInfo | None:
 
 
 def get_all_sections() -> list[SettingsSectionInfo]:
-    """Get all settings sections."""
-    return SETTINGS_SECTIONS
+    """Get all settings sections.
+
+    Excludes hidden discovery provider sections (kubernetes, vcenter, nutanix)
+    which are now configured via the Discovery Providers page.
+    """
+    return [s for s in SETTINGS_SECTIONS if s.key not in HIDDEN_SECTIONS]

@@ -214,13 +214,14 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, baselines, changes, classification, dependencies, discovery, discovery_providers, folders, gateways, layouts, maintenance, saml_providers, saved_views, search, segmentation, settings as settings_router, tasks, topology, users, ws
+    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, backup, baselines, changes, classification, dependencies, discovery, discovery_providers, folders, gateways, layouts, maintenance, saml_providers, saved_views, search, segmentation, settings as settings_router, tasks, topology, users, ws
 
     app.include_router(admin.router)
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
     app.include_router(saml_providers.router, prefix="/api/v1")
     app.include_router(settings_router.router, prefix="/api/v1")
+    app.include_router(backup.router, prefix="/api/v1")  # Backup and restore
     app.include_router(assets.router, prefix="/api/v1")
     app.include_router(applications.router, prefix="/api/v1")
     app.include_router(asset_classification.router, prefix="/api/v1")  # Behavioral classification

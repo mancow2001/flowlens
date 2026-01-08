@@ -19,6 +19,7 @@ import {
   ShieldCheckIcon,
   ShieldExclamationIcon,
   CloudIcon,
+  ArchiveBoxIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -51,6 +52,7 @@ const settingsNavigation: NavItem[] = [
   { name: 'Maintenance', href: '/settings/maintenance', icon: WrenchScrewdriverIcon, requiredRoles: ['admin', 'analyst'] },
   { name: 'Discovery Providers', href: '/settings/discovery', icon: CloudIcon, requiredRoles: ['admin'] },
   { name: 'System Settings', href: '/settings/system', icon: Cog6ToothIcon, requiredRoles: ['admin'] },
+  { name: 'Backup & Restore', href: '/admin/backup', icon: ArchiveBoxIcon, requiredRoles: ['admin'] },
   { name: 'User Management', href: '/settings/users', icon: UsersIcon, requiredRoles: ['admin'] },
   { name: 'SAML Configuration', href: '/settings/saml', icon: ShieldCheckIcon, requiredRoles: ['admin'] },
 ];

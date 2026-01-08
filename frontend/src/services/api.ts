@@ -2007,6 +2007,70 @@ export const baselineApi = {
   },
 };
 
+// Backup types
+export type BackupType = 'configuration' | 'full';
+
+export interface BackupPreview {
+  backup_type: BackupType;
+  backup_created_at: string;
+  app_version_backup: string;
+  app_version_current: string;
+  table_counts: Record<string, number>;
+  warnings: string[];
+  is_compatible: boolean;
+}
+
+export interface RestoreResponse {
+  success: boolean;
+  message: string;
+  tables_restored: string[];
+  rows_restored: Record<string, number>;
+  errors: string[];
+}
+
+// Backup API
+export const backupApi = {
+  /**
+   * Get the download URL for a backup file
+   */
+  downloadUrl: (backupType: BackupType = 'configuration'): string => {
+    return `/api/v1/admin/backup/download?backup_type=${backupType}`;
+  },
+
+  /**
+   * Preview what a restore operation will do
+   */
+  previewRestore: async (file: File): Promise<BackupPreview> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post<BackupPreview>(
+      '/admin/backup/restore/preview',
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
+    return response.data;
+  },
+
+  /**
+   * Restore database from backup file
+   */
+  restore: async (file: File, confirmDestructive: boolean = false): Promise<RestoreResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post<RestoreResponse>(
+      '/admin/backup/restore',
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        params: { confirm_destructive: confirmDestructive },
+      }
+    );
+    return response.data;
+  },
+};
+
 // Helper function to download files with authentication
 export const downloadWithAuth = async (url: string, filename: string): Promise<void> => {
   const response = await api.get(url, {
