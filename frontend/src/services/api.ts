@@ -1106,8 +1106,11 @@ export const settingsApi = {
     return data;
   },
 
-  downloadDockerComposeUrl: (): string => {
-    return '/api/v1/settings/export/docker-compose.yml';
+  downloadDockerCompose: async (): Promise<Blob> => {
+    const response = await api.get('/settings/export/docker-compose.yml', {
+      responseType: 'blob',
+    });
+    return response.data;
   },
 };
 

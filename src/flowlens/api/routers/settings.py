@@ -58,6 +58,34 @@ async def get_all_settings(admin: AdminUser) -> SettingsResponse:
     )
 
 
+@router.get("/export/docker-compose.yml")
+async def download_docker_compose(admin: AdminUser) -> Response:
+    """Download a docker-compose.yml with current settings.
+
+    Generates a complete docker-compose.yml file with all current settings
+    applied as environment variables. Useful for persisting settings changes
+    made in Docker environments.
+    """
+    logger.info("Docker Compose download requested", user=admin.sub)
+
+    try:
+        yaml_content = generate_docker_compose_yaml()
+    except Exception as e:
+        logger.error("Failed to generate docker-compose.yml", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate docker-compose.yml: {str(e)}",
+        )
+
+    return Response(
+        content=yaml_content,
+        media_type="application/x-yaml",
+        headers={
+            "Content-Disposition": "attachment; filename=docker-compose.yml",
+        },
+    )
+
+
 @router.get("/restart-required")
 async def check_restart_required(admin: AdminUser) -> dict:
     """Check if a service restart is required.
@@ -228,31 +256,3 @@ async def clear_restart_flag(admin: AdminUser) -> dict:
     clear_restart_required()
     logger.info("Restart flag cleared", user=admin.sub)
     return {"message": "Restart flag cleared"}
-
-
-@router.get("/export/docker-compose.yml")
-async def download_docker_compose(admin: AdminUser) -> Response:
-    """Download a docker-compose.yml with current settings.
-
-    Generates a complete docker-compose.yml file with all current settings
-    applied as environment variables. Useful for persisting settings changes
-    made in Docker environments.
-    """
-    logger.info("Docker Compose download requested", user=admin.sub)
-
-    try:
-        yaml_content = generate_docker_compose_yaml()
-    except Exception as e:
-        logger.error("Failed to generate docker-compose.yml", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate docker-compose.yml: {str(e)}",
-        )
-
-    return Response(
-        content=yaml_content,
-        media_type="application/x-yaml",
-        headers={
-            "Content-Disposition": "attachment; filename=docker-compose.yml",
-        },
-    )
