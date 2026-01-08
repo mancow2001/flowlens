@@ -71,6 +71,17 @@ import type {
   MoveApplicationRequest,
   ArcTopologyData,
   ApplicationDependencyList,
+  ApplicationLayout,
+  LayoutUpdate,
+  LayoutPositionsUpdate,
+  AssetGroup,
+  AssetGroupCreate,
+  AssetGroupUpdate,
+  ApplicationBaseline,
+  ApplicationBaselineWithSnapshot,
+  ApplicationBaselineCreate,
+  BaselineComparisonRequest,
+  BaselineComparisonResult,
 } from '../types';
 import { useAuthStore } from '../stores/authStore';
 
@@ -1825,6 +1836,174 @@ export const exclusionsApi = {
 
   delete: async (exclusionId: string): Promise<void> => {
     await api.delete(`/topology/exclusions/${exclusionId}`);
+  },
+};
+
+// Application Layout API
+export const layoutApi = {
+  /**
+   * Get layout for an application at a specific hop depth
+   * Returns null if no layout has been saved yet
+   */
+  getLayout: async (applicationId: string, hopDepth: number): Promise<ApplicationLayout | null> => {
+    const response = await api.get<ApplicationLayout | null>(
+      `/applications/${applicationId}/layouts/${hopDepth}`
+    );
+    return response.data;
+  },
+
+  /**
+   * Save or update layout for an application at a specific hop depth
+   */
+  saveLayout: async (
+    applicationId: string,
+    hopDepth: number,
+    data: LayoutUpdate
+  ): Promise<ApplicationLayout> => {
+    const response = await api.put<ApplicationLayout>(
+      `/applications/${applicationId}/layouts/${hopDepth}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Batch update node positions for a layout
+   * Merges with existing positions
+   */
+  updatePositions: async (
+    applicationId: string,
+    hopDepth: number,
+    data: LayoutPositionsUpdate
+  ): Promise<ApplicationLayout> => {
+    const response = await api.patch<ApplicationLayout>(
+      `/applications/${applicationId}/layouts/${hopDepth}/positions`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Reset (delete) layout for an application at a specific hop depth
+   */
+  resetLayout: async (applicationId: string, hopDepth: number): Promise<void> => {
+    await api.delete(`/applications/${applicationId}/layouts/${hopDepth}`);
+  },
+
+  /**
+   * Create an asset group in a layout
+   */
+  createGroup: async (
+    applicationId: string,
+    hopDepth: number,
+    data: AssetGroupCreate
+  ): Promise<AssetGroup> => {
+    const response = await api.post<AssetGroup>(
+      `/applications/${applicationId}/layouts/${hopDepth}/groups`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * List all asset groups in a layout
+   */
+  listGroups: async (applicationId: string, hopDepth: number): Promise<AssetGroup[]> => {
+    const response = await api.get<AssetGroup[]>(
+      `/applications/${applicationId}/layouts/${hopDepth}/groups`
+    );
+    return response.data;
+  },
+
+  /**
+   * Update an asset group
+   */
+  updateGroup: async (
+    applicationId: string,
+    hopDepth: number,
+    groupId: string,
+    data: AssetGroupUpdate
+  ): Promise<AssetGroup> => {
+    const response = await api.patch<AssetGroup>(
+      `/applications/${applicationId}/layouts/${hopDepth}/groups/${groupId}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * Delete an asset group
+   */
+  deleteGroup: async (
+    applicationId: string,
+    hopDepth: number,
+    groupId: string
+  ): Promise<void> => {
+    await api.delete(`/applications/${applicationId}/layouts/${hopDepth}/groups/${groupId}`);
+  },
+};
+
+// Application Baselines API
+export const baselineApi = {
+  // List all baselines for an application
+  list: async (applicationId: string, activeOnly?: boolean): Promise<ApplicationBaseline[]> => {
+    const params = activeOnly ? { active_only: true } : {};
+    const response = await api.get(`/applications/${applicationId}/baselines`, { params });
+    return response.data;
+  },
+
+  // Create a new baseline
+  create: async (
+    applicationId: string,
+    data: ApplicationBaselineCreate
+  ): Promise<ApplicationBaseline> => {
+    const response = await api.post(`/applications/${applicationId}/baselines`, data);
+    return response.data;
+  },
+
+  // Get a specific baseline
+  get: async (applicationId: string, baselineId: string): Promise<ApplicationBaseline> => {
+    const response = await api.get(`/applications/${applicationId}/baselines/${baselineId}`);
+    return response.data;
+  },
+
+  // Get a baseline with its full snapshot
+  getWithSnapshot: async (
+    applicationId: string,
+    baselineId: string
+  ): Promise<ApplicationBaselineWithSnapshot> => {
+    const response = await api.get(`/applications/${applicationId}/baselines/${baselineId}/snapshot`);
+    return response.data;
+  },
+
+  // Delete a baseline
+  delete: async (applicationId: string, baselineId: string): Promise<void> => {
+    await api.delete(`/applications/${applicationId}/baselines/${baselineId}`);
+  },
+
+  // Compare baseline to current state
+  compareToCurrent: async (
+    applicationId: string,
+    baselineId: string,
+    data?: BaselineComparisonRequest
+  ): Promise<BaselineComparisonResult> => {
+    const response = await api.post(
+      `/applications/${applicationId}/baselines/${baselineId}/compare`,
+      data || {}
+    );
+    return response.data;
+  },
+
+  // Compare two baselines
+  compareTwoBaselines: async (
+    applicationId: string,
+    baselineIdA: string,
+    baselineIdB: string
+  ): Promise<BaselineComparisonResult> => {
+    const response = await api.post(
+      `/applications/${applicationId}/baselines/${baselineIdA}/compare/${baselineIdB}`
+    );
+    return response.data;
   },
 };
 

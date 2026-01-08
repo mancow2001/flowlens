@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from flowlens.models.discovery import DiscoveryProvider
     from flowlens.models.folder import Folder
     from flowlens.models.gateway import AssetGateway
+    from flowlens.models.layout import ApplicationLayout
     from flowlens.models.segmentation import SegmentationPolicy
 
 
@@ -485,6 +486,18 @@ class Application(Base, UUIDMixin, TimestampMixin):
 
     policies: Mapped[list["SegmentationPolicy"]] = relationship(
         "SegmentationPolicy",
+        back_populates="application",
+        cascade="all, delete-orphan",
+    )
+
+    layouts: Mapped[list["ApplicationLayout"]] = relationship(
+        "ApplicationLayout",
+        back_populates="application",
+        cascade="all, delete-orphan",
+    )
+
+    baselines: Mapped[list["ApplicationBaseline"]] = relationship(
+        "ApplicationBaseline",
         back_populates="application",
         cascade="all, delete-orphan",
     )

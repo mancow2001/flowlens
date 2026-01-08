@@ -3,6 +3,7 @@
 from flowlens.models.base import Base
 from flowlens.models.alert_rule import AlertRule
 from flowlens.models.asset import Application, ApplicationMember, Asset, AssetType, EntryPoint, Service
+from flowlens.models.baseline import ApplicationBaseline
 from flowlens.models.auth import (
     AuthAuditLog,
     AuthEventType,
@@ -18,6 +19,7 @@ from flowlens.models.dependency import Dependency, DependencyHistory
 from flowlens.models.discovery import DiscoveryStatus
 from flowlens.models.folder import Folder
 from flowlens.models.flow import FlowAggregate, FlowRecord
+from flowlens.models.layout import ApplicationLayout, AssetGroup
 from flowlens.models.gateway import AssetGateway, GatewayObservation, GatewayRole, InferenceMethod
 from flowlens.models.maintenance_window import MaintenanceWindow
 from flowlens.models.saved_view import SavedView
@@ -74,4 +76,7 @@ __all__ = [
     "UserRole",
     "ExclusionEntityType",
     "TopologyExclusion",
+    "ApplicationLayout",
+    "AssetGroup",
+    "ApplicationBaseline",
 ]

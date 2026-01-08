@@ -1,12 +1,15 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as d3 from 'd3';
 import {
   ArrowLeftIcon,
   InformationCircleIcon,
   UsersIcon,
   CpuChipIcon,
+  PencilIcon,
+  ArrowPathIcon,
+  Squares2X2Icon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -14,9 +17,11 @@ import Badge from '../components/common/Badge';
 import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import ApplicationDetailCanvas from '../components/topology/ApplicationDetailCanvas';
-import { applicationsApi } from '../services/api';
+import GroupEditModal from '../components/layout/GroupEditModal';
+import BaselinePanel from '../components/baseline/BaselinePanel';
+import { applicationsApi, layoutApi } from '../services/api';
 import { getProtocolName, formatProtocolPort, formatBytes, getEdgeLabelForPort } from '../utils/network';
-import type { AssetType, InboundSummary } from '../types';
+import type { AssetType, InboundSummary, NodePosition } from '../types';
 
 type RenderMode = 'auto' | 'svg' | 'canvas';
 
@@ -128,7 +133,143 @@ export default function ApplicationDetail() {
   const [maxDepth, setMaxDepth] = useState(1);
   const [renderMode, setRenderMode] = useState<RenderMode>('auto');
   const [hideInfrastructureOnly, setHideInfrastructureOnly] = useState(true);
+  const [editMode, setEditMode] = useState(false);
+  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
+  const [showGroupModal, setShowGroupModal] = useState(false);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const queryClient = useQueryClient();
+
+  // Fetch saved layout for this application and hop depth
+  const { data: savedLayout } = useQuery({
+    queryKey: ['application-layout', id, maxDepth],
+    queryFn: () => layoutApi.getLayout(id!, maxDepth),
+    enabled: !!id,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
+  // Mutation to save positions on drag end
+  const savePositionsMutation = useMutation({
+    mutationFn: (positions: Record<string, NodePosition>) =>
+      layoutApi.updatePositions(id!, maxDepth, { positions }),
+    onSuccess: () => {
+      // Invalidate layout query to refresh
+      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
+    },
+  });
+
+  // Reset layout to auto-calculated positions
+  const resetLayoutMutation = useMutation({
+    mutationFn: () => layoutApi.resetLayout(id!, maxDepth),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
+    },
+  });
+
+  // Create asset group
+  const createGroupMutation = useMutation({
+    mutationFn: (data: { name: string; color: string; asset_ids: string[] }) =>
+      layoutApi.createGroup(id!, maxDepth, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
+      setSelectedNodes(new Set());
+      setShowGroupModal(false);
+    },
+  });
+
+  // Delete asset group
+  const deleteGroupMutation = useMutation({
+    mutationFn: (groupId: string) => layoutApi.deleteGroup(id!, maxDepth, groupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['application-layout', id, maxDepth] });
+    },
+  });
+
+  // Handle creating a group from selected nodes
+  const handleCreateGroup = useCallback(
+    (name: string, color: string) => {
+      if (selectedNodes.size < 2) return;
+      createGroupMutation.mutate({
+        name,
+        color,
+        asset_ids: Array.from(selectedNodes),
+      });
+    },
+    [selectedNodes, createGroupMutation]
+  );
+
+  // Callback to save positions on drag end
+  const handleNodeDragEnd = useCallback(
+    (nodeId: string, x: number, y: number, allNodePositions?: Record<string, { x: number; y: number }>) => {
+      if (!editMode) return;
+
+      // If multiple nodes are selected and we have all positions, save all of them
+      if (selectedNodes.size > 1 && selectedNodes.has(nodeId) && allNodePositions) {
+        const positionsToSave: Record<string, NodePosition> = {};
+        selectedNodes.forEach(id => {
+          if (allNodePositions[id]) {
+            positionsToSave[id] = { x: allNodePositions[id].x, y: allNodePositions[id].y };
+          }
+        });
+        savePositionsMutation.mutate(positionsToSave);
+      } else {
+        // Single node drag
+        savePositionsMutation.mutate({ [nodeId]: { x, y } });
+      }
+    },
+    [editMode, selectedNodes, savePositionsMutation]
+  );
+
+  // Handle node click for selection
+  const handleNodeClick = useCallback(
+    (nodeId: string, event: MouseEvent) => {
+      if (!editMode) return;
+
+      if (event.shiftKey) {
+        // Shift+click: toggle selection
+        setSelectedNodes(prev => {
+          const next = new Set(prev);
+          if (next.has(nodeId)) {
+            next.delete(nodeId);
+          } else {
+            next.add(nodeId);
+          }
+          return next;
+        });
+      } else {
+        // Regular click: select only this node (or deselect if already solo-selected)
+        setSelectedNodes(prev => {
+          if (prev.size === 1 && prev.has(nodeId)) {
+            return new Set();
+          }
+          return new Set([nodeId]);
+        });
+      }
+    },
+    [editMode]
+  );
+
+  // Clear selection when exiting edit mode
+  useEffect(() => {
+    if (!editMode) {
+      setSelectedNodes(new Set());
+    }
+  }, [editMode]);
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && editMode) {
+        if (selectedNodes.size > 0) {
+          setSelectedNodes(new Set());
+        } else {
+          setEditMode(false);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editMode, selectedNodes.size]);
 
   // Fetch application topology
   const { data: topology, isLoading, error } = useQuery({
@@ -145,6 +286,9 @@ export default function ApplicationDetail() {
     const simNodes: SimNode[] = [];
     const simLinks: SimLink[] = [];
 
+    // Get saved positions from layout
+    const savedPositions = savedLayout?.positions || {};
+
     // Group nodes by hop distance
     const nodesByHop: Map<number, typeof topology.nodes> = new Map();
     topology.nodes.forEach(node => {
@@ -154,18 +298,27 @@ export default function ApplicationDetail() {
     });
 
     // Create nodes positioned by hop distance (columns)
+    // If saved position exists, use it; otherwise use auto-calculated position
     nodesByHop.forEach((nodesAtHop, hopDistance) => {
-      const xPos = getLayoutX(hopDistance);
+      const defaultXPos = getLayoutX(hopDistance);
       const ySpacing = height / (nodesAtHop.length + 1);
 
       nodesAtHop.forEach((node, i) => {
-        const yPos = ySpacing * (i + 1);
+        const defaultYPos = ySpacing * (i + 1);
+        const saved = savedPositions[node.id];
+
+        // Use saved position if available, otherwise use auto-calculated
+        const xPos = saved?.x ?? defaultXPos;
+        const yPos = saved?.y ?? defaultYPos;
+
         simNodes.push({
           ...node,
           hop_distance: hopDistance,
           x: xPos,
           y: yPos,
-          fx: xPos, // Fixed X position for column layout
+          // If we have a saved position, fix both X and Y; otherwise just fix X for column layout
+          fx: saved ? xPos : defaultXPos,
+          fy: saved ? yPos : undefined,
         });
       });
     });
@@ -177,12 +330,15 @@ export default function ApplicationDetail() {
       const clientYSpacing = height / (clientSummaries.length + 1);
 
       clientSummaries.forEach((summary: InboundSummary, summaryIndex: number) => {
-        // Use summaryIndex for Y positioning to ensure each client summary has unique position
-        const yPos = clientYSpacing * (summaryIndex + 1);
-
         // Include port and protocol in ID to ensure uniqueness when same asset has multiple entry points
         const clientNodeId = `client-summary-${summary.entry_point_asset_id}-${summary.port}-${summary.protocol}`;
-        const xPos = getLayoutX(-1); // -1 for client summary column
+        const defaultXPos = getLayoutX(-1); // -1 for client summary column
+        const defaultYPos = clientYSpacing * (summaryIndex + 1);
+
+        // Check for saved position
+        const saved = savedPositions[clientNodeId];
+        const xPos = saved?.x ?? defaultXPos;
+        const yPos = saved?.y ?? defaultYPos;
 
         simNodes.push({
           id: clientNodeId,
@@ -290,7 +446,7 @@ export default function ApplicationDetail() {
     }
 
     return { nodes: simNodes, links: simLinks };
-  }, [topology, dimensions, maxDepth, hideInfrastructureOnly]);
+  }, [topology, dimensions, maxDepth, hideInfrastructureOnly, savedLayout]);
 
   // Determine effective render mode based on graph size
   const effectiveRenderMode = useMemo((): 'svg' | 'canvas' => {
@@ -484,8 +640,83 @@ export default function ApplicationDetail() {
       .attr('pointer-events', 'none')
       .text((d) => getEdgeLabelForPort(d.target_port));
 
+    // Draw asset groups (render before nodes so they appear behind)
+    const assetGroups = savedLayout?.groups || [];
+    const groupsGroup = g.append('g').attr('class', 'groups');
+
+    // Create a map of node positions for group bounds calculation
+    const nodePositionMap = new Map<string, SimNode>();
+    nodes.forEach(n => nodePositionMap.set(n.id, n));
+
+    // Function to calculate group bounds based on member nodes
+    const calculateGroupBounds = (group: { asset_ids: string[] }) => {
+      const memberNodes = group.asset_ids
+        .map(id => nodePositionMap.get(id))
+        .filter((n): n is SimNode => n !== undefined && n.x !== undefined && n.y !== undefined);
+
+      if (memberNodes.length === 0) return null;
+
+      const padding = 30;
+      const xs = memberNodes.map(n => n.x!);
+      const ys = memberNodes.map(n => n.y!);
+
+      return {
+        x: Math.min(...xs) - padding,
+        y: Math.min(...ys) - padding,
+        width: Math.max(...xs) - Math.min(...xs) + padding * 2,
+        height: Math.max(...ys) - Math.min(...ys) + padding * 2,
+      };
+    };
+
+    const groupElements = groupsGroup
+      .selectAll<SVGGElement, typeof assetGroups[number]>('g.asset-group')
+      .data(assetGroups)
+      .join('g')
+      .attr('class', 'asset-group');
+
+    // Group background rectangles
+    groupElements
+      .append('rect')
+      .attr('class', 'group-bounds')
+      .attr('rx', 12)
+      .attr('ry', 12)
+      .attr('fill', d => d.color + '15')
+      .attr('stroke', d => d.color)
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '4,2');
+
+    // Group labels
+    groupElements
+      .append('text')
+      .attr('class', 'group-label')
+      .attr('fill', d => d.color)
+      .attr('font-size', 12)
+      .attr('font-weight', 'bold')
+      .text(d => d.name);
+
+    // Delete buttons for groups (only in edit mode)
+    if (editMode) {
+      groupElements
+        .append('text')
+        .attr('class', 'group-delete')
+        .attr('fill', '#ef4444')
+        .attr('font-size', 14)
+        .attr('cursor', 'pointer')
+        .text('×')
+        .on('click', (event, d) => {
+          event.stopPropagation();
+          if (confirm(`Delete group "${d.name}"?`)) {
+            deleteGroupMutation.mutate(d.id);
+          }
+        });
+    }
+
     // Draw nodes
     const nodesGroup = g.append('g').attr('class', 'nodes');
+
+    // Track drag start positions for multi-select dragging
+    let dragStartPositions: Map<string, { x: number; y: number }> = new Map();
+
     const nodeElements = nodesGroup
       .selectAll<SVGGElement, SimNode>('g')
       .data(nodes)
@@ -498,20 +729,69 @@ export default function ApplicationDetail() {
             if (!event.active) simulation.alphaTarget(0.3).restart();
             d.fx = d.x;
             d.fy = d.y;
+
+            // If in edit mode and dragging a selected node, track all selected nodes
+            if (editMode && selectedNodes.has(d.id)) {
+              dragStartPositions.clear();
+              nodes.forEach(n => {
+                if (selectedNodes.has(n.id)) {
+                  dragStartPositions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
+                }
+              });
+            }
           })
           .on('drag', (event, d) => {
             d.fx = event.x;
             d.fy = event.y;
+
+            // In edit mode, move all selected nodes together
+            if (editMode && selectedNodes.has(d.id) && selectedNodes.size > 1) {
+              const startPos = dragStartPositions.get(d.id);
+              if (startPos) {
+                const dx = event.x - startPos.x;
+                const dy = event.y - startPos.y;
+
+                nodes.forEach(n => {
+                  if (selectedNodes.has(n.id) && n.id !== d.id) {
+                    const nStartPos = dragStartPositions.get(n.id);
+                    if (nStartPos) {
+                      n.fx = nStartPos.x + dx;
+                      n.fy = nStartPos.y + dy;
+                    }
+                  }
+                });
+              }
+            }
           })
           .on('end', (event, d) => {
             if (!event.active) simulation.alphaTarget(0);
-            // Only release non-fixed nodes
-            if (!d.is_entry_point && !d.is_client_summary) {
-              d.fx = null;
-              d.fy = null;
+            // In edit mode, save the position and keep it fixed
+            if (editMode) {
+              // Collect all node positions for multi-select save
+              const allPositions: Record<string, { x: number; y: number }> = {};
+              nodes.forEach(n => {
+                if (n.fx != null && n.fy != null) {
+                  allPositions[n.id] = { x: n.fx, y: n.fy };
+                }
+              });
+
+              handleNodeDragEnd(d.id, event.x, event.y, allPositions);
+              d.fx = event.x;
+              d.fy = event.y;
+            } else {
+              // Only release non-fixed nodes (non-edit mode behavior)
+              if (!d.is_entry_point && !d.is_client_summary) {
+                d.fx = null;
+                d.fy = null;
+              }
             }
+            dragStartPositions.clear();
           })
       )
+      .on('click', function (event, d) {
+        // Handle node selection in edit mode
+        handleNodeClick(d.id, event);
+      })
       .on('mouseenter', function (_, d) {
         setHoveredNode(d);
         d3.select(this).select('circle,rect').attr('stroke-width', 3);
@@ -520,6 +800,32 @@ export default function ApplicationDetail() {
         setHoveredNode(null);
         d3.select(this).select('circle,rect').attr('stroke-width', 1.5);
       });
+
+    // Selection rings for selected nodes (in edit mode)
+    nodeElements
+      .filter((d) => editMode && selectedNodes.has(d.id) && d.is_client_summary === true)
+      .append('rect')
+      .attr('class', 'selection-ring')
+      .attr('x', -36)
+      .attr('y', -26)
+      .attr('width', 72)
+      .attr('height', 52)
+      .attr('rx', 12)
+      .attr('ry', 12)
+      .attr('fill', 'none')
+      .attr('stroke', '#60a5fa')
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '4,2');
+
+    nodeElements
+      .filter((d) => editMode && selectedNodes.has(d.id) && !d.is_client_summary)
+      .append('circle')
+      .attr('class', 'selection-ring')
+      .attr('r', (d) => (d.is_entry_point ? 24 : 20))
+      .attr('fill', 'none')
+      .attr('stroke', '#60a5fa')
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '4,2');
 
     // Client summary nodes as rounded rectangles
     nodeElements
@@ -702,6 +1008,29 @@ export default function ApplicationDetail() {
           return labelY;
         });
 
+      // Update group bounds based on member node positions
+      groupElements.each(function (d) {
+        const bounds = calculateGroupBounds(d);
+        if (bounds) {
+          d3.select(this)
+            .select('rect.group-bounds')
+            .attr('x', bounds.x)
+            .attr('y', bounds.y)
+            .attr('width', bounds.width)
+            .attr('height', bounds.height);
+
+          d3.select(this)
+            .select('text.group-label')
+            .attr('x', bounds.x + 8)
+            .attr('y', bounds.y + 16);
+
+          d3.select(this)
+            .select('text.group-delete')
+            .attr('x', bounds.x + bounds.width - 12)
+            .attr('y', bounds.y + 16);
+        }
+      });
+
       nodeElements.attr('transform', (d) => `translate(${d.x},${d.y})`);
     });
 
@@ -715,7 +1044,7 @@ export default function ApplicationDetail() {
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, dimensions, effectiveRenderMode]);
+  }, [nodes, links, dimensions, effectiveRenderMode, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation]);
 
   if (isLoading) {
     return <LoadingPage />;
@@ -789,6 +1118,55 @@ export default function ApplicationDetail() {
               <option value="svg">SVG</option>
               <option value="canvas">Canvas</option>
             </select>
+          </div>
+          <div className="flex items-center gap-2 border-l border-slate-700 pl-4">
+            <button
+              onClick={() => setEditMode(!editMode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition-colors ${
+                editMode
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+              title={editMode ? 'Exit edit mode' : 'Edit layout positions'}
+            >
+              <PencilIcon className="h-4 w-4" />
+              {editMode ? 'Editing' : 'Edit Layout'}
+            </button>
+            {editMode && selectedNodes.size > 0 && (
+              <span className="text-sm text-blue-400">
+                {selectedNodes.size} selected
+              </span>
+            )}
+            {editMode && selectedNodes.size > 0 && (
+              <button
+                onClick={() => setSelectedNodes(new Set())}
+                className="text-sm text-slate-400 hover:text-white transition-colors"
+                title="Clear selection"
+              >
+                Clear
+              </button>
+            )}
+            {editMode && selectedNodes.size >= 2 && (
+              <button
+                onClick={() => setShowGroupModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-purple-600 text-white hover:bg-purple-500 transition-colors"
+                title="Group selected nodes"
+              >
+                <Squares2X2Icon className="h-4 w-4" />
+                Group
+              </button>
+            )}
+            {editMode && savedLayout && (
+              <button
+                onClick={() => resetLayoutMutation.mutate()}
+                disabled={resetLayoutMutation.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-50 transition-colors"
+                title="Reset to auto-calculated positions"
+              >
+                <ArrowPathIcon className={`h-4 w-4 ${resetLayoutMutation.isPending ? 'animate-spin' : ''}`} />
+                Reset
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -939,6 +1317,12 @@ export default function ApplicationDetail() {
 
         {/* Sidebar Panels */}
         <div className="space-y-4">
+          {/* Baseline Panel */}
+          <BaselinePanel
+            applicationId={id!}
+            hopDepth={maxDepth}
+          />
+
           {/* Inbound Traffic Summary */}
           {topology.inbound_summary && topology.inbound_summary.length > 0 && (
             <Card title="Inbound Traffic">
@@ -1094,14 +1478,30 @@ export default function ApplicationDetail() {
             <div className="text-sm text-slate-400 space-y-2">
               <p>
                 <InformationCircleIcon className="inline h-4 w-4 mr-1" />
-                Drag nodes to reposition them.
+                {editMode ? 'Edit mode enabled. Positions will be saved.' : 'Click "Edit Layout" to save positions.'}
               </p>
+              {editMode && (
+                <>
+                  <p>• Click node to select, Shift+click for multi-select</p>
+                  <p>• Drag selected nodes to move them together</p>
+                  <p>• Select 2+ nodes and click "Group" to group them</p>
+                  <p>• Press Escape to clear selection or exit</p>
+                </>
+              )}
               <p>Scroll to zoom, drag background to pan.</p>
               <p>Hover over edges to see connection details.</p>
             </div>
           </Card>
         </div>
       </div>
+
+      {/* Group Edit Modal */}
+      <GroupEditModal
+        isOpen={showGroupModal}
+        onClose={() => setShowGroupModal(false)}
+        onSave={handleCreateGroup}
+        title="Create Asset Group"
+      />
     </div>
   );
 }
