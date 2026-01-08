@@ -137,6 +137,8 @@ export default function ApplicationDetail() {
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [showGroupModal, setShowGroupModal] = useState(false);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const transformRef = useRef<d3.ZoomTransform | null>(null);
+  const isInitialRenderRef = useRef(true);
   const queryClient = useQueryClient();
 
   // Fetch saved layout for this application and hop depth
@@ -275,6 +277,11 @@ export default function ApplicationDetail() {
     queryFn: () => applicationsApi.getTopology(id!, showExternal, maxDepth),
     enabled: !!id,
   });
+
+  // Reset transform when topology query changes (new data warrants a view reset)
+  useEffect(() => {
+    transformRef.current = null;
+  }, [id, maxDepth, showExternal]);
 
   // Transform data for D3 with hierarchical layout based on hop distance
   const { nodes, links } = useMemo(() => {
@@ -510,18 +517,26 @@ export default function ApplicationDetail() {
 
     const { height } = dimensions;
 
+    // Main group for zoom/pan
+    const g = svg.append('g');
+
     // Create zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
+        // Save transform for restoration after re-renders
+        transformRef.current = event.transform;
       });
 
     svg.call(zoom);
     zoomRef.current = zoom;
 
-    // Main group for zoom/pan
-    const g = svg.append('g');
+    // Restore previous transform if available
+    if (transformRef.current) {
+      svg.call(zoom.transform, transformRef.current);
+      g.attr('transform', transformRef.current.toString());
+    }
 
     // Click on background clears edge tooltip
     svg.on('click', () => {
@@ -1043,12 +1058,13 @@ export default function ApplicationDetail() {
       nodeElements.attr('transform', (d) => `translate(${d.x},${d.y})`);
     });
 
-    // Initial zoom to fit content
-    const padding = 30;
-    svg.call(
-      zoom.transform,
-      d3.zoomIdentity.translate(padding, padding).scale(0.85)
-    );
+    // Initial zoom to fit content (only on first render)
+    if (!transformRef.current) {
+      const padding = 30;
+      const initialTransform = d3.zoomIdentity.translate(padding, padding).scale(0.85);
+      svg.call(zoom.transform, initialTransform);
+      transformRef.current = initialTransform;
+    }
 
     return () => {
       simulation.stop();
