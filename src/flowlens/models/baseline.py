@@ -9,8 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from flowlens.common.database import Base
-from flowlens.models.mixins import TimestampMixin, UUIDMixin
+from flowlens.models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from flowlens.models.asset import Application
