@@ -2034,7 +2034,7 @@ export const backupApi = {
    * Get the download URL for a backup file
    */
   downloadUrl: (backupType: BackupType = 'configuration'): string => {
-    return `/api/v1/admin/backup/download?backup_type=${backupType}`;
+    return `/admin/backup/download?backup_type=${backupType}`;
   },
 
   /**
