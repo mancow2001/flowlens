@@ -138,6 +138,8 @@ export default function ApplicationDetail() {
   const [comparisonResult, setComparisonResult] = useState<BaselineComparisonResult | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const transformRef = useRef<d3.ZoomTransform | null>(null);
+  const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const nodesRef = useRef<SimNode[]>([]);
   const queryClient = useQueryClient();
 
   // Fetch saved layout for this application and hop depth
@@ -574,14 +576,8 @@ export default function ApplicationDetail() {
       .attr('d', 'M 0,-5 L 10 ,0 L 0,5')
       .attr('fill', '#eab308');
 
-    // In edit mode or frozen mode, fix all nodes in place
-    const shouldFreeze = editMode || layoutFrozen;
-    if (shouldFreeze) {
-      nodes.forEach(node => {
-        if (node.x !== undefined) node.fx = node.x;
-        if (node.y !== undefined) node.fy = node.y;
-      });
-    }
+    // Store nodes in ref for freeze/unfreeze access
+    nodesRef.current = nodes;
 
     // Create simulation with horizontal force to push members right
     const simulation = d3
@@ -592,28 +588,26 @@ export default function ApplicationDetail() {
           .forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
           .distance(120)
-          .strength(shouldFreeze ? 0 : 0.3) // Disable forces when frozen
+          .strength(0.3)
       )
-      .force('charge', d3.forceManyBody().strength(shouldFreeze ? 0 : -300))
-      .force('collision', d3.forceCollide().radius(45).strength(shouldFreeze ? 0 : 1))
+      .force('charge', d3.forceManyBody().strength(-300))
+      .force('collision', d3.forceCollide().radius(45).strength(1))
       // Push non-fixed nodes towards the right side
       .force('x', d3.forceX<SimNode>()
         .x((d) => {
           if (d.fx !== undefined && d.fx !== null) return d.fx; // Fixed nodes stay
           return LAYOUT.memberX + 100; // Members pulled right
         })
-        .strength(shouldFreeze ? 0 : 0.3)
+        .strength(0.3)
       )
       .force('y', d3.forceY<SimNode>()
         .y(height / 2)
-        .strength(shouldFreeze ? 0 : 0.05) // Weak vertical centering
+        .strength(0.05) // Weak vertical centering
       )
       .alphaDecay(0.05); // Faster settling (default is 0.0228)
 
-    // Stop simulation immediately if frozen
-    if (shouldFreeze) {
-      simulation.stop();
-    }
+    // Store simulation in ref for freeze/unfreeze access
+    simulationRef.current = simulation;
 
     // Draw links
     const linksGroup = g.append('g').attr('class', 'links');
@@ -1293,8 +1287,39 @@ export default function ApplicationDetail() {
 
     return () => {
       simulation.stop();
+      simulationRef.current = null;
     };
-  }, [nodes, links, dimensions, editMode, layoutFrozen, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
+  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
+
+  // Handle freeze/unfreeze without recreating the simulation
+  useEffect(() => {
+    const simulation = simulationRef.current;
+    const currentNodes = nodesRef.current;
+    if (!simulation || currentNodes.length === 0) return;
+
+    const shouldFreeze = layoutFrozen || editMode;
+
+    if (shouldFreeze) {
+      // Fix all nodes at their current positions
+      currentNodes.forEach(node => {
+        if (node.x !== undefined) node.fx = node.x;
+        if (node.y !== undefined) node.fy = node.y;
+      });
+      // Stop the simulation
+      simulation.stop();
+    } else {
+      // Unfreeze: release nodes that aren't entry points or client summaries
+      currentNodes.forEach(node => {
+        // Keep entry points and client summaries fixed, release others
+        if (!node.is_entry_point && !node.is_client_summary) {
+          // Only release fy, keep fx to maintain column structure
+          node.fy = null;
+        }
+      });
+      // Restart simulation with low alpha to gently settle
+      simulation.alpha(0.1).restart();
+    }
+  }, [layoutFrozen, editMode]);
 
   if (isLoading || isLayoutLoading) {
     return <LoadingPage />;
