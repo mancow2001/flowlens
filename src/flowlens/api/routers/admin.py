@@ -79,6 +79,17 @@ async def metrics() -> Response:
     )
 
 
+def _is_ai_configured(settings) -> bool:
+    """Check if AI/LLM features are properly configured."""
+    llm = settings.llm
+    if llm.provider == "openai_compatible":
+        # OpenAI-compatible (Ollama, LM Studio) requires base_url
+        return bool(llm.base_url)
+    else:
+        # Anthropic/OpenAI require api_key
+        return bool(llm.api_key)
+
+
 @router.get("/info")
 async def info() -> dict[str, Any]:
     """Application info endpoint.
@@ -96,6 +107,7 @@ async def info() -> dict[str, Any]:
             "kafka_enabled": settings.kafka.enabled,
             "redis_enabled": settings.redis.enabled,
             "auth_enabled": settings.auth.enabled,
+            "ai_enabled": _is_ai_configured(settings),
         },
     }
 

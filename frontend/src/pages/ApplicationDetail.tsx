@@ -21,7 +21,7 @@ import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
-import { applicationsApi, layoutApi, dependencyApi } from '../services/api';
+import { applicationsApi, layoutApi, dependencyApi, adminApi } from '../services/api';
 import { getProtocolName, formatProtocolPort, formatBytes } from '../utils/network';
 import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
 
@@ -149,6 +149,14 @@ export default function ApplicationDetail() {
   const nodesRef = useRef<SimNode[]>([]);
   const currentPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const queryClient = useQueryClient();
+
+  // Fetch app info to check if AI features are enabled
+  const { data: appInfo } = useQuery({
+    queryKey: ['app-info'],
+    queryFn: () => adminApi.getAppInfo(),
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+  const aiEnabled = appInfo?.features?.ai_enabled ?? false;
 
   // Fetch saved layout for this application and hop depth
   const { data: savedLayout, isLoading: isLayoutLoading } = useQuery({
@@ -1752,6 +1760,7 @@ export default function ApplicationDetail() {
               onExplain={handleExplainEdge}
               explanation={edgeExplanation}
               isExplaining={isExplaining}
+              aiEnabled={aiEnabled}
             />
           )}
         </div>

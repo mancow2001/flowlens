@@ -577,6 +577,23 @@ export const changeApi = {
   },
 };
 
+// App features interface
+export interface AppFeatures {
+  kafka_enabled: boolean;
+  redis_enabled: boolean;
+  auth_enabled: boolean;
+  ai_enabled: boolean;
+}
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  environment: string;
+  debug: boolean;
+  timestamp: string;
+  features: AppFeatures;
+}
+
 // Admin endpoints
 export const adminApi = {
   getHealth: async (): Promise<{ status: string; details: Record<string, unknown> }> => {
@@ -586,6 +603,11 @@ export const adminApi = {
 
   getStats: async (): Promise<Record<string, unknown>> => {
     const { data } = await api.get('/stats');
+    return data;
+  },
+
+  getAppInfo: async (): Promise<AppInfo> => {
+    const { data } = await api.get('/admin/info');
     return data;
   },
 };

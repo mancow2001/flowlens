@@ -19,6 +19,7 @@ interface EdgeTooltipProps {
   onExplain?: (dependencyId: string) => Promise<string>;
   explanation?: string | null;
   isExplaining?: boolean;
+  aiEnabled?: boolean;
 }
 
 function formatBytes(bytes: number): string {
@@ -51,9 +52,10 @@ const EdgeTooltip: React.FC<EdgeTooltipProps> = ({
   onExplain,
   explanation,
   isExplaining,
+  aiEnabled = false,
 }) => {
   const protocolName = getProtocolName(edge.protocol);
-  const canExplain = edge.dependency_id && onExplain && !edge.source.name.includes('clients');
+  const canExplain = aiEnabled && edge.dependency_id && onExplain && !edge.source.name.includes('clients');
   // Use target_ports if available, otherwise fall back to single port
   const ports = edge.target_ports && edge.target_ports.length > 0
     ? edge.target_ports
