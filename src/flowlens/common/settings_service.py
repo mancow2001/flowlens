@@ -86,6 +86,7 @@ def _get_section_object(settings: Settings, section_key: str) -> Any:
         "slack": settings.notifications.slack,
         "teams": settings.notifications.teams,
         "pagerduty": settings.notifications.pagerduty,
+        "llm": settings.llm,
         "kubernetes": settings.kubernetes,
         "vcenter": settings.vcenter,
         "nutanix": settings.nutanix,

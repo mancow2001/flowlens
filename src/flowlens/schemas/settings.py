@@ -1632,14 +1632,22 @@ SETTINGS_SECTIONS: list[SettingsSectionInfo] = [
     SettingsSectionInfo(
         key="llm",
         name="AI/LLM Configuration",
-        description="Configure AI-powered features like layout suggestions",
+        description="Configure AI-powered features like dependency explanations",
         icon="SparklesIcon",
         restart_required=False,
         fields=[
             FieldMetadata(
+                name="enabled",
+                label="Enable AI Features",
+                description="Enable AI-powered features (dependency explanations, etc.)",
+                field_type=FieldType.BOOLEAN,
+                env_var="LLM_ENABLED",
+                default=False,
+            ),
+            FieldMetadata(
                 name="provider",
                 label="LLM Provider",
-                description="Select the AI provider for layout suggestions",
+                description="Select the AI provider",
                 field_type=FieldType.SELECT,
                 options=["anthropic", "openai", "openai_compatible"],
                 env_var="LLM_PROVIDER",
