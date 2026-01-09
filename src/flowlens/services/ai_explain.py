@@ -113,14 +113,20 @@ async def explain_dependency(
     service_name = service_info.name if service_info else "unknown"
     service_category = service_info.category if service_info else "unknown"
 
+    # Helper to get asset type as string (handles both enum and string)
+    def get_asset_type_str(asset_type) -> str:
+        if asset_type is None:
+            return "unknown"
+        return asset_type.value if hasattr(asset_type, 'value') else str(asset_type)
+
     # Format the prompt
     prompt = EXPLANATION_PROMPT.format(
         source_name=source_asset.display_name or source_asset.name,
-        source_type=source_asset.asset_type.value if source_asset.asset_type else "unknown",
+        source_type=get_asset_type_str(source_asset.asset_type),
         source_ip=str(source_asset.ip_address),
         source_criticality=source_asset.criticality_score or 0,
         target_name=target_asset.display_name or target_asset.name,
-        target_type=target_asset.asset_type.value if target_asset.asset_type else "unknown",
+        target_type=get_asset_type_str(target_asset.asset_type),
         target_ip=str(target_asset.ip_address),
         target_criticality=target_asset.criticality_score or 0,
         port=dependency.target_port,
