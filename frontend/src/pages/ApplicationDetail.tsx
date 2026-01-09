@@ -60,7 +60,8 @@ interface SimNode extends d3.SimulationNodeDatum {
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
-  id: string;
+  id: string;  // Composite key for D3
+  dependency_id?: string;  // Actual dependency UUID for API calls
   target_port: number;
   protocol: number;
   dependency_type: string | null;
@@ -420,6 +421,7 @@ export default function ApplicationDetail() {
 
       simLinks.push({
         id: `${edge.source}-${edge.target}-${i}`,
+        dependency_id: edge.id,  // Actual dependency UUID
         source: edge.source,
         target: edge.target,
         target_port: edge.target_port,
@@ -1743,7 +1745,7 @@ export default function ApplicationDetail() {
                 bytes_last_24h: hoveredEdge.edge.bytes_last_24h ?? undefined,
                 last_seen: hoveredEdge.edge.last_seen ?? undefined,
                 service_type: hoveredEdge.edge.dependency_type,
-                dependency_id: hoveredEdge.edge.id,
+                dependency_id: hoveredEdge.edge.dependency_id,
               }}
               position={hoveredEdge.position}
               containerBounds={containerRef.current?.getBoundingClientRect()}

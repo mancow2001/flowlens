@@ -617,6 +617,7 @@ export interface ApplicationTopologyNode {
 }
 
 export interface ApplicationTopologyEdge {
+  id?: string;  // Dependency UUID
   source: string;
   target: string;
   target_port: number;
