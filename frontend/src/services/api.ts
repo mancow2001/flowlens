@@ -271,6 +271,16 @@ export const dependencyApi = {
     const { data } = await api.get(`/dependencies/${id}`);
     return data;
   },
+
+  explain: async (id: string): Promise<{
+    dependency_id: string;
+    explanation: string;
+    generated_at: string;
+    cached: boolean;
+  }> => {
+    const { data } = await api.get(`/dependencies/${id}/explain`);
+    return data;
+  },
 };
 
 // Topology config response type

@@ -21,8 +21,8 @@ import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
-import { applicationsApi, layoutApi } from '../services/api';
-import { getProtocolName, formatProtocolPort, formatBytes, getEdgeLabelForPort } from '../utils/network';
+import { applicationsApi, layoutApi, dependencyApi } from '../services/api';
+import { getProtocolName, formatProtocolPort, formatBytes } from '../utils/network';
 import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
 
 // Entry point in topology data
@@ -140,6 +140,8 @@ export default function ApplicationDetail() {
   const [isArranging, setIsArranging] = useState(false);
   const [showArrangeConfirm, setShowArrangeConfirm] = useState(false);
   const [preArrangePositions, setPreArrangePositions] = useState<Record<string, { x: number; y: number }> | null>(null);
+  const [edgeExplanation, setEdgeExplanation] = useState<string | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const transformRef = useRef<d3.ZoomTransform | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
@@ -627,6 +629,28 @@ export default function ApplicationDetail() {
     setPreArrangePositions(null);
   }, [preArrangePositions]);
 
+  // Handle AI explanation for a dependency
+  const handleExplainEdge = useCallback(async (dependencyId: string): Promise<string> => {
+    setIsExplaining(true);
+    setEdgeExplanation(null);
+    try {
+      const result = await dependencyApi.explain(dependencyId);
+      setEdgeExplanation(result.explanation);
+      return result.explanation;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate explanation';
+      setEdgeExplanation(`Error: ${message}`);
+      return `Error: ${message}`;
+    } finally {
+      setIsExplaining(false);
+    }
+  }, []);
+
+  // Clear explanation when hovering a different edge
+  useEffect(() => {
+    setEdgeExplanation(null);
+  }, [hoveredEdge?.edge.id]);
+
   // Handle container resize
   useEffect(() => {
     if (!containerRef.current) return;
@@ -816,18 +840,6 @@ export default function ApplicationDetail() {
         // Prevent click from bubbling to SVG background
         event.stopPropagation();
       });
-
-    // Port labels on edges
-    const edgeLabels = linksGroup
-      .selectAll('text.edge-label')
-      .data(links)
-      .join('text')
-      .attr('class', 'edge-label')
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#94a3b8')
-      .attr('font-size', 10)
-      .attr('pointer-events', 'none')
-      .text((d) => getEdgeLabelForPort(d.target_port));
 
     // Draw asset groups (render before nodes so they appear behind)
     const assetGroups = savedLayout?.groups || [];
@@ -1345,82 +1357,6 @@ export default function ApplicationDetail() {
           });
       }
 
-      edgeLabels
-        .attr('x', (d) => {
-          const source = d.source as SimNode;
-          const target = d.target as SimNode;
-          const sx = source.x ?? 0;
-          const sy = source.y ?? 0;
-          const tx = target.x ?? 0;
-          const ty = target.y ?? 0;
-          const midX = (sx + tx) / 2;
-
-          // For straight client edges, use simple midpoint
-          if (d.is_from_client_summary) {
-            return midX;
-          }
-
-          // For curved edges, offset perpendicular to edge direction
-          const dx = tx - sx;
-          const dy = ty - sy;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          if (len === 0) return midX;
-
-          // Perpendicular direction (matches arc sweep direction)
-          const perpX = -dy / len;
-          const offset = 15;
-          let labelX = midX + perpX * offset;
-
-          // Spread labels for edges with same source-target (different ports)
-          const key = `${source.id}-${target.id}`;
-          const group = edgeGroupMap.get(key);
-          if (group && group.count > 1) {
-            const idx = group.indexMap.get(d.id) ?? 0;
-            const spreadOffset = (idx - (group.count - 1) / 2) * 18;
-            // Spread along edge direction
-            labelX += (dx / len) * spreadOffset;
-          }
-
-          return labelX;
-        })
-        .attr('y', (d) => {
-          const source = d.source as SimNode;
-          const target = d.target as SimNode;
-          const sx = source.x ?? 0;
-          const sy = source.y ?? 0;
-          const tx = target.x ?? 0;
-          const ty = target.y ?? 0;
-          const midY = (sy + ty) / 2;
-
-          // For straight client edges, use simple midpoint with small offset
-          if (d.is_from_client_summary) {
-            return midY - 8;
-          }
-
-          // For curved edges, offset perpendicular to edge direction
-          const dx = tx - sx;
-          const dy = ty - sy;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          if (len === 0) return midY - 8;
-
-          // Perpendicular direction (matches arc sweep direction)
-          const perpY = dx / len;
-          const offset = 15;
-          let labelY = midY + perpY * offset;
-
-          // Spread labels for edges with same source-target (different ports)
-          const key = `${source.id}-${target.id}`;
-          const group = edgeGroupMap.get(key);
-          if (group && group.count > 1) {
-            const idx = group.indexMap.get(d.id) ?? 0;
-            const spreadOffset = (idx - (group.count - 1) / 2) * 18;
-            // Spread along edge direction
-            labelY += (dy / len) * spreadOffset;
-          }
-
-          return labelY;
-        });
-
       // Update group bounds based on member node positions
       groupElements.each(function (d) {
         const bounds = calculateGroupBounds(d);
@@ -1807,9 +1743,13 @@ export default function ApplicationDetail() {
                 bytes_last_24h: hoveredEdge.edge.bytes_last_24h ?? undefined,
                 last_seen: hoveredEdge.edge.last_seen ?? undefined,
                 service_type: hoveredEdge.edge.dependency_type,
+                dependency_id: hoveredEdge.edge.id,
               }}
               position={hoveredEdge.position}
               containerBounds={containerRef.current?.getBoundingClientRect()}
+              onExplain={handleExplainEdge}
+              explanation={edgeExplanation}
+              isExplaining={isExplaining}
             />
           )}
         </div>
