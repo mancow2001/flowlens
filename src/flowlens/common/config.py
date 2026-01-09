@@ -496,6 +496,7 @@ class LLMSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
+    enabled: bool = False  # AI features disabled by default
     provider: Literal["anthropic", "openai", "openai_compatible"] = "anthropic"
     api_key: str | None = None
     model: str | None = None  # Optional model override (uses provider default if not set)

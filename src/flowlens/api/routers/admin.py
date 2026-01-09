@@ -80,8 +80,10 @@ async def metrics() -> Response:
 
 
 def _is_ai_configured(settings) -> bool:
-    """Check if AI/LLM features are properly configured."""
+    """Check if AI/LLM features are enabled and properly configured."""
     llm = settings.llm
+    if not llm.enabled:
+        return False
     if llm.provider == "openai_compatible":
         # OpenAI-compatible (Ollama, LM Studio) requires base_url
         return bool(llm.base_url)
