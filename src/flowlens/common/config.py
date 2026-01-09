@@ -162,6 +162,20 @@ class ResolutionSettings(BaseSettings):
     stale_threshold_hours: int = Field(default=24, ge=1)
     new_dependency_lookback_minutes: int = Field(default=30, ge=5)
 
+    # Stale cleanup settings
+    stale_dependency_cleanup_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Automatically close dependencies with no traffic after this many days"
+    )
+    stale_asset_cleanup_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Automatically soft-delete assets with no activity after this many days"
+    )
+
     # External IP filtering - master switch
     discard_external_flows: bool = Field(
         default=True,

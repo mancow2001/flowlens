@@ -4,7 +4,7 @@ Detects new, stale, and changed dependencies and assets,
 generating change events and alerts.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -54,6 +54,8 @@ class ChangeDetector:
             settings = app_settings.resolution
 
         self._stale_threshold_hours = settings.stale_threshold_hours
+        self._stale_dependency_cleanup_days = settings.stale_dependency_cleanup_days
+        self._stale_asset_cleanup_days = settings.stale_asset_cleanup_days
         self._traffic_spike_threshold = 2.0  # 2x baseline
         self._traffic_drop_threshold = 0.5  # 50% of baseline
 
@@ -473,10 +475,11 @@ class ChangeDetector:
         db.add(alert)
         await db.flush()
 
+        severity_str = severity.value if hasattr(severity, 'value') else str(severity)
         logger.info(
             "Created alert",
             alert_id=str(alert.id),
-            severity=severity.value,
+            severity=severity_str,
             title=title,
             rule=rule_result.matching_rule.name if rule_result.matching_rule else None,
         )
@@ -493,14 +496,15 @@ class ChangeDetector:
 
         # Broadcast via WebSocket
         try:
+            change_type_str = event.change_type.value if hasattr(event.change_type, 'value') else str(event.change_type)
             await broadcast_alert_event(
                 EventType.ALERT_CREATED,
                 alert.id,
                 {
-                    "severity": severity.value,
+                    "severity": severity_str,
                     "title": title,
                     "message": message[:200] if message else None,  # Truncate for broadcast
-                    "change_type": event.change_type.value,
+                    "change_type": change_type_str,
                     "asset_id": str(alert.asset_id) if alert.asset_id else None,
                     "dependency_id": str(alert.dependency_id) if alert.dependency_id else None,
                 },
@@ -1063,7 +1067,12 @@ class ChangeDetector:
             if not asset:
                 continue
 
-            hours_offline = (datetime.utcnow() - asset.last_seen).total_seconds() / 3600
+            # Handle both timezone-aware and naive datetimes
+            now = datetime.now(timezone.utc)
+            last_seen = asset.last_seen
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            hours_offline = (now - last_seen).total_seconds() / 3600
 
             event = await self.create_change_event(
                 db,
@@ -1193,6 +1202,108 @@ class ChangeDetector:
 
         return critical_deps
 
+    async def cleanup_stale_dependencies(
+        self,
+        db: AsyncSession,
+        threshold_days: int | None = None,
+    ) -> int:
+        """Close dependencies that have been stale for too long.
+
+        Sets valid_to to mark dependencies as closed/ended.
+
+        Args:
+            db: Database session.
+            threshold_days: Days since last activity to trigger cleanup.
+
+        Returns:
+            Number of dependencies closed.
+        """
+        if threshold_days is None:
+            threshold_days = self._stale_dependency_cleanup_days
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+
+        # Find dependencies to close
+        result = await db.execute(
+            select(Dependency.id)
+            .where(
+                Dependency.last_seen < cutoff,
+                Dependency.valid_to.is_(None),
+            )
+            .limit(500)
+        )
+        stale_ids = [row[0] for row in result.fetchall()]
+
+        if not stale_ids:
+            return 0
+
+        # Close the dependencies by setting valid_to
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(Dependency)
+            .where(Dependency.id.in_(stale_ids))
+            .values(valid_to=now)
+        )
+
+        logger.info(
+            "Cleaned up stale dependencies",
+            count=len(stale_ids),
+            threshold_days=threshold_days,
+        )
+
+        return len(stale_ids)
+
+    async def cleanup_stale_assets(
+        self,
+        db: AsyncSession,
+        threshold_days: int | None = None,
+    ) -> int:
+        """Soft-delete assets that have been inactive for too long.
+
+        Sets deleted_at to mark assets as removed.
+
+        Args:
+            db: Database session.
+            threshold_days: Days since last activity to trigger cleanup.
+
+        Returns:
+            Number of assets soft-deleted.
+        """
+        if threshold_days is None:
+            threshold_days = self._stale_asset_cleanup_days
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+
+        # Find assets to soft-delete
+        result = await db.execute(
+            select(Asset.id)
+            .where(
+                Asset.last_seen < cutoff,
+                Asset.deleted_at.is_(None),
+            )
+            .limit(500)
+        )
+        stale_ids = [row[0] for row in result.fetchall()]
+
+        if not stale_ids:
+            return 0
+
+        # Soft-delete the assets
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(Asset)
+            .where(Asset.id.in_(stale_ids))
+            .values(deleted_at=now)
+        )
+
+        logger.info(
+            "Cleaned up stale assets",
+            count=len(stale_ids),
+            threshold_days=threshold_days,
+        )
+
+        return len(stale_ids)
+
     async def run_detection_cycle(
         self,
         db: AsyncSession,
@@ -1228,6 +1339,8 @@ class ChangeDetector:
             "new_dependencies": 0,
             "events_created": 0,
             "alerts_created": 0,
+            "dependencies_cleaned_up": 0,
+            "assets_cleaned_up": 0,
         }
 
         # Detect stale dependencies
@@ -1290,6 +1403,10 @@ class ChangeDetector:
             events_created = await self.process_new_dependencies(db, new_deps[:100])
             results["events_created"] += events_created
             results["alerts_created"] += events_created
+
+        # Cleanup stale dependencies and assets (after configured threshold)
+        results["dependencies_cleaned_up"] = await self.cleanup_stale_dependencies(db)
+        results["assets_cleaned_up"] = await self.cleanup_stale_assets(db)
 
         await db.commit()
 
