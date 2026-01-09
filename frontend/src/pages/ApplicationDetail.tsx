@@ -468,7 +468,7 @@ export default function ApplicationDetail() {
     return { nodes: simNodes, links: simLinks };
   }, [topology, dimensions, maxDepth, hideInfrastructureOnly, savedLayout]);
 
-  // AI-powered layout arrangement handlers
+  // Suggested layout arrangement handlers
   const handleAIArrange = useCallback(async () => {
     if (!id || !dimensions.width || !dimensions.height) return;
     setIsArranging(true);
@@ -483,37 +483,91 @@ export default function ApplicationDetail() {
     setPreArrangePositions(currentPositions);
 
     try {
-      // Prepare data for LLM using current nodes from ref
       const currentNodes = nodesRef.current;
-      const nodeData = currentNodes.map(n => ({
-        id: n.id,
-        name: n.display_name || n.name,
-        node_type: n.is_entry_point ? 'entry_point' : n.is_client_summary ? 'client_summary' : n.is_external ? 'external' : 'member',
-        hop_distance: n.hop_distance ?? 0,
-        is_critical: n.is_critical,
-      }));
+      const nodeById = new Map(currentNodes.map(node => [node.id, node]));
+      const getNodeId = (nodeOrId: SimNode | string | number) =>
+        typeof nodeOrId === 'string' ? nodeOrId : (nodeOrId as SimNode).id;
 
-      // Build edge data from the links array
-      const edgeData = links.map(l => {
-        const sourceId = typeof l.source === 'object' && l.source !== null ? (l.source as SimNode).id : String(l.source);
-        const targetId = typeof l.target === 'object' && l.target !== null ? (l.target as SimNode).id : String(l.target);
-        return {
-          source_id: sourceId,
-          target_id: targetId,
-          dependency_type: l.dependency_type,
-        };
+      const nodesByLayer = new Map<number, SimNode[]>();
+      currentNodes.forEach(node => {
+        const layer = node.is_client_summary ? -1 : node.hop_distance ?? 0;
+        if (!nodesByLayer.has(layer)) nodesByLayer.set(layer, []);
+        nodesByLayer.get(layer)!.push(node);
       });
 
-      const result = await layoutApi.aiArrange(id, maxDepth, {
-        nodes: nodeData,
-        edges: edgeData,
-        canvas_width: dimensions.width,
-        canvas_height: dimensions.height,
+      const incomingFromPrev = new Map<string, string[]>();
+      links.forEach(link => {
+        const sourceId = getNodeId(link.source as SimNode);
+        const targetId = getNodeId(link.target as SimNode);
+        const sourceNode = nodeById.get(sourceId);
+        const targetNode = nodeById.get(targetId);
+        if (!sourceNode || !targetNode) return;
+        const sourceLayer = sourceNode.is_client_summary ? -1 : sourceNode.hop_distance ?? 0;
+        const targetLayer = targetNode.is_client_summary ? -1 : targetNode.hop_distance ?? 0;
+        if (targetLayer !== sourceLayer + 1) return;
+        if (!incomingFromPrev.has(targetId)) incomingFromPrev.set(targetId, []);
+        incomingFromPrev.get(targetId)!.push(sourceId);
+      });
+
+      const sortedLayers = Array.from(nodesByLayer.keys()).sort((a, b) => a - b);
+      const positions: Record<string, { x: number; y: number }> = {};
+      let prevLayerPositions = new Map<string, number>();
+
+      sortedLayers.forEach(layer => {
+        const layerNodes = nodesByLayer.get(layer)!;
+        if (layer === -1) {
+          layerNodes.sort((a, b) => {
+            const aEntry = a.target_entry_point_id ? nodeById.get(a.target_entry_point_id) : undefined;
+            const bEntry = b.target_entry_point_id ? nodeById.get(b.target_entry_point_id) : undefined;
+            const aOrder = aEntry?.entry_point_order ?? Number.MAX_SAFE_INTEGER;
+            const bOrder = bEntry?.entry_point_order ?? Number.MAX_SAFE_INTEGER;
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            if ((a.entry_point_port ?? 0) !== (b.entry_point_port ?? 0)) {
+              return (a.entry_point_port ?? 0) - (b.entry_point_port ?? 0);
+            }
+            return (a.name || '').localeCompare(b.name || '');
+          });
+        } else if (layer === 0) {
+          layerNodes.sort((a, b) => {
+            const aOrder = a.entry_point_order ?? Number.MAX_SAFE_INTEGER;
+            const bOrder = b.entry_point_order ?? Number.MAX_SAFE_INTEGER;
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return (a.display_name || a.name).localeCompare(b.display_name || b.name);
+          });
+        } else {
+          layerNodes.sort((a, b) => {
+            const aSources = incomingFromPrev.get(a.id) ?? [];
+            const bSources = incomingFromPrev.get(b.id) ?? [];
+            const aAvg =
+              aSources.length > 0
+                ? aSources.reduce((sum, id) => sum + (prevLayerPositions.get(id) ?? 0), 0) / aSources.length
+                : a.y ?? 0;
+            const bAvg =
+              bSources.length > 0
+                ? bSources.reduce((sum, id) => sum + (prevLayerPositions.get(id) ?? 0), 0) / bSources.length
+                : b.y ?? 0;
+            if (aAvg !== bAvg) return aAvg - bAvg;
+            const aDegree = aSources.length;
+            const bDegree = bSources.length;
+            if (aDegree !== bDegree) return bDegree - aDegree;
+            return (a.display_name || a.name).localeCompare(b.display_name || b.name);
+          });
+        }
+
+        const ySpacing = dimensions.height / (layerNodes.length + 1);
+        const xPos = getLayoutX(layer);
+        prevLayerPositions = new Map();
+
+        layerNodes.forEach((node, index) => {
+          const yPos = ySpacing * (index + 1);
+          positions[node.id] = { x: xPos, y: yPos };
+          prevLayerPositions.set(node.id, yPos);
+        });
       });
 
       // Apply new positions with animation
       nodesRef.current.forEach(node => {
-        const newPos = result.positions[node.id];
+        const newPos = positions[node.id];
         if (newPos) {
           node.fx = newPos.x;
           node.fy = newPos.y;
@@ -526,7 +580,7 @@ export default function ApplicationDetail() {
       // Show confirmation dialog
       setShowArrangeConfirm(true);
     } catch (error) {
-      console.error('AI arrange failed:', error);
+      console.error('Suggested arrange failed:', error);
       // Revert on error
       if (currentPositions && Object.keys(currentPositions).length > 0) {
         nodesRef.current.forEach(node => {
@@ -542,7 +596,7 @@ export default function ApplicationDetail() {
     } finally {
       setIsArranging(false);
     }
-  }, [id, maxDepth, links, dimensions]);
+  }, [id, links, dimensions]);
 
   const handleKeepArrangement = useCallback(async () => {
     // Save the new positions to backend
@@ -1563,7 +1617,7 @@ export default function ApplicationDetail() {
                 onClick={handleAIArrange}
                 disabled={isArranging}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-                title="Use AI to suggest optimal arrangement"
+                title="Suggest a layered arrangement"
               >
                 <SparklesIcon className={`h-4 w-4 ${isArranging ? 'animate-pulse' : ''}`} />
                 {isArranging ? 'Arranging...' : 'Suggest Arrangement'}
@@ -1950,7 +2004,7 @@ export default function ApplicationDetail() {
         title="Create Asset Group"
       />
 
-      {/* AI Arrangement Confirmation Dialog */}
+      {/* Arrangement Confirmation Dialog */}
       {showArrangeConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-lg p-6 max-w-sm shadow-xl border border-slate-700">
@@ -1961,7 +2015,7 @@ export default function ApplicationDetail() {
               <h3 className="text-lg font-medium text-white">Keep this arrangement?</h3>
             </div>
             <p className="text-slate-400 text-sm mb-6">
-              The AI has suggested a new layout for your topology. Would you like to keep it or discard the changes?
+              A new layered layout has been suggested for your topology. Would you like to keep it or discard the changes?
             </p>
             <div className="flex gap-3 justify-end">
               <button
