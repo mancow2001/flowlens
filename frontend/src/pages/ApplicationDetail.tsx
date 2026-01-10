@@ -13,6 +13,8 @@ import {
   LockClosedIcon,
   LockOpenIcon,
   SparklesIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -24,7 +26,8 @@ import BaselinePanel from '../components/baseline/BaselinePanel';
 import { applicationsApi, layoutApi, dependencyApi, adminApi } from '../services/api';
 import { getProtocolName, formatProtocolPort } from '../utils/network';
 import { formatBytes } from '../utils/format';
-import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
+import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange, LayoutSuggestion } from '../types';
+import { generateLayoutSuggestions } from '../utils/layoutSuggestions';
 
 // Entry point in topology data
 interface TopologyEntryPointInfo {
@@ -141,6 +144,8 @@ export default function ApplicationDetail() {
   const [comparisonResult, setComparisonResult] = useState<BaselineComparisonResult | null>(null);
   const [isArranging, setIsArranging] = useState(false);
   const [showArrangeConfirm, setShowArrangeConfirm] = useState(false);
+  const [layoutSuggestions, setLayoutSuggestions] = useState<LayoutSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [preArrangePositions, setPreArrangePositions] = useState<Record<string, { x: number; y: number }> | null>(null);
   const [edgeExplanation, setEdgeExplanation] = useState<string | null>(null);
   const [isExplaining, setIsExplaining] = useState(false);
@@ -496,99 +501,51 @@ export default function ApplicationDetail() {
     setPreArrangePositions(currentPositions);
 
     try {
-      const currentNodes = nodesRef.current;
-      const nodeById = new Map(currentNodes.map(node => [node.id, node]));
-      const getNodeId = (nodeOrId: SimNode | string | number) =>
-        typeof nodeOrId === 'string' ? nodeOrId : (nodeOrId as SimNode).id;
+      // Prepare nodes and edges for layout suggestion
+      const layoutNodes = nodesRef.current.map(node => ({
+        id: node.id,
+        name: node.name,
+        ip_address: node.ip_address,
+        asset_type: node.asset_type,
+        is_internal: !node.is_external,
+        x: node.x,
+        y: node.y,
+      }));
 
-      const nodesByLayer = new Map<number, SimNode[]>();
-      currentNodes.forEach(node => {
-        const layer = node.is_client_summary ? -1 : node.hop_distance ?? 0;
-        if (!nodesByLayer.has(layer)) nodesByLayer.set(layer, []);
-        nodesByLayer.get(layer)!.push(node);
+      const layoutEdges = links.map(link => {
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as SimNode).id;
+        const targetId = typeof link.target === 'string' ? link.target : (link.target as SimNode).id;
+        return {
+          source: sourceId,
+          target: targetId,
+          port: link.target_port,
+          total_bytes: link.bytes_last_24h ?? undefined,
+        };
       });
 
-      const incomingFromPrev = new Map<string, string[]>();
-      links.forEach(link => {
-        const sourceId = getNodeId(link.source as SimNode);
-        const targetId = getNodeId(link.target as SimNode);
-        const sourceNode = nodeById.get(sourceId);
-        const targetNode = nodeById.get(targetId);
-        if (!sourceNode || !targetNode) return;
-        const sourceLayer = sourceNode.is_client_summary ? -1 : sourceNode.hop_distance ?? 0;
-        const targetLayer = targetNode.is_client_summary ? -1 : targetNode.hop_distance ?? 0;
-        if (targetLayer !== sourceLayer + 1) return;
-        if (!incomingFromPrev.has(targetId)) incomingFromPrev.set(targetId, []);
-        incomingFromPrev.get(targetId)!.push(sourceId);
-      });
+      // Generate 3 layout suggestions
+      const suggestions = generateLayoutSuggestions(
+        layoutNodes,
+        layoutEdges,
+        dimensions.width,
+        dimensions.height
+      );
 
-      const sortedLayers = Array.from(nodesByLayer.keys()).sort((a, b) => a - b);
-      const positions: Record<string, { x: number; y: number }> = {};
-      let prevLayerPositions = new Map<string, number>();
+      setLayoutSuggestions(suggestions);
+      setSelectedSuggestionIndex(0);
 
-      sortedLayers.forEach(layer => {
-        const layerNodes = nodesByLayer.get(layer)!;
-        if (layer === -1) {
-          layerNodes.sort((a, b) => {
-            const aEntry = a.target_entry_point_id ? nodeById.get(a.target_entry_point_id) : undefined;
-            const bEntry = b.target_entry_point_id ? nodeById.get(b.target_entry_point_id) : undefined;
-            const aOrder = aEntry?.entry_point_order ?? Number.MAX_SAFE_INTEGER;
-            const bOrder = bEntry?.entry_point_order ?? Number.MAX_SAFE_INTEGER;
-            if (aOrder !== bOrder) return aOrder - bOrder;
-            if ((a.entry_point_port ?? 0) !== (b.entry_point_port ?? 0)) {
-              return (a.entry_point_port ?? 0) - (b.entry_point_port ?? 0);
-            }
-            return (a.name || '').localeCompare(b.name || '');
-          });
-        } else if (layer === 0) {
-          layerNodes.sort((a, b) => {
-            const aOrder = a.entry_point_order ?? Number.MAX_SAFE_INTEGER;
-            const bOrder = b.entry_point_order ?? Number.MAX_SAFE_INTEGER;
-            if (aOrder !== bOrder) return aOrder - bOrder;
-            return (a.display_name || a.name).localeCompare(b.display_name || b.name);
-          });
-        } else {
-          layerNodes.sort((a, b) => {
-            const aSources = incomingFromPrev.get(a.id) ?? [];
-            const bSources = incomingFromPrev.get(b.id) ?? [];
-            const aAvg =
-              aSources.length > 0
-                ? aSources.reduce((sum, id) => sum + (prevLayerPositions.get(id) ?? 0), 0) / aSources.length
-                : a.y ?? 0;
-            const bAvg =
-              bSources.length > 0
-                ? bSources.reduce((sum, id) => sum + (prevLayerPositions.get(id) ?? 0), 0) / bSources.length
-                : b.y ?? 0;
-            if (aAvg !== bAvg) return aAvg - bAvg;
-            const aDegree = aSources.length;
-            const bDegree = bSources.length;
-            if (aDegree !== bDegree) return bDegree - aDegree;
-            return (a.display_name || a.name).localeCompare(b.display_name || b.name);
-          });
-        }
-
-        const ySpacing = dimensions.height / (layerNodes.length + 1);
-        const xPos = getLayoutX(layer);
-        prevLayerPositions = new Map();
-
-        layerNodes.forEach((node, index) => {
-          const yPos = ySpacing * (index + 1);
-          positions[node.id] = { x: xPos, y: yPos };
-          prevLayerPositions.set(node.id, yPos);
+      // Apply the first suggestion's positions
+      const firstSuggestion = suggestions[0];
+      if (firstSuggestion) {
+        nodesRef.current.forEach(node => {
+          const newPos = firstSuggestion.positions[node.id];
+          if (newPos) {
+            node.fx = newPos.x;
+            node.fy = newPos.y;
+          }
         });
-      });
-
-      // Apply new positions with animation
-      nodesRef.current.forEach(node => {
-        const newPos = positions[node.id];
-        if (newPos) {
-          node.fx = newPos.x;
-          node.fy = newPos.y;
-        }
-      });
-
-      // Restart simulation briefly to animate
-      simulationRef.current?.alpha(0.3).restart();
+        simulationRef.current?.alpha(0.3).restart();
+      }
 
       // Show confirmation dialog
       setShowArrangeConfirm(true);
@@ -606,10 +563,36 @@ export default function ApplicationDetail() {
         simulationRef.current?.alpha(0.3).restart();
       }
       setPreArrangePositions(null);
+      setLayoutSuggestions([]);
     } finally {
       setIsArranging(false);
     }
   }, [id, links, dimensions]);
+
+  // Apply a specific layout suggestion (used when navigating between options)
+  const applySuggestion = useCallback((suggestion: LayoutSuggestion) => {
+    nodesRef.current.forEach(node => {
+      const newPos = suggestion.positions[node.id];
+      if (newPos) {
+        node.fx = newPos.x;
+        node.fy = newPos.y;
+      }
+    });
+    simulationRef.current?.alpha(0.3).restart();
+  }, []);
+
+  // Handle navigation between layout suggestions
+  const handlePrevSuggestion = useCallback(() => {
+    const newIndex = (selectedSuggestionIndex - 1 + layoutSuggestions.length) % layoutSuggestions.length;
+    setSelectedSuggestionIndex(newIndex);
+    applySuggestion(layoutSuggestions[newIndex]);
+  }, [selectedSuggestionIndex, layoutSuggestions, applySuggestion]);
+
+  const handleNextSuggestion = useCallback(() => {
+    const newIndex = (selectedSuggestionIndex + 1) % layoutSuggestions.length;
+    setSelectedSuggestionIndex(newIndex);
+    applySuggestion(layoutSuggestions[newIndex]);
+  }, [selectedSuggestionIndex, layoutSuggestions, applySuggestion]);
 
   const handleKeepArrangement = useCallback(async () => {
     // Save the new positions to backend
@@ -620,9 +603,27 @@ export default function ApplicationDetail() {
       }
     });
     await savePositionsMutation.mutateAsync(positions);
+
+    // Create groups from the selected suggestion
+    const selectedSuggestion = layoutSuggestions[selectedSuggestionIndex];
+    if (selectedSuggestion && selectedSuggestion.groups.length > 0) {
+      // Create each group sequentially
+      for (const group of selectedSuggestion.groups) {
+        if (group.asset_ids.length >= 2) {
+          await createGroupMutation.mutateAsync({
+            name: group.name,
+            color: group.color,
+            asset_ids: group.asset_ids,
+          });
+        }
+      }
+    }
+
     setShowArrangeConfirm(false);
     setPreArrangePositions(null);
-  }, [savePositionsMutation]);
+    setLayoutSuggestions([]);
+    setSelectedSuggestionIndex(0);
+  }, [savePositionsMutation, createGroupMutation, layoutSuggestions, selectedSuggestionIndex]);
 
   const handleDiscardArrangement = useCallback(() => {
     // Revert to previous positions
@@ -638,6 +639,8 @@ export default function ApplicationDetail() {
     }
     setShowArrangeConfirm(false);
     setPreArrangePositions(null);
+    setLayoutSuggestions([]);
+    setSelectedSuggestionIndex(0);
   }, [preArrangePositions]);
 
   // Handle AI explanation for a dependency
@@ -947,7 +950,7 @@ export default function ApplicationDetail() {
       .attr('class', 'asset-group');
 
     // Track group drag state
-    let groupDragStartPositions: Map<string, { x: number; y: number }> = new Map();
+    const groupDragStartPositions: Map<string, { x: number; y: number }> = new Map();
 
     // Add drag behavior to groups in edit mode
     if (editMode) {
@@ -1050,7 +1053,7 @@ export default function ApplicationDetail() {
     const nodesGroup = g.append('g').attr('class', 'nodes');
 
     // Track drag start positions for multi-select dragging
-    let dragStartPositions: Map<string, { x: number; y: number }> = new Map();
+    const dragStartPositions: Map<string, { x: number; y: number }> = new Map();
 
     const nodeElements = nodesGroup
       .selectAll<SVGGElement, SimNode>('g')
@@ -1956,32 +1959,95 @@ export default function ApplicationDetail() {
         title="Create Asset Group"
       />
 
-      {/* Arrangement Confirmation Dialog */}
-      {showArrangeConfirm && (
+      {/* Layout Suggestion Carousel Dialog */}
+      {showArrangeConfirm && layoutSuggestions.length > 0 && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 max-w-sm shadow-xl border border-slate-700">
+          <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full shadow-xl border border-slate-700">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2 rounded-full bg-indigo-600/20">
                 <SparklesIcon className="h-6 w-6 text-indigo-400" />
               </div>
-              <h3 className="text-lg font-medium text-white">Keep this arrangement?</h3>
+              <div className="flex-1">
+                <h3 className="text-lg font-medium text-white">Choose Layout</h3>
+                <p className="text-sm text-slate-400">
+                  {selectedSuggestionIndex + 1} of {layoutSuggestions.length} options
+                </p>
+              </div>
             </div>
-            <p className="text-slate-400 text-sm mb-6">
-              A new layered layout has been suggested for your topology. Would you like to keep it or discard the changes?
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={handleDiscardArrangement}
-                className="px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
-              >
-                Discard
-              </button>
-              <button
-                onClick={handleKeepArrangement}
-                className="px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
-              >
-                Keep
-              </button>
+
+            {/* Current suggestion details */}
+            <div className="bg-slate-900/50 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-white font-medium">
+                  {layoutSuggestions[selectedSuggestionIndex]?.name}
+                </h4>
+                <div className="flex gap-1">
+                  {layoutSuggestions.map((_, idx) => (
+                    <div
+                      key={idx}
+                      className={`w-2 h-2 rounded-full transition-colors ${
+                        idx === selectedSuggestionIndex ? 'bg-indigo-500' : 'bg-slate-600'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+              <p className="text-slate-400 text-sm mb-3">
+                {layoutSuggestions[selectedSuggestionIndex]?.description}
+              </p>
+
+              {/* Groups legend */}
+              {layoutSuggestions[selectedSuggestionIndex]?.groups.length > 0 && (
+                <div className="border-t border-slate-700 pt-3 mt-3">
+                  <p className="text-xs text-slate-500 mb-2 uppercase tracking-wider">Groups to create:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {layoutSuggestions[selectedSuggestionIndex].groups.map((group) => (
+                      <div
+                        key={group.id}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs"
+                        style={{ backgroundColor: group.color + '20', borderLeft: `3px solid ${group.color}` }}
+                      >
+                        <span className="text-slate-300">{group.name}</span>
+                        <span className="text-slate-500">({group.asset_ids.length})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Navigation and actions */}
+            <div className="flex items-center justify-between">
+              <div className="flex gap-2">
+                <button
+                  onClick={handlePrevSuggestion}
+                  className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                  title="Previous option"
+                >
+                  <ChevronLeftIcon className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={handleNextSuggestion}
+                  className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                  title="Next option"
+                >
+                  <ChevronRightIcon className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDiscardArrangement}
+                  className="px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleKeepArrangement}
+                  className="px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+                >
+                  Accept Layout
+                </button>
+              </div>
             </div>
           </div>
         </div>

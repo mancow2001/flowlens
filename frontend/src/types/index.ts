@@ -1494,3 +1494,20 @@ export interface BaselineComparisonResult {
   total_changes: number;
   change_severity: 'none' | 'low' | 'medium' | 'high';
 }
+
+// Layout suggestion types
+export interface LayoutSuggestion {
+  id: string;
+  name: string;
+  description: string;
+  groups: SuggestedGroup[];
+  positions: Record<string, { x: number; y: number }>;
+}
+
+export interface SuggestedGroup {
+  id: string;
+  name: string;
+  color: string;
+  asset_ids: string[];
+  bounds?: { x: number; y: number; width: number; height: number };
+}
