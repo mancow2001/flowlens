@@ -607,13 +607,20 @@ export default function ApplicationDetail() {
     // Create groups from the selected suggestion
     const selectedSuggestion = layoutSuggestions[selectedSuggestionIndex];
     if (selectedSuggestion && selectedSuggestion.groups.length > 0) {
+      // UUID regex to filter out non-asset IDs (like client-summary-...)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
       // Create each group sequentially
       for (const group of selectedSuggestion.groups) {
-        if (group.asset_ids.length >= 2) {
+        // Filter to only include valid asset UUIDs
+        const validAssetIds = group.asset_ids.filter(id => uuidRegex.test(id));
+
+        // Only create group if we have at least 2 valid assets
+        if (validAssetIds.length >= 2) {
           await createGroupMutation.mutateAsync({
             name: group.name,
             color: group.color,
-            asset_ids: group.asset_ids,
+            asset_ids: validAssetIds,
           });
         }
       }

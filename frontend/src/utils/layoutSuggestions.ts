@@ -101,6 +101,16 @@ const FUNCTION_TIER_ORDER: Record<string, number> = {
   'Web Servers': 9,
 };
 
+// UUID regex to identify real asset IDs vs synthetic IDs (like client-summary-...)
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Check if a node ID is a valid UUID (i.e., a real asset)
+ */
+function isAssetNode(nodeId: string): boolean {
+  return UUID_REGEX.test(nodeId);
+}
+
 /**
  * Generate 3 layout suggestions with different grouping strategies
  */
@@ -110,10 +120,13 @@ export function generateLayoutSuggestions(
   canvasWidth: number = 1200,
   canvasHeight: number = 800
 ): LayoutSuggestion[] {
+  // Filter to only include real asset nodes (valid UUIDs)
+  const assetNodes = nodes.filter(n => isAssetNode(n.id));
+
   return [
-    generateFunctionalLayout(nodes, edges, canvasWidth, canvasHeight),
-    generateNetworkLayout(nodes, edges, canvasWidth, canvasHeight),
-    generateCommunicationLayout(nodes, edges, canvasWidth, canvasHeight),
+    generateFunctionalLayout(nodes, edges, canvasWidth, canvasHeight, assetNodes),
+    generateNetworkLayout(nodes, edges, canvasWidth, canvasHeight, assetNodes),
+    generateCommunicationLayout(nodes, edges, canvasWidth, canvasHeight, assetNodes),
   ];
 }
 
@@ -122,10 +135,11 @@ export function generateLayoutSuggestions(
  * Groups assets by their inferred service type based on ports
  */
 function generateFunctionalLayout(
-  nodes: LayoutNode[],
+  _nodes: LayoutNode[],
   edges: LayoutEdge[],
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  assetNodes: LayoutNode[]
 ): LayoutSuggestion {
   // Build a map of node IDs to ports they serve
   const nodePortsServed = new Map<string, Set<number>>();
@@ -140,10 +154,10 @@ function generateFunctionalLayout(
     }
   });
 
-  // Assign each node to a functional group
+  // Assign each asset node to a functional group (only real assets, not client summaries)
   const groupAssignments = new Map<string, string>();
 
-  nodes.forEach(node => {
+  assetNodes.forEach(node => {
     // Check if external
     if (node.is_internal === false) {
       groupAssignments.set(node.id, 'External');
@@ -253,10 +267,11 @@ function generateFunctionalLayout(
  * Groups assets by their IP subnet
  */
 function generateNetworkLayout(
-  nodes: LayoutNode[],
+  _nodes: LayoutNode[],
   _edges: LayoutEdge[],
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  assetNodes: LayoutNode[]
 ): LayoutSuggestion {
   // Extract subnet from IP address (first 3 octets)
   const getSubnet = (ip?: string): string => {
@@ -268,10 +283,10 @@ function generateNetworkLayout(
     return 'Unknown';
   };
 
-  // Group nodes by subnet
+  // Group asset nodes by subnet (only real assets, not client summaries)
   const subnetGroups = new Map<string, string[]>();
 
-  nodes.forEach(node => {
+  assetNodes.forEach(node => {
     // External nodes get their own group
     if (node.is_internal === false) {
       if (!subnetGroups.has('External')) {
@@ -352,8 +367,12 @@ function generateCommunicationLayout(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  assetNodes: LayoutNode[]
 ): LayoutSuggestion {
+  // Create a set of valid asset IDs for filtering
+  const assetNodeIds = new Set(assetNodes.map(n => n.id));
+
   // Build adjacency matrix with weights
   const nodeIds = nodes.map(n => n.id);
   const nodeIndexMap = new Map(nodeIds.map((id, i) => [id, i]));
@@ -467,13 +486,13 @@ function generateCommunicationLayout(
     return `Service Group ${index + 1}`;
   };
 
-  // Create groups with colors
+  // Create groups with colors (only include valid asset IDs in groups)
   const groups: SuggestedGroup[] = significantClusters.map((cluster, index) => ({
     id: `comm-cluster-${index}`,
     name: getClusterName(cluster, index),
     color: GROUP_COLORS[index % GROUP_COLORS.length],
-    asset_ids: cluster,
-  }));
+    asset_ids: cluster.filter(id => assetNodeIds.has(id)),
+  })).filter(g => g.asset_ids.length > 0);
 
   // Calculate positions (radial layout)
   const positions: Record<string, { x: number; y: number }> = {};
