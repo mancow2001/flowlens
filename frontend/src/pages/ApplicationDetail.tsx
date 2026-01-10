@@ -22,7 +22,8 @@ import EdgeTooltip from '../components/topology/EdgeTooltip';
 import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
 import { applicationsApi, layoutApi, dependencyApi, adminApi } from '../services/api';
-import { getProtocolName, formatProtocolPort, formatBytes } from '../utils/network';
+import { getProtocolName, formatProtocolPort } from '../utils/network';
+import { formatBytes } from '../utils/format';
 import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
 
 // Entry point in topology data

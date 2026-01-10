@@ -8,7 +8,7 @@ import { Dialog, Transition, Tab } from '@headlessui/react';
 import { XMarkIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
 import { arcTopologyApi } from '../../services/api';
-import { formatBytes } from '../../utils/arcLayout';
+import { formatBytes } from '../../utils/format';
 import type { ApplicationDependencySummary, ConnectionDetail, EdgeDirection } from '../../types';
 
 interface ApplicationDetailsSlideOverProps {
