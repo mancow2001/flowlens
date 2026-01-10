@@ -81,6 +81,7 @@ export function useWebSocketEvents(handlers?: EventHandlers) {
           break;
 
         // System events
+        case 'system.connected':
         case 'system.status':
         case 'ingestion.stats':
           // These are informational, no cache invalidation needed
