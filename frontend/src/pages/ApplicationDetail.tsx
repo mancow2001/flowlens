@@ -26,7 +26,7 @@ import BaselinePanel from '../components/baseline/BaselinePanel';
 import { applicationsApi, layoutApi, dependencyApi, adminApi } from '../services/api';
 import { getProtocolName, formatProtocolPort } from '../utils/network';
 import { formatBytes } from '../utils/format';
-import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange, LayoutSuggestion } from '../types';
+import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange, LayoutSuggestion, SuggestedGroup } from '../types';
 import { generateLayoutSuggestions } from '../utils/layoutSuggestions';
 
 // Entry point in topology data
@@ -147,6 +147,7 @@ export default function ApplicationDetail() {
   const [layoutSuggestions, setLayoutSuggestions] = useState<LayoutSuggestion[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [preArrangePositions, setPreArrangePositions] = useState<Record<string, { x: number; y: number }> | null>(null);
+  const [previewGroups, setPreviewGroups] = useState<SuggestedGroup[]>([]);
   const [edgeExplanation, setEdgeExplanation] = useState<string | null>(null);
   const [isExplaining, setIsExplaining] = useState(false);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
@@ -578,6 +579,8 @@ export default function ApplicationDetail() {
         node.fy = newPos.y;
       }
     });
+    // Update preview groups to show on canvas
+    setPreviewGroups(suggestion.groups);
     simulationRef.current?.alpha(0.3).restart();
   }, []);
 
@@ -630,6 +633,7 @@ export default function ApplicationDetail() {
     setPreArrangePositions(null);
     setLayoutSuggestions([]);
     setSelectedSuggestionIndex(0);
+    setPreviewGroups([]);
   }, [savePositionsMutation, createGroupMutation, layoutSuggestions, selectedSuggestionIndex]);
 
   const handleDiscardArrangement = useCallback(() => {
@@ -648,6 +652,7 @@ export default function ApplicationDetail() {
     setPreArrangePositions(null);
     setLayoutSuggestions([]);
     setSelectedSuggestionIndex(0);
+    setPreviewGroups([]);
   }, [preArrangePositions]);
 
   // Handle AI explanation for a dependency
@@ -863,7 +868,13 @@ export default function ApplicationDetail() {
       });
 
     // Draw asset groups (render before nodes so they appear behind)
-    const assetGroups = savedLayout?.groups || [];
+    // When previewing layout suggestions, show preview groups; otherwise show saved groups
+    // Define common type for group rendering (subset of properties used)
+    type RenderableGroup = { id: string; name: string; color: string; asset_ids: string[] };
+    const assetGroups: RenderableGroup[] = previewGroups.length > 0
+      ? previewGroups
+      : (savedLayout?.groups || []);
+    const isPreviewMode = previewGroups.length > 0;
     const groupsGroup = g.append('g').attr('class', 'groups');
 
     // Create a map of node positions for group bounds calculation
@@ -951,7 +962,7 @@ export default function ApplicationDetail() {
     }
 
     const groupElements = groupsGroup
-      .selectAll<SVGGElement, typeof assetGroups[number]>('g.asset-group')
+      .selectAll<SVGGElement, RenderableGroup>('g.asset-group')
       .data(assetGroups)
       .join('g')
       .attr('class', 'asset-group');
@@ -962,7 +973,7 @@ export default function ApplicationDetail() {
     // Add drag behavior to groups in edit mode
     if (editMode) {
       groupElements.call(
-        d3.drag<SVGGElement, typeof assetGroups[number]>()
+        d3.drag<SVGGElement, RenderableGroup>()
           .on('start', (event, d) => {
             event.sourceEvent.stopPropagation();
             if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -1023,11 +1034,11 @@ export default function ApplicationDetail() {
       .attr('class', 'group-bounds')
       .attr('rx', 12)
       .attr('ry', 12)
-      .attr('fill', d => d.color + '15')
+      .attr('fill', d => d.color + (isPreviewMode ? '10' : '15'))
       .attr('stroke', d => d.color)
-      .attr('stroke-width', 2)
-      .attr('stroke-dasharray', editMode ? '4,2' : 'none')
-      .attr('cursor', editMode ? 'move' : 'default');
+      .attr('stroke-width', isPreviewMode ? 2.5 : 2)
+      .attr('stroke-dasharray', isPreviewMode ? '8,4' : (editMode ? '4,2' : 'none'))
+      .attr('cursor', editMode && !isPreviewMode ? 'move' : 'default');
 
     // Group labels
     groupElements
@@ -1039,8 +1050,21 @@ export default function ApplicationDetail() {
       .attr('pointer-events', 'none')
       .text(d => d.name);
 
-    // Delete buttons for groups (only in edit mode)
-    if (editMode) {
+    // Preview indicator badge for preview groups
+    if (isPreviewMode) {
+      groupElements
+        .append('text')
+        .attr('class', 'group-preview-badge')
+        .attr('fill', d => d.color)
+        .attr('font-size', 9)
+        .attr('font-weight', 'normal')
+        .attr('opacity', 0.7)
+        .attr('pointer-events', 'none')
+        .text('PREVIEW');
+    }
+
+    // Delete buttons for groups (only in edit mode, not in preview mode)
+    if (editMode && !isPreviewMode) {
       groupElements
         .append('text')
         .attr('class', 'group-delete')
@@ -1398,6 +1422,11 @@ export default function ApplicationDetail() {
             .select('text.group-delete')
             .attr('x', bounds.x + bounds.width - 12)
             .attr('y', bounds.y + 16);
+
+          d3.select(this)
+            .select('text.group-preview-badge')
+            .attr('x', bounds.x + bounds.width - 45)
+            .attr('y', bounds.y + 16);
         }
       });
 
@@ -1425,7 +1454,7 @@ export default function ApplicationDetail() {
       simulation.stop();
       simulationRef.current = null;
     };
-  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
+  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult, previewGroups]);
 
   // Handle freeze/unfreeze without recreating the simulation
   useEffect(() => {
@@ -1966,40 +1995,65 @@ export default function ApplicationDetail() {
         title="Create Asset Group"
       />
 
-      {/* Layout Suggestion Carousel Dialog */}
+      {/* Layout Suggestion Side Panel */}
       {showArrangeConfirm && layoutSuggestions.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full shadow-xl border border-slate-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 rounded-full bg-indigo-600/20">
-                <SparklesIcon className="h-6 w-6 text-indigo-400" />
+        <div className="fixed top-0 right-0 h-full w-80 bg-slate-800 shadow-2xl border-l border-slate-700 z-50 flex flex-col">
+          {/* Header */}
+          <div className="flex items-center gap-3 p-4 border-b border-slate-700">
+            <div className="p-2 rounded-full bg-indigo-600/20">
+              <SparklesIcon className="h-5 w-5 text-indigo-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-base font-medium text-white">Choose Layout</h3>
+              <p className="text-sm text-slate-400">
+                {selectedSuggestionIndex + 1} of {layoutSuggestions.length} options
+              </p>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {/* Navigation carousel */}
+            <div className="flex items-center justify-between mb-4">
+              <button
+                onClick={handlePrevSuggestion}
+                className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                title="Previous option"
+              >
+                <ChevronLeftIcon className="h-5 w-5" />
+              </button>
+              <div className="flex gap-1.5">
+                {layoutSuggestions.map((_, idx) => (
+                  <div
+                    key={idx}
+                    className={`w-2.5 h-2.5 rounded-full transition-colors cursor-pointer ${
+                      idx === selectedSuggestionIndex ? 'bg-indigo-500' : 'bg-slate-600 hover:bg-slate-500'
+                    }`}
+                    onClick={() => {
+                      const suggestion = layoutSuggestions[idx];
+                      if (suggestion) {
+                        setSelectedSuggestionIndex(idx);
+                        applySuggestion(suggestion);
+                      }
+                    }}
+                  />
+                ))}
               </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-medium text-white">Choose Layout</h3>
-                <p className="text-sm text-slate-400">
-                  {selectedSuggestionIndex + 1} of {layoutSuggestions.length} options
-                </p>
-              </div>
+              <button
+                onClick={handleNextSuggestion}
+                className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                title="Next option"
+              >
+                <ChevronRightIcon className="h-5 w-5" />
+              </button>
             </div>
 
             {/* Current suggestion details */}
-            <div className="bg-slate-900/50 rounded-lg p-4 mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-white font-medium">
-                  {layoutSuggestions[selectedSuggestionIndex]?.name}
-                </h4>
-                <div className="flex gap-1">
-                  {layoutSuggestions.map((_, idx) => (
-                    <div
-                      key={idx}
-                      className={`w-2 h-2 rounded-full transition-colors ${
-                        idx === selectedSuggestionIndex ? 'bg-indigo-500' : 'bg-slate-600'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-              <p className="text-slate-400 text-sm mb-3">
+            <div className="bg-slate-900/50 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">
+                {layoutSuggestions[selectedSuggestionIndex]?.name}
+              </h4>
+              <p className="text-slate-400 text-sm">
                 {layoutSuggestions[selectedSuggestionIndex]?.description}
               </p>
 
@@ -2007,55 +2061,37 @@ export default function ApplicationDetail() {
               {layoutSuggestions[selectedSuggestionIndex]?.groups.length > 0 && (
                 <div className="border-t border-slate-700 pt-3 mt-3">
                   <p className="text-xs text-slate-500 mb-2 uppercase tracking-wider">Groups to create:</p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-2">
                     {layoutSuggestions[selectedSuggestionIndex].groups.map((group) => (
                       <div
                         key={group.id}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs"
+                        className="flex items-center gap-2 px-2 py-1.5 rounded text-sm"
                         style={{ backgroundColor: group.color + '20', borderLeft: `3px solid ${group.color}` }}
                       >
-                        <span className="text-slate-300">{group.name}</span>
-                        <span className="text-slate-500">({group.asset_ids.length})</span>
+                        <span className="text-slate-300 flex-1">{group.name}</span>
+                        <span className="text-slate-500 text-xs">{group.asset_ids.length} assets</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Navigation and actions */}
-            <div className="flex items-center justify-between">
-              <div className="flex gap-2">
-                <button
-                  onClick={handlePrevSuggestion}
-                  className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
-                  title="Previous option"
-                >
-                  <ChevronLeftIcon className="h-5 w-5" />
-                </button>
-                <button
-                  onClick={handleNextSuggestion}
-                  className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
-                  title="Next option"
-                >
-                  <ChevronRightIcon className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleDiscardArrangement}
-                  className="px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleKeepArrangement}
-                  className="px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
-                >
-                  Accept Layout
-                </button>
-              </div>
-            </div>
+          {/* Footer actions */}
+          <div className="p-4 border-t border-slate-700 flex gap-3">
+            <button
+              onClick={handleDiscardArrangement}
+              className="flex-1 px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleKeepArrangement}
+              className="flex-1 px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+            >
+              Accept
+            </button>
           </div>
         </div>
       )}
