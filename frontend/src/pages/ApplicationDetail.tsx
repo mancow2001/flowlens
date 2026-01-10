@@ -517,12 +517,15 @@ export default function ApplicationDetail() {
       }
 
       // Prepare nodes and edges for layout suggestion
+      // Note: is_internal_asset is the network classification (internal vs external network)
+      // is_external is whether the asset is external to the application (not a member)
+      // For layout suggestions, we use is_internal_asset to exclude network-external assets
       const layoutNodes = nodesRef.current.map(node => ({
         id: node.id,
         name: node.name,
         ip_address: node.ip_address,
         asset_type: node.asset_type,
-        is_internal: !node.is_external,
+        is_internal: node.is_internal_asset ?? true,
         is_entry_point: node.is_entry_point,
         is_client_summary: node.is_client_summary,
         x: node.x,
