@@ -1,6 +1,7 @@
 """AI-powered dependency explanation service."""
 
 from datetime import datetime, timezone
+from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -11,7 +12,14 @@ from flowlens.enrichment.resolvers.protocol import ProtocolResolver
 from flowlens.models.asset import Asset
 from flowlens.models.dependency import Dependency
 from flowlens.schemas.ai_explain import DependencyExplanationResponse
-from flowlens.schemas.ai_layout import LLMProvider
+
+
+class LLMProvider(str, Enum):
+    """Supported LLM providers."""
+
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    OPENAI_COMPATIBLE = "openai_compatible"  # Ollama, LM Studio, etc.
 
 
 EXPLANATION_PROMPT = """You are a network infrastructure analyst. Explain this dependency in 2-3 concise sentences.

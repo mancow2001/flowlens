@@ -27,7 +27,6 @@ FlowLens is an open-source platform that ingests network flow data (NetFlow, sFl
 - **System Settings UI** - Web-based configuration with docker-compose.yml export
 - **AI-Powered Insights** (Optional) - LLM integration for intelligent features:
   - **Dependency Explanations** - Natural language explanations of network dependencies
-  - **Smart Layout** - AI-suggested topology arrangements for optimal visualization
   - Supports Anthropic Claude, OpenAI GPT, and local models (Ollama, LM Studio)
 
 ### Technical Highlights
@@ -346,7 +345,6 @@ The REST API is available at `http://localhost:8000/api/v1`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/dependencies/{id}/explain` | Get AI-generated explanation for a dependency |
-| POST | `/applications/{id}/layouts/{hop}/ai-arrange` | Get AI-suggested node positions for topology |
 
 #### Background Tasks
 
