@@ -3,26 +3,20 @@ import {
   ServerStackIcon,
   ArrowsRightLeftIcon,
   BellAlertIcon,
-  ClockIcon,
 } from '@heroicons/react/24/outline';
 import Card from '../components/common/Card';
 import StatCard from '../components/common/StatCard';
 import Badge from '../components/common/Badge';
 import { LoadingPage } from '../components/common/Loading';
-import { alertApi, changeApi, assetApi, dependencyApi } from '../services/api';
+import { alertApi, assetApi, dependencyApi } from '../services/api';
 import { formatRelativeTime, getSeverityColor } from '../utils/format';
-import type { Alert, ChangeEvent } from '../types';
+import type { Alert } from '../types';
 import clsx from 'clsx';
 
 export default function Dashboard() {
   const { data: alertSummary, isLoading: alertsLoading } = useQuery({
     queryKey: ['alerts', 'summary'],
     queryFn: alertApi.getSummary,
-  });
-
-  const { data: changeSummary, isLoading: changesLoading } = useQuery({
-    queryKey: ['changes', 'summary'],
-    queryFn: changeApi.getSummary,
   });
 
   const { data: assetsData, isLoading: assetsLoading } = useQuery({
@@ -40,12 +34,7 @@ export default function Dashboard() {
     queryFn: () => alertApi.list({ page_size: 5, is_resolved: false }),
   });
 
-  const { data: recentChanges } = useQuery({
-    queryKey: ['changes', 'recent'],
-    queryFn: () => changeApi.list({ page_size: 5 }),
-  });
-
-  if (alertsLoading || changesLoading || assetsLoading || depsLoading) {
+  if (alertsLoading || assetsLoading || depsLoading) {
     return <LoadingPage />;
   }
 
@@ -59,7 +48,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard
           title="Total Assets"
           value={assetsData?.total ?? 0}
@@ -74,11 +63,6 @@ export default function Dashboard() {
           title="Unresolved Alerts"
           value={alertSummary?.unresolved ?? 0}
           icon={<BellAlertIcon className="w-5 h-5" />}
-        />
-        <StatCard
-          title="Changes (24h)"
-          value={changeSummary?.last_24h ?? 0}
-          icon={<ClockIcon className="w-5 h-5" />}
         />
       </div>
 
@@ -114,106 +98,53 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Two column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Alerts */}
-        <Card title="Recent Alerts">
-          <div className="space-y-3">
-            {recentAlerts?.items.length === 0 && (
-              <p className="text-slate-400 text-center py-4">No recent alerts</p>
-            )}
-            {recentAlerts?.items.map((alert: Alert) => (
+      {/* Recent Alerts */}
+      <Card title="Recent Alerts">
+        <div className="space-y-3">
+          {recentAlerts?.items.length === 0 && (
+            <p className="text-slate-400 text-center py-4">No recent alerts</p>
+          )}
+          {recentAlerts?.items.map((alert: Alert) => (
+            <div
+              key={alert.id}
+              className="flex items-start gap-3 p-3 bg-slate-700/50 rounded-lg"
+            >
               <div
-                key={alert.id}
-                className="flex items-start gap-3 p-3 bg-slate-700/50 rounded-lg"
-              >
-                <div
-                  className={clsx(
-                    'w-2 h-2 rounded-full mt-2',
-                    getSeverityColor(alert.severity)
-                  )}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-white truncate">
-                      {alert.title}
-                    </span>
-                    <Badge
-                      variant={
-                        alert.severity === 'critical'
-                          ? 'error'
-                          : alert.severity === 'error'
-                          ? 'error'
-                          : alert.severity === 'warning'
-                          ? 'warning'
-                          : 'info'
-                      }
-                    >
-                      {alert.severity}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-slate-400 truncate">
-                    {alert.message}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {formatRelativeTime(alert.created_at)}
-                  </p>
+                className={clsx(
+                  'w-2 h-2 rounded-full mt-2',
+                  getSeverityColor(alert.severity)
+                )}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-white truncate">
+                    {alert.title}
+                  </span>
+                  <Badge
+                    variant={
+                      alert.severity === 'critical'
+                        ? 'error'
+                        : alert.severity === 'error'
+                        ? 'error'
+                        : alert.severity === 'warning'
+                        ? 'warning'
+                        : 'info'
+                    }
+                  >
+                    {alert.severity}
+                  </Badge>
                 </div>
+                <p className="text-sm text-slate-400 truncate">
+                  {alert.message}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {formatRelativeTime(alert.created_at)}
+                </p>
               </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Recent Changes */}
-        <Card title="Recent Changes">
-          <div className="space-y-3">
-            {recentChanges?.items.length === 0 && (
-              <p className="text-slate-400 text-center py-4">No recent changes</p>
-            )}
-            {recentChanges?.items.map((change: ChangeEvent) => (
-              <div
-                key={change.id}
-                className="flex items-start gap-3 p-3 bg-slate-700/50 rounded-lg"
-              >
-                <div className="w-2 h-2 rounded-full mt-2 bg-primary-500" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-white truncate">
-                      {change.summary}
-                    </span>
-                    <Badge>{change.change_type}</Badge>
-                  </div>
-                  {change.description && (
-                    <p className="text-sm text-slate-400 truncate">
-                      {change.description}
-                    </p>
-                  )}
-                  <p className="text-xs text-slate-500 mt-1">
-                    {formatRelativeTime(change.detected_at)}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      {/* Change Types Summary */}
-      {changeSummary && changeSummary.by_type && Object.keys(changeSummary.by_type).length > 0 && (
-        <Card title="Changes by Type (Last 7 Days)">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {Object.entries(changeSummary.by_type).map(([type, count]) => (
-              <div
-                key={type}
-                className="text-center p-4 bg-slate-700/50 rounded-lg"
-              >
-                <div className="text-xl font-semibold text-white">{count}</div>
-                <div className="text-sm text-slate-400 truncate">{type}</div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

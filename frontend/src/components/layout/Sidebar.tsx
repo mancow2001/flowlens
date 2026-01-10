@@ -4,7 +4,6 @@ import {
   ServerStackIcon,
   ArrowsRightLeftIcon,
   BellAlertIcon,
-  ClockIcon,
   ChartBarIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -34,7 +33,6 @@ const navigation = [
   { name: 'Segmentation', href: '/segmentation-policies', icon: ShieldExclamationIcon },
   { name: 'Dependencies', href: '/dependencies', icon: ArrowsRightLeftIcon },
   { name: 'Alerts', href: '/alerts', icon: BellAlertIcon },
-  { name: 'Changes', href: '/changes', icon: ClockIcon },
   { name: 'Analysis', href: '/analysis', icon: BeakerIcon },
   { name: 'Tasks', href: '/tasks', icon: QueueListIcon },
 ];
