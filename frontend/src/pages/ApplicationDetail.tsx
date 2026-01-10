@@ -23,11 +23,11 @@ import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
-import { applicationsApi, layoutApi, dependencyApi, adminApi } from '../services/api';
+import { applicationsApi, layoutApi, dependencyApi, adminApi, classificationApi } from '../services/api';
 import { getProtocolName, formatProtocolPort } from '../utils/network';
 import { formatBytes } from '../utils/format';
 import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange, LayoutSuggestion, SuggestedGroup } from '../types';
-import { generateLayoutSuggestions } from '../utils/layoutSuggestions';
+import { generateLayoutSuggestions, type ClassificationRuleForLayout } from '../utils/layoutSuggestions';
 
 // Entry point in topology data
 interface TopologyEntryPointInfo {
@@ -502,6 +502,20 @@ export default function ApplicationDetail() {
     setPreArrangePositions(currentPositions);
 
     try {
+      // Fetch classification rules for network group naming
+      let classificationRules: ClassificationRuleForLayout[] = [];
+      try {
+        const rulesResponse = await classificationApi.list({ is_active: true, page_size: 1000 });
+        classificationRules = rulesResponse.items.map(rule => ({
+          name: rule.name,
+          cidr: rule.cidr,
+          priority: rule.priority,
+        }));
+      } catch {
+        // If classification rules can't be fetched, continue without them
+        console.warn('Could not fetch classification rules for layout suggestions');
+      }
+
       // Prepare nodes and edges for layout suggestion
       const layoutNodes = nodesRef.current.map(node => ({
         id: node.id,
@@ -531,7 +545,8 @@ export default function ApplicationDetail() {
         layoutNodes,
         layoutEdges,
         dimensions.width,
-        dimensions.height
+        dimensions.height,
+        classificationRules
       );
 
       setLayoutSuggestions(suggestions);

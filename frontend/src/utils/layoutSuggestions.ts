@@ -9,6 +9,13 @@
 
 import type { LayoutSuggestion, SuggestedGroup } from '../types';
 
+// Classification rule for naming network groups
+export interface ClassificationRuleForLayout {
+  name: string;
+  cidr: string;
+  priority: number;
+}
+
 // Node interface for layout calculations
 interface LayoutNode {
   id: string;
@@ -91,7 +98,6 @@ const GROUP_COLORS = [
 
 // Function tier ordering (bottom to top in horizontal layout)
 const FUNCTION_TIER_ORDER: Record<string, number> = {
-  'External': 0,
   'Infrastructure': 1,
   'Databases': 2,
   'Caches': 3,
@@ -115,13 +121,51 @@ function isAssetNode(nodeId: string): boolean {
 
 /**
  * Check if a node should be included in groups
- * Excludes: entry points, client summaries, and non-UUID nodes
+ * Excludes: entry points, client summaries, external assets, and non-UUID nodes
  */
 function isGroupableNode(node: LayoutNode): boolean {
   if (!isAssetNode(node.id)) return false;
   if (node.is_entry_point) return false;
   if (node.is_client_summary) return false;
+  if (node.is_internal === false) return false; // Exclude external assets
   return true;
+}
+
+/**
+ * Check if an IP address matches a CIDR block
+ */
+function ipMatchesCidr(ip: string, cidr: string): boolean {
+  const [cidrIp, prefixStr] = cidr.split('/');
+  if (!cidrIp || !prefixStr) return false;
+
+  const prefix = parseInt(prefixStr, 10);
+  if (isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+
+  const ipParts = ip.split('.').map(p => parseInt(p, 10));
+  const cidrParts = cidrIp.split('.').map(p => parseInt(p, 10));
+
+  if (ipParts.length !== 4 || cidrParts.length !== 4) return false;
+  if (ipParts.some(p => isNaN(p)) || cidrParts.some(p => isNaN(p))) return false;
+
+  const ipNum = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+  const cidrNum = (cidrParts[0] << 24) | (cidrParts[1] << 16) | (cidrParts[2] << 8) | cidrParts[3];
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+
+  return ((ipNum >>> 0) & mask) === ((cidrNum >>> 0) & mask);
+}
+
+/**
+ * Find the best matching classification rule for an IP address
+ */
+function findMatchingRule(ip: string, rules: ClassificationRuleForLayout[]): ClassificationRuleForLayout | null {
+  // Sort by priority (lower = higher priority) and find first match
+  const sortedRules = [...rules].sort((a, b) => a.priority - b.priority);
+  for (const rule of sortedRules) {
+    if (ipMatchesCidr(ip, rule.cidr)) {
+      return rule;
+    }
+  }
+  return null;
 }
 
 /**
@@ -131,14 +175,15 @@ export function generateLayoutSuggestions(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
   canvasWidth: number = 1200,
-  canvasHeight: number = 800
+  canvasHeight: number = 800,
+  classificationRules: ClassificationRuleForLayout[] = []
 ): LayoutSuggestion[] {
   // Filter to only include groupable nodes (excludes entry points, client summaries)
   const groupableNodes = nodes.filter(n => isGroupableNode(n));
 
   return [
     generateFunctionalLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes),
-    generateNetworkLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes),
+    generateNetworkLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes, classificationRules),
     generateCommunicationLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes),
   ];
 }
@@ -167,16 +212,10 @@ function generateFunctionalLayout(
     }
   });
 
-  // Assign each asset node to a functional group (excludes entry points and client summaries)
+  // Assign each asset node to a functional group (excludes entry points, client summaries, external)
   const groupAssignments = new Map<string, string>();
 
   groupableNodes.forEach(node => {
-    // Check if external
-    if (node.is_internal === false) {
-      groupAssignments.set(node.id, 'External');
-      return;
-    }
-
     // Check ports served
     const ports = nodePortsServed.get(node.id);
     if (ports) {
@@ -277,14 +316,15 @@ function generateFunctionalLayout(
 
 /**
  * Option 2: Group by Network (Vertical Columns)
- * Groups assets by their IP subnet
+ * Groups assets by their IP subnet or classification rule name
  */
 function generateNetworkLayout(
   _nodes: LayoutNode[],
   _edges: LayoutEdge[],
   canvasWidth: number,
   canvasHeight: number,
-  groupableNodes: LayoutNode[]
+  groupableNodes: LayoutNode[],
+  classificationRules: ClassificationRuleForLayout[] = []
 ): LayoutSuggestion {
   // Extract subnet from IP address (first 3 octets)
   const getSubnet = (ip?: string): string => {
@@ -296,42 +336,53 @@ function generateNetworkLayout(
     return 'Unknown';
   };
 
-  // Group asset nodes by subnet (excludes entry points and client summaries)
-  const subnetGroups = new Map<string, string[]>();
+  // Get group name for a node - use classification rule name if matched, otherwise subnet
+  const getGroupKey = (node: LayoutNode): { key: string; displayName: string } => {
+    if (node.ip_address && classificationRules.length > 0) {
+      const matchedRule = findMatchingRule(node.ip_address, classificationRules);
+      if (matchedRule) {
+        return { key: `rule:${matchedRule.name}`, displayName: matchedRule.name };
+      }
+    }
+    const subnet = getSubnet(node.ip_address);
+    return { key: `subnet:${subnet}`, displayName: subnet };
+  };
+
+  // Group asset nodes by classification rule or subnet
+  const networkGroups = new Map<string, { displayName: string; nodeIds: string[] }>();
 
   groupableNodes.forEach(node => {
-    // External nodes get their own group
-    if (node.is_internal === false) {
-      if (!subnetGroups.has('External')) {
-        subnetGroups.set('External', []);
-      }
-      subnetGroups.get('External')!.push(node.id);
-      return;
+    const { key, displayName } = getGroupKey(node);
+    if (!networkGroups.has(key)) {
+      networkGroups.set(key, { displayName, nodeIds: [] });
     }
-
-    const subnet = getSubnet(node.ip_address);
-    if (!subnetGroups.has(subnet)) {
-      subnetGroups.set(subnet, []);
-    }
-    subnetGroups.get(subnet)!.push(node.id);
+    networkGroups.get(key)!.nodeIds.push(node.id);
   });
 
-  // Sort subnets (External first, then by IP)
-  const sortedSubnets = Array.from(subnetGroups.keys()).sort((a, b) => {
-    if (a === 'External') return -1;
-    if (b === 'External') return 1;
-    if (a === 'Unknown') return 1;
-    if (b === 'Unknown') return -1;
+  // Sort groups: classification rules first (alphabetically), then subnets (by IP), Unknown last
+  const sortedKeys = Array.from(networkGroups.keys()).sort((a, b) => {
+    const aIsRule = a.startsWith('rule:');
+    const bIsRule = b.startsWith('rule:');
+    const aIsUnknown = a === 'subnet:Unknown';
+    const bIsUnknown = b === 'subnet:Unknown';
+
+    if (aIsUnknown) return 1;
+    if (bIsUnknown) return -1;
+    if (aIsRule && !bIsRule) return -1;
+    if (!aIsRule && bIsRule) return 1;
     return a.localeCompare(b);
   });
 
   // Create groups with colors
-  const groups: SuggestedGroup[] = sortedSubnets.map((subnet, index) => ({
-    id: `net-${subnet.replace(/\./g, '-').replace(/x/g, '0')}`,
-    name: subnet === 'External' ? 'External Network' : `Subnet ${subnet}`,
-    color: GROUP_COLORS[index % GROUP_COLORS.length],
-    asset_ids: subnetGroups.get(subnet) || [],
-  }));
+  const groups: SuggestedGroup[] = sortedKeys.map((key, index) => {
+    const group = networkGroups.get(key)!;
+    return {
+      id: `net-${key.replace(/[^a-zA-Z0-9]/g, '-')}`,
+      name: group.displayName,
+      color: GROUP_COLORS[index % GROUP_COLORS.length],
+      asset_ids: group.nodeIds,
+    };
+  });
 
   // Calculate positions (vertical columns)
   const positions: Record<string, { x: number; y: number }> = {};
@@ -474,11 +525,6 @@ function generateCommunicationLayout(
 
     // Find common characteristics
     const clusterNodes = cluster.map(id => nodes.find(n => n.id === id)).filter(Boolean) as LayoutNode[];
-
-    // Check if all external
-    if (clusterNodes.every(n => n.is_internal === false)) {
-      return 'External Services';
-    }
 
     // Check for common subnet
     const subnets = new Set(clusterNodes.map(n => {
