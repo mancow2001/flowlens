@@ -463,6 +463,35 @@ class ChangeDetector:
         if message is None:
             message = self._generate_alert_message(event)
 
+        # Check for existing unresolved alert with same asset/dependency/title
+        # to prevent duplicate alerts for the same ongoing condition
+        existing_query = select(Alert.id).where(
+            Alert.is_resolved == False,  # noqa: E712
+            Alert.title == title,
+        )
+        if event.asset_id:
+            existing_query = existing_query.where(Alert.asset_id == event.asset_id)
+        else:
+            existing_query = existing_query.where(Alert.asset_id.is_(None))
+
+        if event.dependency_id:
+            existing_query = existing_query.where(Alert.dependency_id == event.dependency_id)
+        else:
+            existing_query = existing_query.where(Alert.dependency_id.is_(None))
+
+        existing_result = await db.execute(existing_query.limit(1))
+        existing_alert_id = existing_result.scalar_one_or_none()
+
+        if existing_alert_id:
+            logger.debug(
+                "Skipping duplicate alert - unresolved alert already exists",
+                existing_alert_id=str(existing_alert_id),
+                title=title,
+                asset_id=str(event.asset_id) if event.asset_id else None,
+                dependency_id=str(event.dependency_id) if event.dependency_id else None,
+            )
+            return None
+
         alert = Alert(
             change_event_id=event.id,
             severity=severity,
