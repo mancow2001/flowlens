@@ -13,6 +13,7 @@ import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import BulkActionToolbar from '../components/assets/BulkActionToolbar';
+import ClassificationBadge from '../components/ml/ClassificationBadge';
 import { assetApi, assetBulkApi, AssetImportPreview } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import type { Asset, AssetType } from '../types';
@@ -236,6 +237,16 @@ export default function Assets() {
           </Badge>
           {asset.is_critical && <Badge variant="error">Critical</Badge>}
         </div>
+      ),
+    },
+    {
+      key: 'classification',
+      header: 'Classification',
+      render: (asset: Asset) => (
+        <ClassificationBadge
+          method={asset.classification_method}
+          confidence={asset.classification_confidence}
+        />
       ),
     },
     {

@@ -19,6 +19,7 @@ import {
   ShieldExclamationIcon,
   CloudIcon,
   ArchiveBoxIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -48,6 +49,7 @@ const settingsNavigation: NavItem[] = [
   { name: 'Classification Rules', href: '/settings/classification', icon: TagIcon, requiredRoles: ['admin', 'analyst'] },
   { name: 'Alert Rules', href: '/settings/alert-rules', icon: AdjustmentsHorizontalIcon, requiredRoles: ['admin', 'analyst'] },
   { name: 'Maintenance', href: '/settings/maintenance', icon: WrenchScrewdriverIcon, requiredRoles: ['admin', 'analyst'] },
+  { name: 'ML Training', href: '/settings/ml-training', icon: SparklesIcon, requiredRoles: ['admin'] },
   { name: 'Discovery Providers', href: '/settings/discovery', icon: CloudIcon, requiredRoles: ['admin'] },
   { name: 'System Settings', href: '/settings/system', icon: Cog6ToothIcon, requiredRoles: ['admin'] },
   { name: 'Backup & Restore', href: '/admin/backup', icon: ArchiveBoxIcon, requiredRoles: ['admin'] },

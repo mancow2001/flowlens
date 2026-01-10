@@ -23,6 +23,7 @@ import UserManagement from './pages/UserManagement';
 import SAMLConfiguration from './pages/SAMLConfiguration';
 import DiscoveryProviders from './pages/DiscoveryProviders';
 import BackupRestore from './pages/BackupRestore';
+import MLTraining from './pages/MLTraining';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebSocketEvents } from './hooks/useWebSocketEvents';
@@ -141,6 +142,14 @@ function App() {
                     element={
                       <ProtectedRoute requiredRoles={['admin']}>
                         <BackupRestore />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/ml-training"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin']}>
+                        <MLTraining />
                       </ProtectedRoute>
                     }
                   />

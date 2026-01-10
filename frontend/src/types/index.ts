@@ -32,6 +32,11 @@ export interface Asset {
   services: Service[];
   created_at: string;
   updated_at: string;
+  // Classification fields
+  classification_method?: ClassificationMethod | null;
+  classification_confidence?: number | null;
+  classification_locked?: boolean;
+  last_classified_at?: string | null;
 }
 
 export type AssetType =
@@ -1510,4 +1515,61 @@ export interface SuggestedGroup {
   color: string;
   asset_ids: string[];
   bounds?: { x: number; y: number; width: number; height: number };
+}
+
+// =============================================================================
+// ML Classification types
+// =============================================================================
+
+export type MLAlgorithm = 'random_forest' | 'xgboost' | 'gradient_boosting';
+export type MLModelType = 'shipped' | 'custom';
+export type ClassificationMethod = 'ml' | 'heuristic' | 'hybrid' | 'manual' | 'auto' | 'api';
+
+export interface MLStatusResponse {
+  ml_enabled: boolean;
+  ml_available: boolean;
+  model_version: string | null;
+  model_classes: string[];
+  ml_confidence_threshold: number;
+  ml_min_flows: number;
+  heuristic_min_flows: number;
+  initialized: boolean;
+}
+
+export interface ModelInfo {
+  id: string;
+  version: string;
+  algorithm: string;
+  model_type: MLModelType;
+  is_active: boolean;
+  created_at: string;
+  training_samples: number;
+  accuracy: number;
+  f1_score: number | null;
+  file_size_bytes: number | null;
+  notes: string | null;
+}
+
+export interface ModelListResponse {
+  models: ModelInfo[];
+  active_version: string | null;
+}
+
+export interface TrainingDataStats {
+  total_confirmed_assets: number;
+  class_distribution: Record<string, number>;
+  meets_minimum_requirements: boolean;
+  minimum_samples_required: number;
+  minimum_per_class_required: number;
+  classes_below_minimum: string[];
+}
+
+export interface TrainModelRequest {
+  algorithm: MLAlgorithm;
+  notes?: string | null;
+}
+
+export interface TrainModelResponse {
+  task_id: string;
+  message: string;
 }

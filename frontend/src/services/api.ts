@@ -2106,6 +2106,53 @@ export const backupApi = {
   },
 };
 
+// ML Classification API endpoints
+import type {
+  MLStatusResponse,
+  ModelListResponse,
+  ModelInfo,
+  TrainingDataStats,
+  TrainModelRequest,
+  TrainModelResponse,
+} from '../types';
+
+export const mlApi = {
+  getStatus: async (): Promise<MLStatusResponse> => {
+    const { data } = await api.get('/ml/status');
+    return data;
+  },
+
+  listModels: async (): Promise<ModelListResponse> => {
+    const { data } = await api.get('/ml/models');
+    return data;
+  },
+
+  getModel: async (version: string): Promise<ModelInfo> => {
+    const { data } = await api.get(`/ml/models/${encodeURIComponent(version)}`);
+    return data;
+  },
+
+  activateModel: async (version: string): Promise<{ message: string; version: string }> => {
+    const { data } = await api.post(`/ml/models/${encodeURIComponent(version)}/activate`);
+    return data;
+  },
+
+  resetToShipped: async (): Promise<{ message: string; active_version: string }> => {
+    const { data } = await api.post('/ml/models/reset');
+    return data;
+  },
+
+  getTrainingStats: async (): Promise<TrainingDataStats> => {
+    const { data } = await api.get('/ml/training/stats');
+    return data;
+  },
+
+  startTraining: async (request: TrainModelRequest): Promise<TrainModelResponse> => {
+    const { data } = await api.post('/ml/train', request);
+    return data;
+  },
+};
+
 // Helper function to download files with authentication
 export const downloadWithAuth = async (url: string, filename: string): Promise<void> => {
   const response = await api.get(url, {

@@ -14,6 +14,7 @@ import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import Table from '../components/common/Table';
 import { LoadingPage } from '../components/common/Loading';
+import ClassificationBadge from '../components/ml/ClassificationBadge';
 import { assetApi, analysisApi, classificationApi, gatewayApi } from '../services/api';
 import { formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
 import type { Dependency, Asset, GatewayRelationship, Environment } from '../types';
@@ -404,6 +405,31 @@ export default function AssetDetail() {
                     <Badge>Loc: {cidrClassification.location}</Badge>
                   )}
                 </div>
+              </div>
+            )}
+            {/* ML Classification */}
+            {asset.classification_method && (
+              <div className="pt-3 mt-3 border-t border-slate-700">
+                <dt className="text-sm text-slate-400 mb-2">
+                  Classification Method
+                </dt>
+                <div className="flex items-center gap-3">
+                  <ClassificationBadge
+                    method={asset.classification_method}
+                    confidence={asset.classification_confidence}
+                    size="md"
+                  />
+                  {asset.classification_confidence && (
+                    <span className="text-sm text-slate-400">
+                      {Math.round(asset.classification_confidence * 100)}% confidence
+                    </span>
+                  )}
+                </div>
+                {asset.last_classified_at && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Last classified: {formatRelativeTime(asset.last_classified_at)}
+                  </p>
+                )}
               </div>
             )}
           </dl>

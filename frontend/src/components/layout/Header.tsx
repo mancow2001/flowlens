@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useWebSocketStore } from '../../hooks/useWebSocket';
 import { searchApi, alertApi, authApi } from '../../services/api';
+import MLStatusIndicator from '../ml/MLStatusIndicator';
 import { useAuthStore } from '../../stores/authStore';
 import Badge from '../common/Badge';
 import clsx from 'clsx';
@@ -348,6 +349,9 @@ export default function Header() {
 
       {/* Right side */}
       <div className="flex items-center gap-4">
+        {/* ML Status */}
+        <MLStatusIndicator />
+
         {/* Connection status */}
         <div className="flex items-center gap-2">
           <div
