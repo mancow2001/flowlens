@@ -509,6 +509,8 @@ export default function ApplicationDetail() {
         ip_address: node.ip_address,
         asset_type: node.asset_type,
         is_internal: !node.is_external,
+        is_entry_point: node.is_entry_point,
+        is_client_summary: node.is_client_summary,
         x: node.x,
         y: node.y,
       }));

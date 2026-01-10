@@ -16,6 +16,8 @@ interface LayoutNode {
   ip_address?: string;
   asset_type?: string;
   is_internal?: boolean;
+  is_entry_point?: boolean;
+  is_client_summary?: boolean;
   x?: number;
   y?: number;
 }
@@ -112,6 +114,17 @@ function isAssetNode(nodeId: string): boolean {
 }
 
 /**
+ * Check if a node should be included in groups
+ * Excludes: entry points, client summaries, and non-UUID nodes
+ */
+function isGroupableNode(node: LayoutNode): boolean {
+  if (!isAssetNode(node.id)) return false;
+  if (node.is_entry_point) return false;
+  if (node.is_client_summary) return false;
+  return true;
+}
+
+/**
  * Generate 3 layout suggestions with different grouping strategies
  */
 export function generateLayoutSuggestions(
@@ -120,13 +133,13 @@ export function generateLayoutSuggestions(
   canvasWidth: number = 1200,
   canvasHeight: number = 800
 ): LayoutSuggestion[] {
-  // Filter to only include real asset nodes (valid UUIDs)
-  const assetNodes = nodes.filter(n => isAssetNode(n.id));
+  // Filter to only include groupable nodes (excludes entry points, client summaries)
+  const groupableNodes = nodes.filter(n => isGroupableNode(n));
 
   return [
-    generateFunctionalLayout(nodes, edges, canvasWidth, canvasHeight, assetNodes),
-    generateNetworkLayout(nodes, edges, canvasWidth, canvasHeight, assetNodes),
-    generateCommunicationLayout(nodes, edges, canvasWidth, canvasHeight, assetNodes),
+    generateFunctionalLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes),
+    generateNetworkLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes),
+    generateCommunicationLayout(nodes, edges, canvasWidth, canvasHeight, groupableNodes),
   ];
 }
 
@@ -139,7 +152,7 @@ function generateFunctionalLayout(
   edges: LayoutEdge[],
   canvasWidth: number,
   canvasHeight: number,
-  assetNodes: LayoutNode[]
+  groupableNodes: LayoutNode[]
 ): LayoutSuggestion {
   // Build a map of node IDs to ports they serve
   const nodePortsServed = new Map<string, Set<number>>();
@@ -154,10 +167,10 @@ function generateFunctionalLayout(
     }
   });
 
-  // Assign each asset node to a functional group (only real assets, not client summaries)
+  // Assign each asset node to a functional group (excludes entry points and client summaries)
   const groupAssignments = new Map<string, string>();
 
-  assetNodes.forEach(node => {
+  groupableNodes.forEach(node => {
     // Check if external
     if (node.is_internal === false) {
       groupAssignments.set(node.id, 'External');
@@ -271,7 +284,7 @@ function generateNetworkLayout(
   _edges: LayoutEdge[],
   canvasWidth: number,
   canvasHeight: number,
-  assetNodes: LayoutNode[]
+  groupableNodes: LayoutNode[]
 ): LayoutSuggestion {
   // Extract subnet from IP address (first 3 octets)
   const getSubnet = (ip?: string): string => {
@@ -283,10 +296,10 @@ function generateNetworkLayout(
     return 'Unknown';
   };
 
-  // Group asset nodes by subnet (only real assets, not client summaries)
+  // Group asset nodes by subnet (excludes entry points and client summaries)
   const subnetGroups = new Map<string, string[]>();
 
-  assetNodes.forEach(node => {
+  groupableNodes.forEach(node => {
     // External nodes get their own group
     if (node.is_internal === false) {
       if (!subnetGroups.has('External')) {
@@ -368,10 +381,10 @@ function generateCommunicationLayout(
   edges: LayoutEdge[],
   canvasWidth: number,
   canvasHeight: number,
-  assetNodes: LayoutNode[]
+  groupableNodes: LayoutNode[]
 ): LayoutSuggestion {
   // Create a set of valid asset IDs for filtering
-  const assetNodeIds = new Set(assetNodes.map(n => n.id));
+  const groupableNodeIds = new Set(groupableNodes.map(n => n.id));
 
   // Build adjacency matrix with weights
   const nodeIds = nodes.map(n => n.id);
@@ -491,7 +504,7 @@ function generateCommunicationLayout(
     id: `comm-cluster-${index}`,
     name: getClusterName(cluster, index),
     color: GROUP_COLORS[index % GROUP_COLORS.length],
-    asset_ids: cluster.filter(id => assetNodeIds.has(id)),
+    asset_ids: cluster.filter(id => groupableNodeIds.has(id)),
   })).filter(g => g.asset_ids.length > 0);
 
   // Calculate positions (radial layout)

@@ -98,7 +98,7 @@ export default function Sidebar() {
               key={item.name}
               to={item.href}
               className={clsx(
-                'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                'group relative flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
                 isActive
                   ? 'bg-primary-600 text-white'
                   : 'text-slate-300 hover:bg-slate-700 hover:text-white'
@@ -106,6 +106,11 @@ export default function Sidebar() {
             >
               <item.icon className="w-5 h-5 flex-shrink-0" />
               {!sidebarCollapsed && <span>{item.name}</span>}
+              {sidebarCollapsed && (
+                <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 text-white text-sm rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                  {item.name}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -125,7 +130,7 @@ export default function Sidebar() {
                   key={item.name}
                   to={item.href}
                   className={clsx(
-                    'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                    'group relative flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
                     isActive
                       ? 'bg-primary-600 text-white'
                       : 'text-slate-300 hover:bg-slate-700 hover:text-white'
@@ -133,6 +138,11 @@ export default function Sidebar() {
                 >
                   <item.icon className="w-5 h-5 flex-shrink-0" />
                   {!sidebarCollapsed && <span>{item.name}</span>}
+                  {sidebarCollapsed && (
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 text-white text-sm rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                      {item.name}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -143,12 +153,17 @@ export default function Sidebar() {
       {/* Collapse button */}
       <button
         onClick={toggleSidebar}
-        className="flex items-center justify-center h-12 border-t border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+        className="group relative flex items-center justify-center h-12 border-t border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
       >
         {sidebarCollapsed ? (
           <ChevronRightIcon className="w-5 h-5" />
         ) : (
           <ChevronLeftIcon className="w-5 h-5" />
+        )}
+        {sidebarCollapsed && (
+          <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 text-white text-sm rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+            Expand sidebar
+          </span>
         )}
       </button>
     </div>
