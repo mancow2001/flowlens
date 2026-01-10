@@ -12,6 +12,10 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Check if redirected from setup page
+  const setupComplete = (location.state as { setupComplete?: boolean })?.setupComplete;
 
   const { setTokens, setUser, setAuthSettings, isAuthenticated } = useAuthStore();
 
@@ -73,6 +77,15 @@ export default function Login() {
     }
   }, [authStatus, setAuthSettings, navigate]);
 
+  // Show success message if redirected from setup
+  useEffect(() => {
+    if (setupComplete) {
+      setSuccessMessage('Account created successfully. Please sign in.');
+      // Clear the state to prevent showing message on refresh
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [setupComplete, navigate, location.pathname]);
+
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated()) {
@@ -105,6 +118,7 @@ export default function Login() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMessage(null);
     loginMutation.mutate({ email, password });
   };
 
@@ -135,6 +149,13 @@ export default function Login() {
         {/* Login Card */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-8">
           <h2 className="text-xl font-semibold text-white mb-6">Sign in to your account</h2>
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="mb-4 p-3 bg-green-500/10 border border-green-500/50 rounded-lg text-green-400 text-sm">
+              {successMessage}
+            </div>
+          )}
 
           {/* Error Message */}
           {error && (

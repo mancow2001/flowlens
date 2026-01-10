@@ -52,6 +52,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_database(settings)
     logger.info("Database initialized")
 
+    # Invalidate all sessions on startup if configured
+    if settings.auth.enabled and settings.auth.invalidate_sessions_on_startup:
+        from flowlens.api.startup import invalidate_all_sessions
+        revoked_count = await invalidate_all_sessions()
+        if revoked_count > 0:
+            logger.info("Invalidated sessions on startup", revoked_count=revoked_count)
+
     # Start WebSocket connection manager
     ws_manager = get_connection_manager()
     await ws_manager.start()

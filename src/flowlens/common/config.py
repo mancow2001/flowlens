@@ -323,6 +323,12 @@ class AuthSettings(BaseSettings):
     password_require_digit: bool = True
     password_require_special: bool = False
 
+    # Session management
+    invalidate_sessions_on_startup: bool = Field(
+        default=True,
+        description="Invalidate all existing sessions when server starts (forces re-login)"
+    )
+
 
 class SAMLSettings(BaseSettings):
     """SAML authentication configuration."""
