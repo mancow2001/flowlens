@@ -80,7 +80,8 @@ class ModelManager:
         self.storage_path = storage_path or settings.model_storage_path
         self.db = db
 
-        # Ensure storage directory exists
+    def _ensure_storage_dir(self) -> None:
+        """Ensure storage directory exists (lazy creation)."""
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
     def get_shipped_model_path(self) -> Path:
@@ -169,6 +170,9 @@ class ModelManager:
         Returns:
             Version string for the saved model.
         """
+        # Ensure storage directory exists
+        self._ensure_storage_dir()
+
         # Generate version string
         version = f"custom-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
 
