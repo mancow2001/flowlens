@@ -176,6 +176,18 @@ class ResolutionSettings(BaseSettings):
         description="Automatically soft-delete assets with no activity after this many days"
     )
 
+    # Auto-clear settings
+    auto_clear_enabled: bool = Field(
+        default=True,
+        description="Enable automatic clearing of alerts when conditions are no longer met"
+    )
+    auto_clear_sustained_cycles: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of consecutive detection cycles condition must remain clear before auto-resolving"
+    )
+
     # External IP filtering - master switch
     discard_external_flows: bool = Field(
         default=True,
@@ -497,6 +509,56 @@ class ClassificationSettings(BaseSettings):
     ephemeral_port_min: int = Field(default=32768, ge=1024, le=65535)
 
 
+class MLClassificationSettings(BaseSettings):
+    """ML-based Classification Engine configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="ML_CLASSIFICATION_")
+
+    # Feature flag
+    enabled: bool = Field(
+        default=True,
+        description="Enable ML classification (uses shipped model by default)"
+    )
+
+    # Model storage
+    model_storage_path: Path = Field(
+        default=Path("/var/lib/flowlens/ml_models"),
+        description="Directory for custom model storage"
+    )
+
+    # Thresholds
+    ml_confidence_threshold: float = Field(
+        default=0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum ML confidence to use ML result"
+    )
+    ml_min_flows: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Minimum flows required for ML classification (vs 100 for heuristics)"
+    )
+
+    # Training requirements
+    min_training_samples: int = Field(
+        default=50,
+        ge=10,
+        description="Minimum confirmed samples before custom training is allowed"
+    )
+    min_samples_per_class: int = Field(
+        default=5,
+        ge=1,
+        description="Minimum samples per asset type for custom training"
+    )
+
+    # Algorithm
+    algorithm: Literal["random_forest", "xgboost", "gradient_boosting"] = Field(
+        default="random_forest",
+        description="ML algorithm to use"
+    )
+
+
 class LLMSettings(BaseSettings):
     """LLM/AI configuration for AI-powered features."""
 
@@ -559,6 +621,7 @@ class Settings(BaseSettings):
     vcenter: VCenterSettings = Field(default_factory=VCenterSettings)
     nutanix: NutanixSettings = Field(default_factory=NutanixSettings)
     classification: ClassificationSettings = Field(default_factory=ClassificationSettings)
+    ml_classification: MLClassificationSettings = Field(default_factory=MLClassificationSettings)
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     saml: SAMLSettings = Field(default_factory=SAMLSettings)

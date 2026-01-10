@@ -193,31 +193,40 @@ async def get_alert_summary(
 async def _get_alert_summary(db: DbSession) -> AlertSummary:
     """Get alert summary from database.
 
+    Only counts active (unresolved) alerts so summaries reflect
+    items requiring attention.
+
     Args:
         db: Database session.
 
     Returns:
-        Alert summary counts.
+        Alert summary counts for active alerts.
     """
-    # Total count
-    total = await db.scalar(select(func.count(Alert.id))) or 0
+    # Base filter for active (unresolved) alerts only
+    active_filter = Alert.is_resolved == False  # noqa: E712
 
-    # Count by severity
+    # Total count of active alerts
+    total = await db.scalar(
+        select(func.count(Alert.id)).where(active_filter)
+    ) or 0
+
+    # Count by severity (active only)
     severity_counts = {}
     for sev in ["critical", "error", "warning", "info"]:
         count = await db.scalar(
-            select(func.count(Alert.id)).where(Alert.severity == sev)
+            select(func.count(Alert.id)).where(
+                active_filter,
+                Alert.severity == sev,
+            )
         )
         severity_counts[sev] = count or 0
 
-    # Unacknowledged count
+    # Unacknowledged count (among active)
     unacknowledged = await db.scalar(
-        select(func.count(Alert.id)).where(Alert.is_acknowledged == False)
-    ) or 0
-
-    # Unresolved count
-    unresolved = await db.scalar(
-        select(func.count(Alert.id)).where(Alert.is_resolved == False)
+        select(func.count(Alert.id)).where(
+            active_filter,
+            Alert.is_acknowledged == False,  # noqa: E712
+        )
     ) or 0
 
     return AlertSummary(
@@ -227,7 +236,7 @@ async def _get_alert_summary(db: DbSession) -> AlertSummary:
         warning=severity_counts["warning"],
         info=severity_counts["info"],
         unacknowledged=unacknowledged,
-        unresolved=unresolved,
+        unresolved=total,  # Now equals total since we only count active
     )
 
 
