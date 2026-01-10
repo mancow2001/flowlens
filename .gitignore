@@ -1,9 +1,41 @@
-.DS_Store
-/migrations/__pycache__
-/src/flowlens/__pycache__
-/src/flowlens/common/__pycache__
-/src/flowlens/models/__pycache__
+# Python bytecode
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.venv/
+
+# Cache directories
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Environment files
+.env
+.env.local
+
+# macOS
 .DS_Store
-.DS_Store
-.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml

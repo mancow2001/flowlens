@@ -15,7 +15,7 @@ from flowlens.classification.feature_extractor import FeatureExtractor
 from flowlens.classification.scoring_engine import ScoringEngine
 from flowlens.common.logging import get_logger
 from flowlens.models.asset import Asset, AssetType
-from flowlens.models.classification import AssetFeatures, ClassificationHistory
+from flowlens.models.classification import ClassificationHistory
 from flowlens.schemas.asset_classification import (
     ClassificationHistoryEntry,
     ClassificationHistoryResponse,

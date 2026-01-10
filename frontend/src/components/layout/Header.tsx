@@ -309,7 +309,6 @@ export default function Header() {
                             e.preventDefault();
                             e.stopPropagation();
                             const url = `/topology?source=${conn.source.id}&target=${conn.target.id}`;
-                            console.log('Navigating to:', url);
                             setIsSearchOpen(false);
                             window.location.href = url;
                           }}

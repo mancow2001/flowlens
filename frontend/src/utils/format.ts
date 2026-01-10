@@ -95,19 +95,3 @@ export function getSeverityColor(severity: string): string {
   };
   return colors[severity] || 'bg-gray-500';
 }
-
-export function getAssetTypeIcon(type: string): string {
-  const icons: Record<string, string> = {
-    server: 'HiServer',
-    database: 'HiDatabase',
-    workstation: 'HiDesktopComputer',
-    network_device: 'HiChip',
-    load_balancer: 'HiSwitchHorizontal',
-    firewall: 'HiShieldCheck',
-    container: 'HiCube',
-    cloud_service: 'HiCloud',
-    external: 'HiGlobe',
-    unknown: 'HiQuestionMarkCircle',
-  };
-  return icons[type] || icons.unknown;
-}

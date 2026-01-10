@@ -305,22 +305,6 @@ export function createArcGenerator(config: ArcLayoutConfig) {
 }
 
 /**
- * Calculate arc centroid for connection endpoints.
- * @deprecated Use getArcInnerPoint for connections inside the hole
- */
-export function getArcCentroid(
-  node: d3.HierarchyRectangularNode<ArcNode>,
-  config: ArcLayoutConfig
-): [number, number] {
-  const angle = (node.x0! + node.x1!) / 2;
-  const radius = config.innerRadius + (node.y0! + node.y1!) / 2;
-  return [
-    Math.cos(angle - Math.PI / 2) * radius,
-    Math.sin(angle - Math.PI / 2) * radius,
-  ];
-}
-
-/**
  * Calculate point on the inner edge of an arc for connection endpoints.
  * This places connections inside the "hole" of the arc ring.
  */
@@ -633,29 +617,6 @@ export function findConnectionAtPoint(
     }
   }
   return null;
-}
-
-/**
- * Format bytes to human-readable string.
- */
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-/**
- * Get protocol name from number.
- */
-export function getProtocolName(protocol: number): string {
-  switch (protocol) {
-    case 6: return 'TCP';
-    case 17: return 'UDP';
-    case 1: return 'ICMP';
-    default: return `Proto ${protocol}`;
-  }
 }
 
 /**
