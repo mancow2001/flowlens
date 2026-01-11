@@ -287,6 +287,18 @@ class Alert(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
+    # Auto-clear tracking
+    auto_clear_eligible: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        index=True,
+    )
+
+    condition_cleared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # Notification tracking
     notification_sent: Mapped[bool] = mapped_column(
         default=False,
@@ -322,6 +334,11 @@ class Alert(Base, UUIDMixin, TimestampMixin):
             "ix_alerts_unresolved",
             "severity", "created_at",
             postgresql_where="is_resolved = false",
+        ),
+        Index(
+            "ix_alerts_auto_clear_candidates",
+            "auto_clear_eligible", "condition_cleared_at",
+            postgresql_where="is_resolved = false AND auto_clear_eligible = true",
         ),
     )
 

@@ -17,8 +17,8 @@ export default function Setup() {
     mutationFn: ({ email, name, password }: { email: string; name: string; password: string }) =>
       authApi.setup({ email, name, password }),
     onSuccess: () => {
-      // Redirect to login page after successful setup
-      navigate('/login', { replace: true });
+      // Redirect to login page after successful setup with success message
+      navigate('/login', { replace: true, state: { setupComplete: true } });
     },
     onError: (error: Error & { response?: { data?: { detail?: string } } }) => {
       const message = error.response?.data?.detail || 'Setup failed. Please try again.';

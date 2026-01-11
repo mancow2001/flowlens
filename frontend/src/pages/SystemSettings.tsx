@@ -141,15 +141,20 @@ export default function SystemSettings() {
     setShowSecrets((prev) => ({ ...prev, [fieldName]: !prev[fieldName] }));
   };
 
-  const handleDownloadDockerCompose = () => {
-    // Trigger download via hidden link
-    const url = settingsApi.downloadDockerComposeUrl();
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'docker-compose.yml';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleDownloadDockerCompose = async () => {
+    try {
+      const blob = await settingsApi.downloadDockerCompose();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'docker-compose.yml';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download docker-compose.yml:', error);
+    }
   };
 
   const renderField = (field: FieldMetadata) => {

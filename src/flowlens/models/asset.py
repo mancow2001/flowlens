@@ -32,17 +32,49 @@ class AssetType(str, Enum):
     start as UNKNOWN.
     """
 
+    # Compute
     SERVER = "server"
     WORKSTATION = "workstation"
+    VIRTUAL_MACHINE = "virtual_machine"
+    CONTAINER = "container"
+    CLOUD_SERVICE = "cloud_service"
+
+    # Data
     DATABASE = "database"
+    STORAGE = "storage"
+
+    # Network (legacy - kept for backwards compatibility)
     LOAD_BALANCER = "load_balancer"
     FIREWALL = "firewall"
     ROUTER = "router"
     SWITCH = "switch"
-    STORAGE = "storage"
-    CONTAINER = "container"
-    VIRTUAL_MACHINE = "virtual_machine"
-    CLOUD_SERVICE = "cloud_service"
+
+    # Network Services (new)
+    DNS_SERVER = "dns_server"
+    DHCP_SERVER = "dhcp_server"
+    NTP_SERVER = "ntp_server"
+    DIRECTORY_SERVICE = "directory_service"
+
+    # Communication (new)
+    MAIL_SERVER = "mail_server"
+    VOIP_SERVER = "voip_server"
+
+    # Security & Access (new)
+    VPN_GATEWAY = "vpn_gateway"
+    PROXY_SERVER = "proxy_server"
+    LOG_COLLECTOR = "log_collector"
+    REMOTE_ACCESS = "remote_access"
+
+    # Endpoints (new)
+    PRINTER = "printer"
+    IOT_DEVICE = "iot_device"
+    IP_CAMERA = "ip_camera"
+
+    # Application Infrastructure (new)
+    MESSAGE_QUEUE = "message_queue"
+    MONITORING_SERVER = "monitoring_server"
+
+    # Default
     UNKNOWN = "unknown"
 
 

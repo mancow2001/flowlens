@@ -4,7 +4,7 @@ Detects new, stale, and changed dependencies and assets,
 generating change events and alerts.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -33,6 +33,36 @@ from flowlens.api.websocket.manager import (
 logger = get_logger(__name__)
 
 
+# Alert types eligible for auto-clear (reversible conditions)
+AUTO_CLEARABLE_CHANGE_TYPES: set[ChangeType] = {
+    # Traffic anomalies
+    ChangeType.DEPENDENCY_TRAFFIC_SPIKE,
+    ChangeType.DEPENDENCY_TRAFFIC_DROP,
+    # Availability
+    ChangeType.ASSET_OFFLINE,
+    ChangeType.DEPENDENCY_STALE,
+    # Baseline deviations
+    ChangeType.BASELINE_DEPENDENCY_ADDED,
+    ChangeType.BASELINE_DEPENDENCY_REMOVED,
+    ChangeType.BASELINE_ENTRY_POINT_ADDED,
+    ChangeType.BASELINE_ENTRY_POINT_REMOVED,
+    ChangeType.BASELINE_MEMBER_ADDED,
+    ChangeType.BASELINE_MEMBER_REMOVED,
+    ChangeType.BASELINE_TRAFFIC_DEVIATION,
+}
+
+
+def _format_bytes(b: int) -> str:
+    """Format bytes to human-readable string."""
+    if b >= 1_000_000_000:
+        return f"{b / 1_000_000_000:.1f} GB"
+    elif b >= 1_000_000:
+        return f"{b / 1_000_000:.1f} MB"
+    elif b >= 1_000:
+        return f"{b / 1_000:.1f} KB"
+    return f"{b} B"
+
+
 class ChangeDetector:
     """Detects changes in the dependency graph.
 
@@ -54,8 +84,15 @@ class ChangeDetector:
             settings = app_settings.resolution
 
         self._stale_threshold_hours = settings.stale_threshold_hours
+        self._stale_dependency_cleanup_days = settings.stale_dependency_cleanup_days
+        self._stale_asset_cleanup_days = settings.stale_asset_cleanup_days
         self._traffic_spike_threshold = 2.0  # 2x baseline
         self._traffic_drop_threshold = 0.5  # 50% of baseline
+
+        # Auto-clear settings
+        self._auto_clear_enabled = settings.auto_clear_enabled
+        self._auto_clear_sustained_cycles = settings.auto_clear_sustained_cycles
+        self._detection_interval_minutes = settings.detection_interval_minutes
 
         # Initialize notification manager
         self._notification_manager: NotificationManager | None = None
@@ -461,6 +498,35 @@ class ChangeDetector:
         if message is None:
             message = self._generate_alert_message(event)
 
+        # Check for existing unresolved alert with same asset/dependency/title
+        # to prevent duplicate alerts for the same ongoing condition
+        existing_query = select(Alert.id).where(
+            Alert.is_resolved == False,  # noqa: E712
+            Alert.title == title,
+        )
+        if event.asset_id:
+            existing_query = existing_query.where(Alert.asset_id == event.asset_id)
+        else:
+            existing_query = existing_query.where(Alert.asset_id.is_(None))
+
+        if event.dependency_id:
+            existing_query = existing_query.where(Alert.dependency_id == event.dependency_id)
+        else:
+            existing_query = existing_query.where(Alert.dependency_id.is_(None))
+
+        existing_result = await db.execute(existing_query.limit(1))
+        existing_alert_id = existing_result.scalar_one_or_none()
+
+        if existing_alert_id:
+            logger.debug(
+                "Skipping duplicate alert - unresolved alert already exists",
+                existing_alert_id=str(existing_alert_id),
+                title=title,
+                asset_id=str(event.asset_id) if event.asset_id else None,
+                dependency_id=str(event.dependency_id) if event.dependency_id else None,
+            )
+            return None
+
         alert = Alert(
             change_event_id=event.id,
             severity=severity,
@@ -468,15 +534,17 @@ class ChangeDetector:
             message=message,
             asset_id=event.asset_id,
             dependency_id=event.dependency_id,
+            auto_clear_eligible=event.change_type in AUTO_CLEARABLE_CHANGE_TYPES,
         )
 
         db.add(alert)
         await db.flush()
 
+        severity_str = severity.value if hasattr(severity, 'value') else str(severity)
         logger.info(
             "Created alert",
             alert_id=str(alert.id),
-            severity=severity.value,
+            severity=severity_str,
             title=title,
             rule=rule_result.matching_rule.name if rule_result.matching_rule else None,
         )
@@ -493,14 +561,15 @@ class ChangeDetector:
 
         # Broadcast via WebSocket
         try:
+            change_type_str = event.change_type.value if hasattr(event.change_type, 'value') else str(event.change_type)
             await broadcast_alert_event(
                 EventType.ALERT_CREATED,
                 alert.id,
                 {
-                    "severity": severity.value,
+                    "severity": severity_str,
                     "title": title,
                     "message": message[:200] if message else None,  # Truncate for broadcast
-                    "change_type": event.change_type.value,
+                    "change_type": change_type_str,
                     "asset_id": str(alert.asset_id) if alert.asset_id else None,
                     "dependency_id": str(alert.dependency_id) if alert.dependency_id else None,
                 },
@@ -782,13 +851,31 @@ class ChangeDetector:
             if not dep:
                 continue
 
+            # Get asset names for better context
+            source_name = "Unknown"
+            target_name = "Unknown"
+            source_result = await db.execute(
+                select(Asset.name, Asset.ip_address).where(Asset.id == dep.source_asset_id)
+            )
+            source_row = source_result.first()
+            if source_row:
+                source_name = source_row[0] or str(source_row[1])
+
+            target_result = await db.execute(
+                select(Asset.name, Asset.ip_address).where(Asset.id == dep.target_asset_id)
+            )
+            target_row = target_result.first()
+            if target_row:
+                target_name = target_row[0] or str(target_row[1])
+
             daily_avg = dep.bytes_last_7d / 7 if dep.bytes_last_7d > 0 else 0
             spike_ratio = dep.bytes_last_24h / daily_avg if daily_avg > 0 else 0
 
             event = await self.create_change_event(
                 db,
                 change_type=ChangeType.DEPENDENCY_TRAFFIC_SPIKE,
-                summary=f"Traffic spike detected: {spike_ratio:.1f}x normal",
+                summary=f"Traffic spike on {source_name} → {target_name}:{dep.target_port} ({spike_ratio:.1f}x normal)",
+                description=f"Traffic from {source_name} to {target_name} on port {dep.target_port} has increased to {spike_ratio:.1f}x the normal daily average. Current 24h: {_format_bytes(dep.bytes_last_24h)}, Normal daily avg: {_format_bytes(int(daily_avg))}",
                 dependency_id=dep_id,
                 source_asset_id=dep.source_asset_id,
                 target_asset_id=dep.target_asset_id,
@@ -803,6 +890,8 @@ class ChangeDetector:
                 metadata={
                     "port": dep.target_port,
                     "protocol": dep.protocol,
+                    "source_name": source_name,
+                    "target_name": target_name,
                 },
             )
 
@@ -819,13 +908,31 @@ class ChangeDetector:
             if not dep:
                 continue
 
+            # Get asset names for better context
+            source_name = "Unknown"
+            target_name = "Unknown"
+            source_result = await db.execute(
+                select(Asset.name, Asset.ip_address).where(Asset.id == dep.source_asset_id)
+            )
+            source_row = source_result.first()
+            if source_row:
+                source_name = source_row[0] or str(source_row[1])
+
+            target_result = await db.execute(
+                select(Asset.name, Asset.ip_address).where(Asset.id == dep.target_asset_id)
+            )
+            target_row = target_result.first()
+            if target_row:
+                target_name = target_row[0] or str(target_row[1])
+
             daily_avg = dep.bytes_last_7d / 7 if dep.bytes_last_7d > 0 else 0
             drop_ratio = dep.bytes_last_24h / daily_avg if daily_avg > 0 else 0
 
             event = await self.create_change_event(
                 db,
                 change_type=ChangeType.DEPENDENCY_TRAFFIC_DROP,
-                summary=f"Traffic drop detected: {drop_ratio:.0%} of normal",
+                summary=f"Traffic drop on {source_name} → {target_name}:{dep.target_port} ({drop_ratio:.0%} of normal)",
+                description=f"Traffic from {source_name} to {target_name} on port {dep.target_port} has dropped to {drop_ratio:.0%} of the normal daily average. Current 24h: {_format_bytes(dep.bytes_last_24h)}, Normal daily avg: {_format_bytes(int(daily_avg))}",
                 dependency_id=dep_id,
                 source_asset_id=dep.source_asset_id,
                 target_asset_id=dep.target_asset_id,
@@ -840,6 +947,8 @@ class ChangeDetector:
                 metadata={
                     "port": dep.target_port,
                     "protocol": dep.protocol,
+                    "source_name": source_name,
+                    "target_name": target_name,
                 },
             )
 
@@ -1063,7 +1172,12 @@ class ChangeDetector:
             if not asset:
                 continue
 
-            hours_offline = (datetime.utcnow() - asset.last_seen).total_seconds() / 3600
+            # Handle both timezone-aware and naive datetimes
+            now = datetime.now(timezone.utc)
+            last_seen = asset.last_seen
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            hours_offline = (now - last_seen).total_seconds() / 3600
 
             event = await self.create_change_event(
                 db,
@@ -1193,6 +1307,108 @@ class ChangeDetector:
 
         return critical_deps
 
+    async def cleanup_stale_dependencies(
+        self,
+        db: AsyncSession,
+        threshold_days: int | None = None,
+    ) -> int:
+        """Close dependencies that have been stale for too long.
+
+        Sets valid_to to mark dependencies as closed/ended.
+
+        Args:
+            db: Database session.
+            threshold_days: Days since last activity to trigger cleanup.
+
+        Returns:
+            Number of dependencies closed.
+        """
+        if threshold_days is None:
+            threshold_days = self._stale_dependency_cleanup_days
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+
+        # Find dependencies to close
+        result = await db.execute(
+            select(Dependency.id)
+            .where(
+                Dependency.last_seen < cutoff,
+                Dependency.valid_to.is_(None),
+            )
+            .limit(500)
+        )
+        stale_ids = [row[0] for row in result.fetchall()]
+
+        if not stale_ids:
+            return 0
+
+        # Close the dependencies by setting valid_to
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(Dependency)
+            .where(Dependency.id.in_(stale_ids))
+            .values(valid_to=now)
+        )
+
+        logger.info(
+            "Cleaned up stale dependencies",
+            count=len(stale_ids),
+            threshold_days=threshold_days,
+        )
+
+        return len(stale_ids)
+
+    async def cleanup_stale_assets(
+        self,
+        db: AsyncSession,
+        threshold_days: int | None = None,
+    ) -> int:
+        """Soft-delete assets that have been inactive for too long.
+
+        Sets deleted_at to mark assets as removed.
+
+        Args:
+            db: Database session.
+            threshold_days: Days since last activity to trigger cleanup.
+
+        Returns:
+            Number of assets soft-deleted.
+        """
+        if threshold_days is None:
+            threshold_days = self._stale_asset_cleanup_days
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+
+        # Find assets to soft-delete
+        result = await db.execute(
+            select(Asset.id)
+            .where(
+                Asset.last_seen < cutoff,
+                Asset.deleted_at.is_(None),
+            )
+            .limit(500)
+        )
+        stale_ids = [row[0] for row in result.fetchall()]
+
+        if not stale_ids:
+            return 0
+
+        # Soft-delete the assets
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(Asset)
+            .where(Asset.id.in_(stale_ids))
+            .values(deleted_at=now)
+        )
+
+        logger.info(
+            "Cleaned up stale assets",
+            count=len(stale_ids),
+            threshold_days=threshold_days,
+        )
+
+        return len(stale_ids)
+
     async def run_detection_cycle(
         self,
         db: AsyncSession,
@@ -1228,6 +1444,10 @@ class ChangeDetector:
             "new_dependencies": 0,
             "events_created": 0,
             "alerts_created": 0,
+            "dependencies_cleaned_up": 0,
+            "assets_cleaned_up": 0,
+            "auto_clear_resolved": 0,
+            "auto_clear_pending": 0,
         }
 
         # Detect stale dependencies
@@ -1291,11 +1511,300 @@ class ChangeDetector:
             results["events_created"] += events_created
             results["alerts_created"] += events_created
 
+        # Cleanup stale dependencies and assets (after configured threshold)
+        results["dependencies_cleaned_up"] = await self.cleanup_stale_dependencies(db)
+        results["assets_cleaned_up"] = await self.cleanup_stale_assets(db)
+
+        # Process auto-clear candidates
+        if self._auto_clear_enabled:
+            auto_clear_results = await self.process_auto_clear_candidates(db)
+            results["auto_clear_resolved"] = auto_clear_results["resolved_alerts"]
+            results["auto_clear_pending"] = auto_clear_results["cleared_conditions"]
+
         await db.commit()
 
         logger.info(
             "Detection cycle complete",
             **results,
         )
+
+        return results
+
+    # -------------------------------------------------------------------------
+    # Auto-clear methods
+    # -------------------------------------------------------------------------
+
+    async def check_alert_condition_cleared(
+        self,
+        db: AsyncSession,
+        alert: Alert,
+        event: ChangeEvent,
+    ) -> bool:
+        """Check if the condition that triggered an alert is no longer true.
+
+        Args:
+            db: Database session.
+            alert: The alert to check.
+            event: The change event that triggered the alert.
+
+        Returns:
+            True if condition is cleared (no longer triggering), False otherwise.
+        """
+        change_type = event.change_type
+
+        if change_type == ChangeType.ASSET_OFFLINE:
+            return await self._check_asset_online(db, event.asset_id)
+
+        elif change_type == ChangeType.DEPENDENCY_STALE:
+            return await self._check_dependency_active(db, event.dependency_id)
+
+        elif change_type == ChangeType.DEPENDENCY_TRAFFIC_SPIKE:
+            return await self._check_traffic_normal(db, event.dependency_id, "spike")
+
+        elif change_type == ChangeType.DEPENDENCY_TRAFFIC_DROP:
+            return await self._check_traffic_normal(db, event.dependency_id, "drop")
+
+        elif change_type in (
+            ChangeType.BASELINE_DEPENDENCY_ADDED,
+            ChangeType.BASELINE_DEPENDENCY_REMOVED,
+            ChangeType.BASELINE_ENTRY_POINT_ADDED,
+            ChangeType.BASELINE_ENTRY_POINT_REMOVED,
+            ChangeType.BASELINE_MEMBER_ADDED,
+            ChangeType.BASELINE_MEMBER_REMOVED,
+            ChangeType.BASELINE_TRAFFIC_DEVIATION,
+        ):
+            return await self._check_baseline_condition_cleared(db, event)
+
+        return False
+
+    async def _check_asset_online(
+        self,
+        db: AsyncSession,
+        asset_id: UUID | None,
+    ) -> bool:
+        """Check if an asset is back online (has recent activity)."""
+        if not asset_id:
+            return False
+
+        cutoff = datetime.utcnow() - timedelta(hours=self._stale_threshold_hours)
+
+        result = await db.execute(
+            select(Asset.id).where(
+                Asset.id == asset_id,
+                Asset.last_seen >= cutoff,
+                Asset.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _check_dependency_active(
+        self,
+        db: AsyncSession,
+        dependency_id: UUID | None,
+    ) -> bool:
+        """Check if a dependency has recent activity (no longer stale)."""
+        if not dependency_id:
+            return False
+
+        cutoff = datetime.utcnow() - timedelta(hours=self._stale_threshold_hours)
+
+        result = await db.execute(
+            select(Dependency.id).where(
+                Dependency.id == dependency_id,
+                Dependency.last_seen >= cutoff,
+                Dependency.valid_to.is_(None),
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _check_traffic_normal(
+        self,
+        db: AsyncSession,
+        dependency_id: UUID | None,
+        anomaly_type: str,
+    ) -> bool:
+        """Check if traffic has returned to normal levels."""
+        if not dependency_id:
+            return False
+
+        result = await db.execute(
+            select(Dependency).where(Dependency.id == dependency_id)
+        )
+        dep = result.scalar_one_or_none()
+
+        if not dep or dep.bytes_last_7d == 0:
+            return False
+
+        daily_avg = dep.bytes_last_7d / 7
+        if daily_avg == 0:
+            return False
+
+        ratio = dep.bytes_last_24h / daily_avg
+
+        if anomaly_type == "spike":
+            # Traffic is normal if ratio is below spike threshold
+            return ratio <= self._traffic_spike_threshold
+        else:  # drop
+            # Traffic is normal if ratio is above drop threshold
+            return ratio >= self._traffic_drop_threshold
+
+    async def _check_baseline_condition_cleared(
+        self,
+        db: AsyncSession,
+        event: ChangeEvent,
+    ) -> bool:
+        """Check if a baseline deviation has been corrected.
+
+        This checks if the baseline has been updated to match current state,
+        or if the condition that caused the deviation no longer exists.
+        """
+        from flowlens.models.baseline import ApplicationBaseline
+        from flowlens.services.baseline_monitor import BaselineMonitorService
+
+        if not event.baseline_id or not event.application_id:
+            return False
+
+        # Get baseline
+        result = await db.execute(
+            select(ApplicationBaseline).where(
+                ApplicationBaseline.id == event.baseline_id,
+                ApplicationBaseline.is_active == True,  # noqa: E712
+            )
+        )
+        baseline = result.scalar_one_or_none()
+
+        if not baseline:
+            # Baseline was deactivated or deleted - condition is "cleared"
+            return True
+
+        # Re-check for this specific deviation
+        monitor = BaselineMonitorService(db)
+        current_events = await monitor.check_baseline(baseline, create_events=False)
+
+        # Check if the same type of deviation still exists for the same entity
+        for current_event in current_events:
+            if (
+                current_event.change_type == event.change_type
+                and current_event.asset_id == event.asset_id
+                and current_event.dependency_id == event.dependency_id
+            ):
+                # Deviation still exists
+                return False
+
+        # Deviation no longer exists
+        return True
+
+    async def process_auto_clear_candidates(
+        self,
+        db: AsyncSession,
+    ) -> dict[str, int]:
+        """Process alerts eligible for auto-clear.
+
+        Checks each eligible alert to see if its condition is still true.
+        Tracks sustained clear time and resolves alerts after enough cycles.
+
+        Args:
+            db: Database session.
+
+        Returns:
+            Dict with counts: cleared_conditions, resolved_alerts, still_active
+        """
+        from sqlalchemy.orm import selectinload
+
+        results = {
+            "cleared_conditions": 0,
+            "resolved_alerts": 0,
+            "still_active": 0,
+            "condition_returned": 0,
+        }
+
+        # Calculate sustained duration
+        detection_interval = timedelta(minutes=self._detection_interval_minutes)
+        sustained_duration = detection_interval * self._auto_clear_sustained_cycles
+
+        # Query eligible alerts
+        query = (
+            select(Alert)
+            .where(
+                Alert.is_resolved == False,  # noqa: E712
+                Alert.auto_clear_eligible == True,  # noqa: E712
+            )
+            .options(selectinload(Alert.change_event))
+            .limit(500)  # Process in batches
+        )
+
+        result = await db.execute(query)
+        alerts = result.scalars().all()
+
+        now = datetime.utcnow()
+
+        for alert in alerts:
+            event = alert.change_event
+            if not event:
+                continue
+
+            # Check if condition is still true
+            condition_cleared = await self.check_alert_condition_cleared(db, alert, event)
+
+            if condition_cleared:
+                if alert.condition_cleared_at is None:
+                    # First time we detected condition is cleared
+                    alert.condition_cleared_at = now
+                    results["cleared_conditions"] += 1
+                    logger.debug(
+                        "Alert condition cleared, starting sustained timer",
+                        alert_id=str(alert.id),
+                        alert_title=alert.title,
+                    )
+                else:
+                    # Check if sustained duration has passed
+                    time_cleared = now - alert.condition_cleared_at
+                    if time_cleared >= sustained_duration:
+                        # Auto-resolve the alert
+                        alert.resolve(
+                            by="system:auto-clear",
+                            notes=f"Condition automatically cleared after {self._auto_clear_sustained_cycles} detection cycles",
+                        )
+                        results["resolved_alerts"] += 1
+
+                        logger.info(
+                            "Alert auto-cleared",
+                            alert_id=str(alert.id),
+                            alert_title=alert.title,
+                            time_cleared_minutes=time_cleared.total_seconds() / 60,
+                        )
+
+                        # Broadcast resolution via WebSocket
+                        try:
+                            await broadcast_alert_event(
+                                EventType.ALERT_RESOLVED,
+                                alert.id,
+                                {
+                                    "severity": alert.severity.value if hasattr(alert.severity, "value") else alert.severity,
+                                    "title": alert.title,
+                                    "resolved_by": "system:auto-clear",
+                                    "auto_cleared": True,
+                                },
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to broadcast auto-clear event",
+                                error=str(e),
+                            )
+                    else:
+                        results["cleared_conditions"] += 1
+            else:
+                # Condition is still active
+                if alert.condition_cleared_at is not None:
+                    # Condition returned - reset the timer
+                    alert.condition_cleared_at = None
+                    results["condition_returned"] += 1
+                    logger.debug(
+                        "Alert condition returned, resetting sustained timer",
+                        alert_id=str(alert.id),
+                        alert_title=alert.title,
+                    )
+                else:
+                    results["still_active"] += 1
 
         return results

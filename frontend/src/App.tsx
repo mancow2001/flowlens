@@ -13,7 +13,6 @@ import Dependencies from './pages/Dependencies';
 import Alerts from './pages/Alerts';
 import AlertRules from './pages/AlertRules';
 import Maintenance from './pages/Maintenance';
-import Changes from './pages/Changes';
 import ClassificationRules from './pages/ClassificationRules';
 import Analysis from './pages/Analysis';
 import Tasks from './pages/Tasks';
@@ -24,6 +23,7 @@ import UserManagement from './pages/UserManagement';
 import SAMLConfiguration from './pages/SAMLConfiguration';
 import DiscoveryProviders from './pages/DiscoveryProviders';
 import BackupRestore from './pages/BackupRestore';
+import MLTraining from './pages/MLTraining';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebSocketEvents } from './hooks/useWebSocketEvents';
@@ -75,7 +75,6 @@ function App() {
                   <Route path="/segmentation-policies/:id" element={<SegmentationPolicyDetail />} />
                   <Route path="/dependencies" element={<Dependencies />} />
                   <Route path="/alerts" element={<Alerts />} />
-                  <Route path="/changes" element={<Changes />} />
                   <Route path="/analysis" element={<Analysis />} />
                   <Route path="/tasks" element={<Tasks />} />
 
@@ -143,6 +142,14 @@ function App() {
                     element={
                       <ProtectedRoute requiredRoles={['admin']}>
                         <BackupRestore />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/settings/ml-training"
+                    element={
+                      <ProtectedRoute requiredRoles={['admin']}>
+                        <MLTraining />
                       </ProtectedRoute>
                     }
                   />

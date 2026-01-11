@@ -1,7 +1,6 @@
 """Application API endpoints."""
 
 import json
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
@@ -1752,6 +1751,7 @@ async def get_application_topology(
             target_hop = downstream_assets.get(conn.target_asset_id, {}).get("hop_distance", 0)
 
             edges.append({
+                "id": str(conn.id),
                 "source": str(conn.source_asset_id),
                 "target": str(conn.target_asset_id),
                 "target_port": conn.target_port,

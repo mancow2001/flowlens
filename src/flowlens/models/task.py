@@ -33,6 +33,7 @@ class TaskType(str, Enum):
     BULK_ASSET_DELETE = "bulk_asset_delete"
     EXPORT_ASSETS = "export_assets"
     IMPORT_ASSETS = "import_assets"
+    TRAIN_ML_MODEL = "train_ml_model"
 
 
 class BackgroundTask(Base, UUIDMixin, TimestampMixin):

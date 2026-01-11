@@ -20,11 +20,11 @@ import {
   getRelatedConnections,
   computeNodeOpacity,
   computeConnectionOpacity,
-  formatBytes,
   type ArcNode,
   type ArcLayoutConfig,
   type VisualConnection,
 } from '../../utils/arcLayout';
+import { formatBytes } from '../../utils/format';
 
 interface ArcTopologyRendererProps {
   data: ArcTopologyData;

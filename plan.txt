@@ -1,0 +1,469 @@
+● The plan is complete. It covers:
+
+  1. Shipped Model - Built from synthetic data (200 samples per class) using profiles based on existing heuristics
+  2. Customer Fine-Tuning - Trains from confirmed classifications (classification_locked=True)
+  3. Background Job Integration - Uses existing BackgroundTask system, status visible in task section
+  4. Rollback - reset_to_shipped() already exists, just needs API endpoint exposure
+  5. Build Script - scripts/build_shipped_model.py for generating the shipped model
+
+  Key implementation files:
+  - dataset.py - Training data structures
+  - synthetic.py - Synthetic data generator with realistic profiles
+  - trainer.py - Training orchestration with progress reporting
+  - ml_training_task.py - Background task integration
+  - ml.py router - API endpoints
+  - build_shipped_model.py - Script to generate shipped model
+                                                                                                    
+● User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/snazzy-tumbling-map.md · /plan to edit
+     ML Model Training & Fine-Tuning Plan
+
+     Overview
+
+     Build a complete ML training system that:
+     1. Ships a pre-trained model with the product
+     2. Allows customers to fine-tune with their confirmed classifications
+     3. Supports rollback to shipped model at any time
+     4. Reports training status in the existing task system
+
+     Current State
+
+     Exists:
+     - MLClassifier - wraps sklearn/XGBoost for predictions
+     - FeatureTransformer - converts BehavioralFeatures to 24-dim vectors
+     - ModelManager - handles model persistence, versioning, rollback
+     - HybridClassificationEngine - ML + heuristic fallback
+     - MLModelRegistry table - tracks model versions
+     - BackgroundTask model and TaskExecutor for async job tracking
+     - Task API at /api/v1/tasks with progress reporting
+
+     Missing:
+     - Training module (trainer class)
+     - Training data collection utilities
+     - Synthetic data generator (for shipped model)
+     - TRAIN_ML_MODEL task type
+     - Training task implementation
+     - Shipped model file
+
+     Configuration
+
+     From user input:
+     - Training mode: Background job (reported in task system)
+     - Minimum accuracy: 85%
+     - Shipped model size: 200 samples per class (~1800 total)
+
+     Implementation Plan
+
+     1. Add TRAIN_ML_MODEL Task Type
+
+     File: src/flowlens/models/task.py
+
+     Add to TaskType enum:
+     TRAIN_ML_MODEL = "train_ml_model"
+
+     2. Create Training Dataset Utilities
+
+     File: src/flowlens/classification/ml/dataset.py
+
+     @dataclass
+     class TrainingDataset:
+         features: np.ndarray      # Shape: (n_samples, 24)
+         labels: np.ndarray        # Shape: (n_samples,)
+         asset_ids: list[UUID]     # For traceability
+         class_names: list[str]    # All class labels
+
+     @dataclass
+     class DatasetSplit:
+         train: TrainingDataset
+         test: TrainingDataset
+
+     class DatasetBuilder:
+         """Builds training datasets from database or synthetic data."""
+
+         async def from_confirmed_assets(db: AsyncSession) -> TrainingDataset
+             """Collect assets where classification_locked=True or classification_method='manual'"""
+
+         def from_synthetic(generator: SyntheticDataGenerator) -> TrainingDataset
+             """Build from synthetic profiles"""
+
+         @staticmethod
+         def train_test_split(dataset: TrainingDataset, test_ratio=0.2) -> DatasetSplit
+
+     3. Create Synthetic Data Generator
+
+     File: src/flowlens/classification/ml/synthetic.py
+
+     class SyntheticDataGenerator:
+         """Generates realistic BehavioralFeatures for building shipped model."""
+
+         # Profiles based on heuristics.py signals and conftest.py fixtures
+         PROFILES: ClassVar[dict[str, FeatureProfile]] = {
+             "server": FeatureProfile(
+                 fan_in_range=(30, 100),
+                 fan_out_range=(2, 10),
+                 ports=[80, 443, 22],
+                 active_hours_range=(18, 24),
+                 business_hours_ratio_range=(0.3, 0.5),
+             ),
+             "workstation": FeatureProfile(
+                 fan_in_range=(0, 5),
+                 fan_out_range=(50, 150),
+                 ports=[],  # No listeners
+                 active_hours_range=(8, 14),
+                 business_hours_ratio_range=(0.7, 0.95),
+             ),
+             # ... profiles for all 9 types
+         }
+
+         def generate_sample(self, asset_type: str) -> BehavioralFeatures
+         def generate_samples(self, asset_type: str, n: int) -> list[BehavioralFeatures]
+         def generate_balanced_dataset(self, samples_per_class: int = 200) -> TrainingDataset
+
+     Profile Summary (200 samples each):
+     ┌─────────────────┬──────────┬─────────┬─────────────────┬──────────────┬───────────┐
+     │      Type       │  Fan-In  │ Fan-Out │      Ports      │ Active Hours │ Business% │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ server          │ 30-100   │ 2-10    │ 80,443,22       │ 18-24        │ 30-50%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ workstation     │ 0-5      │ 50-150  │ none            │ 8-14         │ 70-95%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ database        │ 5-30     │ 1-5     │ 3306,5432,27017 │ 20-24        │ 40-60%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ load_balancer   │ 100-500  │ 5-20    │ 80,443          │ 24           │ 45-55%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ network_device  │ 5-20     │ 5-20    │ 161,179         │ 24           │ 45-55%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ storage         │ 10-50    │ 1-5     │ 445,2049,3260   │ 22-24        │ 45-55%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ container       │ 5-30     │ 5-30    │ 3000,8000       │ 16-22        │ 50-70%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ cloud_service   │ 200-1000 │ 1-10    │ 443             │ 24           │ 45-55%    │
+     ├─────────────────┼──────────┼─────────┼─────────────────┼──────────────┼───────────┤
+     │ virtual_machine │ 5-30     │ 5-30    │ varies          │ 14-20        │ 50-70%    │
+     └─────────────────┴──────────┴─────────┴─────────────────┴──────────────┴───────────┘
+     4. Create MLTrainer Class
+
+     File: src/flowlens/classification/ml/trainer.py
+
+     class MLTrainer:
+         """Orchestrates ML model training with progress reporting."""
+
+         MIN_ACCURACY_THRESHOLD = 0.85
+         MIN_SAMPLES_PER_CLASS = 5
+
+         def __init__(self, db: AsyncSession, task_executor: TaskExecutor):
+             self.db = db
+             self.executor = task_executor
+             self.settings = get_settings().ml_classification
+
+         async def train_from_confirmed(
+             self,
+             task_id: UUID,
+             algorithm: str = "random_forest",
+             notes: str | None = None,
+         ) -> str:
+             """Train model from confirmed classifications. Returns model version."""
+
+             # 1. Update task: starting
+             await self.executor.start_task(task_id, total_items=5)  # 5 phases
+
+             # 2. Collect training data
+             dataset = await DatasetBuilder().from_confirmed_assets(self.db)
+             await self.executor.update_task_progress(task_id, processed=1)
+
+             # 3. Validate sufficient data
+             self._validate_dataset(dataset)
+             await self.executor.update_task_progress(task_id, processed=2)
+
+             # 4. Train model
+             split = DatasetBuilder.train_test_split(dataset)
+             classifier, stats = self._train_model(split.train, algorithm)
+             await self.executor.update_task_progress(task_id, processed=3)
+
+             # 5. Evaluate on test set
+             eval_metrics = self._evaluate(classifier, split.test)
+             if eval_metrics.accuracy < self.MIN_ACCURACY_THRESHOLD:
+                 raise TrainingError(f"Accuracy {eval_metrics.accuracy:.2%} below threshold")
+             await self.executor.update_task_progress(task_id, processed=4)
+
+             # 6. Save model
+             model_manager = ModelManager(db=self.db)
+             version = await model_manager.save_model(classifier, stats, notes)
+             await self.executor.update_task_progress(task_id, processed=5)
+
+             return version
+
+         def train_shipped_model(self, samples_per_class: int = 200) -> MLClassifier:
+             """Train shipped model from synthetic data (offline use)."""
+             generator = SyntheticDataGenerator()
+             dataset = generator.generate_balanced_dataset(samples_per_class)
+             split = DatasetBuilder.train_test_split(dataset)
+             classifier, stats = self._train_model(split.train, "random_forest")
+             return classifier
+
+     5. Create Training Task
+
+     File: src/flowlens/tasks/ml_training_task.py
+
+     async def run_ml_training_task(
+         task_id: UUID,
+         algorithm: str,
+         notes: str | None,
+     ) -> None:
+         """Background task for ML model training."""
+
+         async with get_async_session() as db:
+             executor = TaskExecutor(db)
+             trainer = MLTrainer(db, executor)
+
+             try:
+                 version = await trainer.train_from_confirmed(task_id, algorithm, notes)
+                 await executor.complete_task(task_id, result={
+                     "model_version": version,
+                     "status": "trained_and_activated",
+                 })
+             except TrainingError as e:
+                 await executor.fail_task(task_id, str(e), {"error_type": "training_error"})
+             except Exception as e:
+                 await executor.fail_task(task_id, str(e), {"error_type": "unexpected_error"})
+
+     6. Add Training API Endpoints
+
+     File: src/flowlens/api/routers/ml.py
+
+     router = APIRouter(prefix="/ml", tags=["ML Classification"])
+
+     @router.post("/train", response_model=TaskResponse)
+     async def start_training(
+         request: TrainModelRequest,  # algorithm, notes
+         db: AsyncSession = Depends(get_db),
+         user: User = Depends(require_admin),
+     ) -> TaskResponse:
+         """Start ML model training from confirmed classifications."""
+         executor = TaskExecutor(db)
+         task = await executor.create_task(
+             task_type=TaskType.TRAIN_ML_MODEL,
+             name="Train ML Classification Model",
+             description=f"Training {request.algorithm} model",
+             triggered_by=user.id,
+             parameters={"algorithm": request.algorithm, "notes": request.notes},
+         )
+         run_task_in_background(task.id, run_ml_training_task(task.id, ...))
+         return TaskResponse(task_id=task.id)
+
+     @router.get("/models", response_model=list[ModelInfoResponse])
+     async def list_models(...) -> list[ModelInfoResponse]:
+         """List all models (shipped + custom)."""
+
+     @router.get("/models/{version}", response_model=ModelInfoResponse)
+     async def get_model(...) -> ModelInfoResponse:
+         """Get model details."""
+
+     @router.post("/models/{version}/activate")
+     async def activate_model(...):
+         """Activate a specific model version."""
+
+     @router.post("/models/reset")
+     async def reset_to_shipped(...):
+         """Reset to shipped model."""
+
+     @router.get("/status", response_model=MLStatusResponse)
+     async def get_ml_status(...) -> MLStatusResponse:
+         """Get current ML engine status."""
+
+     7. Create Shipped Model Build Script
+
+     File: scripts/build_shipped_model.py
+
+     #!/usr/bin/env python
+     """
+     Build the shipped ML model using synthetic data.
+
+     Usage:
+         python scripts/build_shipped_model.py [--samples-per-class 200] [--algorithm random_forest]
+
+     Output:
+         src/flowlens/classification/ml/models/shipped_model.joblib
+     """
+
+     def main():
+         # 1. Generate synthetic dataset (200 per class = 1800 total)
+         generator = SyntheticDataGenerator()
+         dataset = generator.generate_balanced_dataset(samples_per_class=200)
+
+         # 2. Split and train
+         split = DatasetBuilder.train_test_split(dataset, test_ratio=0.2)
+         classifier, stats = train_model(split.train, algorithm="random_forest")
+
+         # 3. Evaluate
+         metrics = evaluate(classifier, split.test)
+         print(f"Test Accuracy: {metrics.accuracy:.2%}")
+         print(f"Test F1 Score: {metrics.f1_macro:.2%}")
+
+         if metrics.accuracy < 0.85:
+             print("WARNING: Accuracy below 85% threshold!")
+             sys.exit(1)
+
+         # 4. Save to models directory
+         output_path = Path("src/flowlens/classification/ml/models/shipped_model.joblib")
+         classifier.save(output_path)
+         print(f"Saved: {output_path} ({output_path.stat().st_size / 1024:.1f} KB)")
+
+     8. Update Module Exports
+
+     File: src/flowlens/classification/ml/__init__.py
+
+     from flowlens.classification.ml.classifier import MLClassifier
+     from flowlens.classification.ml.dataset import DatasetBuilder, TrainingDataset, DatasetSplit
+     from flowlens.classification.ml.feature_transformer import FeatureTransformer
+     from flowlens.classification.ml.hybrid_engine import HybridClassificationEngine
+     from flowlens.classification.ml.model_manager import ModelManager, TrainingStats
+     from flowlens.classification.ml.synthetic import SyntheticDataGenerator
+     from flowlens.classification.ml.trainer import MLTrainer
+
+     __all__ = [
+         "MLClassifier",
+         "DatasetBuilder",
+         "TrainingDataset",
+         "DatasetSplit",
+         "FeatureTransformer",
+         "HybridClassificationEngine",
+         "ModelManager",
+         "TrainingStats",
+         "SyntheticDataGenerator",
+         "MLTrainer",
+     ]
+
+     9. Register ML Router
+
+     File: src/flowlens/api/main.py
+
+     Add:
+     from flowlens.api.routers import ml
+     app.include_router(ml.router, prefix="/api/v1")
+
+     File Structure After Implementation
+
+     src/flowlens/
+     ├── classification/ml/
+     │   ├── __init__.py          # Updated exports
+     │   ├── classifier.py        # Existing
+     │   ├── dataset.py           # NEW
+     │   ├── feature_transformer.py # Existing
+     │   ├── hybrid_engine.py     # Existing
+     │   ├── model_manager.py     # Existing
+     │   ├── synthetic.py         # NEW
+     │   ├── trainer.py           # NEW
+     │   └── models/
+     │       └── shipped_model.joblib  # NEW (generated)
+     ├── api/routers/
+     │   └── ml.py                # NEW
+     ├── tasks/
+     │   └── ml_training_task.py  # NEW
+     └── models/
+         └── task.py              # Add TRAIN_ML_MODEL enum value
+
+     scripts/
+     └── build_shipped_model.py   # NEW
+
+     Customer Fine-Tuning Flow
+
+     1. Customer confirms asset classifications via UI (sets classification_locked=True)
+     2. Customer calls POST /api/v1/ml/train (requires admin role)
+     3. System creates background task, returns task ID
+     4. Training runs async:
+       - Collects confirmed assets
+       - Extracts features from flow aggregates
+       - Trains model with 80/20 split
+       - Validates accuracy >= 85%
+       - Saves and activates new model
+     5. Customer monitors progress at /api/v1/tasks/{task_id}
+     6. On completion, new model is automatically activated
+     7. Customer can call /api/v1/ml/models/reset to rollback to shipped model
+
+     Verification
+
+     1. Build shipped model:
+     python scripts/build_shipped_model.py
+     # Expect: shipped_model.joblib created, accuracy > 85%
+     2. Test shipped model loading:
+     pytest tests/unit/test_ml_classifier.py -v
+     3. Test training API:
+     # Start API server
+     uvicorn flowlens.api.main:app --reload
+
+     # Check ML status
+     curl http://localhost:8000/api/v1/ml/status
+
+     # Trigger training (requires confirmed assets in DB)
+     curl -X POST http://localhost:8000/api/v1/ml/train \
+       -H "Content-Type: application/json" \
+       -d '{"algorithm": "random_forest"}'
+
+     # Check task status
+     curl http://localhost:8000/api/v1/tasks/{task_id}
+     4. Test rollback:
+     curl -X POST http://localhost:8000/api/v1/ml/models/reset
+     # Verify shipped model is active again
+     curl http://localhost:8000/api/v1/ml/status
+
+     Implementation Order
+
+     1. dataset.py - Training data structures
+     2. synthetic.py - Synthetic data generator
+     3. trainer.py - Training orchestration
+     4. scripts/build_shipped_model.py - Generate shipped model
+     5. Add TRAIN_ML_MODEL to task.py enum
+     6. ml_training_task.py - Background task
+     7. ml.py router - API endpoints
+     8. Register router in main.py
+     9. Update __init__.py exports
+     10. Run shipped model script to generate model file
+
+● Let me update the todo list and start implementing.
+
+● Write(src/flowlens/classification/ml/dataset.py)
+  ⎿  Wrote 354 lines to src/flowlens/classification/ml/dataset.py           
+      1 """Training dataset utilities for ML classification.
+      2 Provides data structures and builders for creating training datasets
+      3 from confirmed asset classifications or synthetic data.
+      4 """
+      5 from __future__ import annotations
+      6 from dataclasses import dataclass, field
+      7 from typing import TYPE_CHECKING
+     … +344 lines (ctrl+o to expand)
+
+● Write(src/flowlens/classification/ml/synthetic.py)
+  ⎿  Wrote 383 lines to src/flowlens/classification/ml/synthetic.py        
+      1 """Synthetic data generator for ML classification.
+      2 Generates realistic BehavioralFeatures for each asset type based on
+      3 characteristic traffic patterns. Used to build the shipped model.
+      4 """
+      5 from __future__ import annotations
+      6 import random
+      7 from dataclasses import dataclass, field
+     … +373 lines (ctrl+o to expand)
+
+● Read(src/flowlens/tasks/executor.py)
+  ⎿  Read 100 lines
+
+● Read(src/flowlens/tasks/executor.py)
+  ⎿  Read 100 lines
+
+● Read(src/flowlens/tasks/executor.py)
+  ⎿  Read 80 lines
+
+● Write(src/flowlens/classification/ml/trainer.py)
+  ⎿  Wrote 384 lines to src/flowlens/classification/ml/trainer.py              
+      1 """ML model trainer for classification.
+      2 Orchestrates training from confirmed classifications or synthetic data,
+      3 with progress reporting through the background task system.
+      4 """
+      5 from __future__ import annotations
+      6 from dataclasses import dataclass
+      7 from typing import TYPE_CHECKING, Literal
+     … +374 lines (ctrl+o to expand)
+
+✽ Creating build script… (ctrl+c to interrupt · ctrl+t to show todos · 6m 58s · ↑ 29.6k tokens)
+  ⎿  Next: Add TRAIN_ML_MODEL to TaskType enum
+

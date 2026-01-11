@@ -12,10 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (including AI/LLM support)
 COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir build && \
-    pip wheel --no-cache-dir --wheel-dir /wheels .
+    pip wheel --no-cache-dir --wheel-dir /wheels ".[ai]"
 
 # Production stage
 FROM python:3.11-slim as production

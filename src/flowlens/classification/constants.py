@@ -15,15 +15,47 @@ class ClassifiableAssetType(str, Enum):
     that cannot be reliably detected from flow data alone.
     """
 
+    # Compute
     SERVER = "server"
     WORKSTATION = "workstation"
+    VIRTUAL_MACHINE = "virtual_machine"
+    CONTAINER = "container"
+    CLOUD_SERVICE = "cloud_service"
+
+    # Data
     DATABASE = "database"
+    STORAGE = "storage"
+
+    # Network
     LOAD_BALANCER = "load_balancer"
     NETWORK_DEVICE = "network_device"  # Covers router, switch, firewall
-    STORAGE = "storage"
-    CONTAINER = "container"
-    VIRTUAL_MACHINE = "virtual_machine"
-    CLOUD_SERVICE = "cloud_service"
+
+    # Network Services
+    DNS_SERVER = "dns_server"
+    DHCP_SERVER = "dhcp_server"
+    NTP_SERVER = "ntp_server"
+    DIRECTORY_SERVICE = "directory_service"
+
+    # Communication
+    MAIL_SERVER = "mail_server"
+    VOIP_SERVER = "voip_server"
+
+    # Security & Access
+    VPN_GATEWAY = "vpn_gateway"
+    PROXY_SERVER = "proxy_server"
+    LOG_COLLECTOR = "log_collector"
+    REMOTE_ACCESS = "remote_access"
+
+    # Endpoints
+    PRINTER = "printer"
+    IOT_DEVICE = "iot_device"
+    IP_CAMERA = "ip_camera"
+
+    # Application Infrastructure
+    MESSAGE_QUEUE = "message_queue"
+    MONITORING_SERVER = "monitoring_server"
+
+    # Default
     UNKNOWN = "unknown"
 
 
@@ -42,6 +74,7 @@ DATABASE_PORTS: Final[set[int]] = {
     5984,   # CouchDB
     8086,   # InfluxDB
     9200,   # Elasticsearch
+    9300,   # Elasticsearch cluster
     11211,  # Memcached
 }
 
@@ -95,8 +128,134 @@ CONTAINER_PORTS: Final[set[int]] = {
     6443,   # Kubernetes API
     10250,  # Kubelet API
     10255,  # Kubelet read-only
+    10256,  # kube-proxy
     4194,   # cAdvisor
+    4789,   # VXLAN overlay
     8001,   # Kubernetes dashboard
+    8472,   # Flannel VXLAN
+}
+
+# === NEW PORT SETS ===
+
+# Network Services
+DNS_PORTS: Final[set[int]] = {
+    53,     # DNS
+    953,    # RNDC (BIND control)
+    5353,   # mDNS
+}
+
+DHCP_SERVER_PORTS: Final[set[int]] = {
+    67,     # DHCP server listens on port 67
+}
+
+# Note: Port 68 is for DHCP clients (receiving responses), not servers
+# We only use DHCP_SERVER_PORTS for classification to avoid misclassifying clients
+
+NTP_PORTS: Final[set[int]] = {
+    123,    # NTP
+}
+
+DIRECTORY_PORTS: Final[set[int]] = {
+    88,     # Kerberos
+    389,    # LDAP
+    464,    # Kerberos password
+    636,    # LDAPS
+    1812,   # RADIUS auth
+    1813,   # RADIUS accounting
+    3268,   # AD Global Catalog
+    3269,   # AD Global Catalog SSL
+}
+
+# Communication
+MAIL_PORTS: Final[set[int]] = {
+    25,     # SMTP
+    110,    # POP3
+    143,    # IMAP
+    465,    # SMTPS
+    587,    # SMTP Submission
+    993,    # IMAPS
+    995,    # POP3S
+}
+
+VOIP_PORTS: Final[set[int]] = {
+    3478,   # STUN
+    3479,   # STUN alt
+    5004,   # RTP
+    5005,   # RTCP
+    5060,   # SIP
+    5061,   # SIPS
+}
+
+# Security & Access
+VPN_PORTS: Final[set[int]] = {
+    443,    # SSL VPN
+    500,    # IKE
+    1194,   # OpenVPN
+    1701,   # L2TP
+    1723,   # PPTP
+    4500,   # IPSec NAT-T
+}
+
+PROXY_PORTS: Final[set[int]] = {
+    1080,   # SOCKS
+    3128,   # Squid
+    8080,   # HTTP proxy
+    8888,   # Alt HTTP proxy
+}
+
+LOG_COLLECTOR_PORTS: Final[set[int]] = {
+    514,    # Syslog
+    2055,   # NetFlow
+    4739,   # IPFIX
+    5000,   # Splunk
+    5044,   # Logstash Beats
+    6514,   # Syslog TLS
+    9995,   # NetFlow alt
+}
+
+REMOTE_ACCESS_PORTS: Final[set[int]] = {
+    3389,   # RDP
+    4172,   # PCoIP
+    5900,   # VNC
+    8443,   # Alt HTTPS/VDI
+}
+
+# Endpoints
+PRINTER_PORTS: Final[set[int]] = {
+    515,    # LPR
+    631,    # IPP/CUPS
+    9100,   # RAW printing
+    9220,   # PDL Data Stream
+}
+
+IOT_PORTS: Final[set[int]] = {
+    1883,   # MQTT
+    5683,   # CoAP
+    5684,   # CoAP DTLS
+    8883,   # MQTT TLS
+}
+
+CAMERA_PORTS: Final[set[int]] = {
+    554,    # RTSP
+    8554,   # RTSP alt
+    37777,  # Dahua
+}
+
+# Application Infrastructure
+MESSAGE_QUEUE_PORTS: Final[set[int]] = {
+    5671,   # AMQP TLS
+    5672,   # AMQP (RabbitMQ)
+    9092,   # Kafka
+    9093,   # Kafka TLS
+    61616,  # ActiveMQ
+}
+
+MONITORING_PORTS: Final[set[int]] = {
+    3000,   # Grafana
+    5601,   # Kibana
+    8086,   # InfluxDB (also in DATABASE)
+    9090,   # Prometheus
+    9091,   # Prometheus pushgateway
 }
 
 # Protocol numbers
@@ -148,6 +307,7 @@ def get_port_category(port: int) -> str | None:
     Returns:
         Category name or None if not categorized.
     """
+    # Existing categories
     if port in DATABASE_PORTS:
         return "database"
     if port in STORAGE_PORTS:
@@ -162,6 +322,41 @@ def get_port_category(port: int) -> str | None:
         return "network_device"
     if port in CONTAINER_PORTS:
         return "container"
+    # Network Services
+    if port in DNS_PORTS:
+        return "dns"
+    if port in DHCP_SERVER_PORTS:
+        return "dhcp"
+    if port in NTP_PORTS:
+        return "ntp"
+    if port in DIRECTORY_PORTS:
+        return "directory"
+    # Communication
+    if port in MAIL_PORTS:
+        return "mail"
+    if port in VOIP_PORTS:
+        return "voip"
+    # Security & Access
+    if port in VPN_PORTS:
+        return "vpn"
+    if port in PROXY_PORTS:
+        return "proxy"
+    if port in LOG_COLLECTOR_PORTS:
+        return "log_collector"
+    if port in REMOTE_ACCESS_PORTS:
+        return "remote_access"
+    # Endpoints
+    if port in PRINTER_PORTS:
+        return "printer"
+    if port in IOT_PORTS:
+        return "iot"
+    if port in CAMERA_PORTS:
+        return "camera"
+    # Application Infrastructure
+    if port in MESSAGE_QUEUE_PORTS:
+        return "message_queue"
+    if port in MONITORING_PORTS:
+        return "monitoring"
     return None
 
 

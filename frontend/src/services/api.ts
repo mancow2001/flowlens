@@ -271,6 +271,16 @@ export const dependencyApi = {
     const { data } = await api.get(`/dependencies/${id}`);
     return data;
   },
+
+  explain: async (id: string): Promise<{
+    dependency_id: string;
+    explanation: string;
+    generated_at: string;
+    cached: boolean;
+  }> => {
+    const { data } = await api.get(`/dependencies/${id}/explain`);
+    return data;
+  },
 };
 
 // Topology config response type
@@ -567,6 +577,23 @@ export const changeApi = {
   },
 };
 
+// App features interface
+export interface AppFeatures {
+  kafka_enabled: boolean;
+  redis_enabled: boolean;
+  auth_enabled: boolean;
+  ai_enabled: boolean;
+}
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  environment: string;
+  debug: boolean;
+  timestamp: string;
+  features: AppFeatures;
+}
+
 // Admin endpoints
 export const adminApi = {
   getHealth: async (): Promise<{ status: string; details: Record<string, unknown> }> => {
@@ -576,6 +603,11 @@ export const adminApi = {
 
   getStats: async (): Promise<Record<string, unknown>> => {
     const { data } = await api.get('/stats');
+    return data;
+  },
+
+  getAppInfo: async (): Promise<AppInfo> => {
+    const { data } = await api.get('/admin/info');
     return data;
   },
 };
@@ -1106,8 +1138,11 @@ export const settingsApi = {
     return data;
   },
 
-  downloadDockerComposeUrl: (): string => {
-    return '/api/v1/settings/export/docker-compose.yml';
+  downloadDockerCompose: async (): Promise<Blob> => {
+    const response = await api.get('/settings/export/docker-compose.yml', {
+      responseType: 'blob',
+    });
+    return response.data;
   },
 };
 
@@ -1941,36 +1976,6 @@ export const layoutApi = {
   ): Promise<void> => {
     await api.delete(`/applications/${applicationId}/layouts/${hopDepth}/groups/${groupId}`);
   },
-
-  /**
-   * Use AI/LLM to suggest optimal node arrangement
-   */
-  aiArrange: async (
-    applicationId: string,
-    hopDepth: number,
-    data: {
-      nodes: Array<{
-        id: string;
-        name: string;
-        node_type: string;
-        hop_distance: number;
-        is_critical: boolean;
-      }>;
-      edges: Array<{
-        source_id: string;
-        target_id: string;
-        dependency_type: string | null;
-      }>;
-      canvas_width: number;
-      canvas_height: number;
-    }
-  ): Promise<{ positions: Record<string, { x: number; y: number }> }> => {
-    const response = await api.post<{ positions: Record<string, { x: number; y: number }> }>(
-      `/applications/${applicationId}/layouts/${hopDepth}/ai-arrange`,
-      data
-    );
-    return response.data;
-  },
 };
 
 // Application Baselines API
@@ -2098,6 +2103,53 @@ export const backupApi = {
       }
     );
     return response.data;
+  },
+};
+
+// ML Classification API endpoints
+import type {
+  MLStatusResponse,
+  ModelListResponse,
+  ModelInfo,
+  TrainingDataStats,
+  TrainModelRequest,
+  TrainModelResponse,
+} from '../types';
+
+export const mlApi = {
+  getStatus: async (): Promise<MLStatusResponse> => {
+    const { data } = await api.get('/ml/status');
+    return data;
+  },
+
+  listModels: async (): Promise<ModelListResponse> => {
+    const { data } = await api.get('/ml/models');
+    return data;
+  },
+
+  getModel: async (version: string): Promise<ModelInfo> => {
+    const { data } = await api.get(`/ml/models/${encodeURIComponent(version)}`);
+    return data;
+  },
+
+  activateModel: async (version: string): Promise<{ message: string; version: string }> => {
+    const { data } = await api.post(`/ml/models/${encodeURIComponent(version)}/activate`);
+    return data;
+  },
+
+  resetToShipped: async (): Promise<{ message: string; active_version: string }> => {
+    const { data } = await api.post('/ml/models/reset');
+    return data;
+  },
+
+  getTrainingStats: async (): Promise<TrainingDataStats> => {
+    const { data } = await api.get('/ml/training/stats');
+    return data;
+  },
+
+  startTraining: async (request: TrainModelRequest): Promise<TrainModelResponse> => {
+    const { data } = await api.post('/ml/train', request);
+    return data;
   },
 };
 

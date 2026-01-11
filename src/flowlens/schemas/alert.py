@@ -61,6 +61,8 @@ class AlertResponse(AlertBase):
     resolved_by: str | None = None
     resolution_notes: str | None = None
     notification_sent: bool = False
+    auto_clear_eligible: bool = False
+    condition_cleared_at: datetime | None = None
     tags: dict | None = None
     created_at: datetime
     updated_at: datetime

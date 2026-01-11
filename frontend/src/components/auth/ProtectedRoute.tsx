@@ -26,11 +26,13 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
   const [isChecking, setIsChecking] = useState(!isInitialized);
 
   // Check auth status on mount - this is the source of truth for auth_enabled
+  // Using shorter staleTime to ensure we detect server restarts quickly
   const { data: authStatus, isLoading: isLoadingStatus, isError: isStatusError } = useQuery({
     queryKey: ['auth-status'],
     queryFn: authApi.getStatus,
     retry: 1,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 30000, // 30 seconds - reduced to detect server changes faster
+    gcTime: 60000, // 1 minute - don't cache auth status for too long
   });
 
   // Update auth settings when status is fetched
@@ -45,7 +47,7 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
   const authEnabledFromApi = authStatus?.auth_enabled ?? true;
 
   // Fetch current user if we have a token but no user data
-  const { isLoading: isLoadingUser } = useQuery({
+  const { isLoading: isLoadingUser, isError: isUserError } = useQuery({
     queryKey: ['current-user'],
     queryFn: async () => {
       const userData = await authApi.getCurrentUser();
@@ -54,7 +56,8 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
     },
     enabled: authEnabledFromApi && !!accessToken && !user,
     retry: false,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30000, // 30 seconds
+    gcTime: 60000, // 1 minute
   });
 
   // Mark as initialized once we have auth status and user (if applicable)
@@ -94,6 +97,12 @@ export default function ProtectedRoute({ children, requiredRoles }: ProtectedRou
         </div>
       </div>
     );
+  }
+
+  // If user fetch failed (e.g., invalid token after server restart), clear auth and redirect
+  if (isUserError && accessToken) {
+    clearAuth();
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // If auth is disabled (from API response), allow access to all routes

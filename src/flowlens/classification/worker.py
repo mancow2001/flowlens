@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flowlens.classification.constants import ClassifiableAssetType
 from flowlens.classification.feature_extractor import FeatureExtractor
-from flowlens.classification.scoring_engine import ClassificationResult, ScoringEngine
+from flowlens.classification.ml.hybrid_engine import HybridClassificationEngine, HybridClassificationResult
+from flowlens.classification.scoring_engine import ClassificationResult
 from flowlens.common.config import ClassificationSettings, get_settings
 from flowlens.common.database import get_session
 from flowlens.common.logging import get_logger
@@ -54,9 +55,6 @@ class ClassificationWorker:
         self._reclassify_interval = timedelta(hours=settings.reclassify_interval_hours)
         self._min_observation_hours = settings.min_observation_hours
         self._auto_threshold = settings.auto_update_confidence_threshold
-
-        # Initialize scoring engine
-        self._scoring_engine = ScoringEngine()
 
         # State
         self._running = False
@@ -120,9 +118,13 @@ class ClassificationWorker:
 
             logger.info("Processing classification batch", count=len(assets))
 
+            # Initialize hybrid classification engine for this batch
+            engine = HybridClassificationEngine(db=db)
+            await engine.initialize()
+
             for asset in assets:
                 try:
-                    await self._classify_asset(db, asset)
+                    await self._classify_asset(db, asset, engine)
                 except Exception as e:
                     logger.error(
                         "Failed to classify asset",
@@ -184,12 +186,15 @@ class ClassificationWorker:
         )
         return assets
 
-    async def _classify_asset(self, db: AsyncSession, asset: Asset) -> None:
+    async def _classify_asset(
+        self, db: AsyncSession, asset: Asset, engine: HybridClassificationEngine
+    ) -> None:
         """Classify a single asset.
 
         Args:
             db: Database session.
             asset: Asset to classify.
+            engine: Hybrid classification engine to use.
         """
         # Extract behavioral features
         extractor = FeatureExtractor(db)
@@ -199,26 +204,30 @@ class ClassificationWorker:
             lookback_hours=self._min_observation_hours,
         )
 
-        # Check minimum flow requirement
-        if features.total_flows < self._settings.min_flows_required:
+        # Check minimum flow requirement (use lower threshold if ML is available)
+        ml_settings = get_settings().ml_classification
+        min_flows = ml_settings.ml_min_flows if engine.ml_enabled else self._settings.min_flows_required
+
+        if features.total_flows < min_flows:
             logger.debug(
                 "Insufficient flows for classification",
                 asset_id=str(asset.id),
                 ip=asset.ip_address,
                 flows=features.total_flows,
-                required=self._settings.min_flows_required,
+                required=min_flows,
+                ml_enabled=engine.ml_enabled,
             )
             # Update last_classified_at to avoid re-processing too soon
             asset.last_classified_at = datetime.now(timezone.utc)
             return
 
-        # Compute classification scores
+        # Compute classification using hybrid engine
         # Handle both enum and string types for asset_type
         current_type = None
         if asset.asset_type:
             current_type = asset.asset_type.value if hasattr(asset.asset_type, 'value') else str(asset.asset_type)
 
-        result = self._scoring_engine.compute_scores(
+        result = await engine.classify(
             features=features,
             current_type=current_type,
         )
@@ -232,6 +241,18 @@ class ClassificationWorker:
         # Update asset if auto-update threshold met
         if result.should_auto_update:
             await self._update_asset_type(db, asset, result)
+
+        # Log classification method used
+        if isinstance(result, HybridClassificationResult):
+            logger.info(
+                "Asset classified",
+                asset_id=str(asset.id),
+                ip=asset.ip_address,
+                method=result.classification_method,
+                recommended_type=result.recommended_type.value,
+                confidence=result.confidence,
+                ml_confidence=result.ml_confidence,
+            )
 
     async def _store_classification(
         self,
@@ -257,6 +278,10 @@ class ClassificationWorker:
             for k, v in result.scores.items()
         }
         asset.last_classified_at = now
+
+        # Store the classification method used
+        if isinstance(result, HybridClassificationResult):
+            asset.classification_method = result.classification_method
 
         # Store feature snapshot
         feature_record = AssetFeatures(
@@ -313,15 +338,39 @@ class ClassificationWorker:
 
         # Map ClassifiableAssetType to AssetType
         asset_type_mapping = {
+            # Compute
             "server": AssetType.SERVER,
             "workstation": AssetType.WORKSTATION,
+            "virtual_machine": AssetType.VIRTUAL_MACHINE,
+            "container": AssetType.CONTAINER,
+            "cloud_service": AssetType.CLOUD_SERVICE,
+            # Data
             "database": AssetType.DATABASE,
+            "storage": AssetType.STORAGE,
+            # Network
             "load_balancer": AssetType.LOAD_BALANCER,
             "network_device": AssetType.ROUTER,  # Map to router as closest match
-            "storage": AssetType.STORAGE,
-            "container": AssetType.CONTAINER,
-            "virtual_machine": AssetType.VIRTUAL_MACHINE,
-            "cloud_service": AssetType.CLOUD_SERVICE,
+            # Network Services (new)
+            "dns_server": AssetType.DNS_SERVER,
+            "dhcp_server": AssetType.DHCP_SERVER,
+            "ntp_server": AssetType.NTP_SERVER,
+            "directory_service": AssetType.DIRECTORY_SERVICE,
+            # Communication (new)
+            "mail_server": AssetType.MAIL_SERVER,
+            "voip_server": AssetType.VOIP_SERVER,
+            # Security & Access (new)
+            "vpn_gateway": AssetType.VPN_GATEWAY,
+            "proxy_server": AssetType.PROXY_SERVER,
+            "log_collector": AssetType.LOG_COLLECTOR,
+            "remote_access": AssetType.REMOTE_ACCESS,
+            # Endpoints (new)
+            "printer": AssetType.PRINTER,
+            "iot_device": AssetType.IOT_DEVICE,
+            "ip_camera": AssetType.IP_CAMERA,
+            # Application Infrastructure (new)
+            "message_queue": AssetType.MESSAGE_QUEUE,
+            "monitoring_server": AssetType.MONITORING_SERVER,
+            # Default
             "unknown": AssetType.UNKNOWN,
         }
 
@@ -333,7 +382,11 @@ class ClassificationWorker:
 
         # Update asset
         asset.asset_type = new_asset_type
-        asset.classification_method = "auto"
+        # Set classification method based on hybrid result
+        if isinstance(result, HybridClassificationResult):
+            asset.classification_method = result.classification_method
+        else:
+            asset.classification_method = "auto"
 
         # Record in history
         history = ClassificationHistory(

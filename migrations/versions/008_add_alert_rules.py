@@ -96,20 +96,6 @@ def upgrade() -> None:
         ),
         (
             gen_random_uuid(),
-            'New External Connections',
-            'Alert when new external connections are detected',
-            true,
-            ARRAY['new_external_connection'],
-            'warning',
-            'New external connection detected',
-            '{summary}',
-            ARRAY['email'],
-            60,
-            50,
-            0
-        ),
-        (
-            gen_random_uuid(),
             'Dependency Changes',
             'Alert on dependency creation and removal',
             true,

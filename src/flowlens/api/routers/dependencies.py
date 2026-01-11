@@ -28,6 +28,8 @@ from flowlens.schemas.dependency import (
     DependencyUpdate,
     DependencyWithAssets,
 )
+from flowlens.schemas.ai_explain import DependencyExplanationResponse
+from flowlens.services.ai_explain import explain_dependency
 
 router = APIRouter(prefix="/dependencies", tags=["dependencies"])
 
@@ -215,6 +217,39 @@ async def get_dependency(
             is_critical=dep.target_asset.is_critical,
         ),
     )
+
+
+@router.get("/{dependency_id}/explain", response_model=DependencyExplanationResponse)
+async def explain_dependency_endpoint(
+    dependency_id: UUID,
+    db: DbSession,
+    _user: AnalystUser,
+) -> DependencyExplanationResponse:
+    """Generate an AI-powered explanation for a dependency.
+
+    Uses the configured LLM provider to analyze the dependency's traffic patterns,
+    source/target assets, and context to generate a human-readable explanation
+    of what the connection represents and its likely business purpose.
+
+    Requires LLM configuration in System Settings.
+    """
+    try:
+        return await explain_dependency(db, dependency_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except ImportError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate explanation: {str(e)}",
+        )
 
 
 @router.post("", response_model=DependencyResponse, status_code=status.HTTP_201_CREATED)

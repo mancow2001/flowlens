@@ -1,5 +1,6 @@
 # FlowLens Docker Compose - Minimal Configuration
 # PostgreSQL only, suitable for <10k flows/sec
+# Generated from System Settings on 2026-01-08 22:14:38
 
 # Shared environment variable definitions
 x-db-env: &db-env
@@ -10,20 +11,15 @@ x-db-env: &db-env
   POSTGRES_DATABASE: flowlens
 
 x-logging-env: &logging-env
-  LOG_LEVEL: DEBUG
+  LOG_LEVEL: INFO
   LOG_FORMAT: json
-
-x-resolution-env: &resolution-env
-  # Discard all flows involving external (non-RFC1918/non-private IPv6) IPs
-  # When true, external flows are never mapped as dependencies
-  RESOLUTION_DISCARD_EXTERNAL_FLOWS: "true"
 
 x-classification-env: &classification-env
   CLASSIFICATION_WORKER_COUNT: "1"
   CLASSIFICATION_POLL_INTERVAL_MS: "30000"
-  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.70"
-  CLASSIFICATION_MIN_OBSERVATION_HOURS: "12"
-  CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
+  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.35"
+  CLASSIFICATION_MIN_OBSERVATION_HOURS: "1"
+  CLASSIFICATION_MIN_FLOWS_REQUIRED: "10"
   CLASSIFICATION_BATCH_SIZE: "100"
   CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD: "0.85"
   CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS: "24"
@@ -35,7 +31,7 @@ x-db-logging-env: &db-logging-env
   POSTGRES_USER: flowlens
   POSTGRES_PASSWORD: flowlens
   POSTGRES_DATABASE: flowlens
-  LOG_LEVEL: DEBUG
+  LOG_LEVEL: INFO
   LOG_FORMAT: json
 
 x-classification-full-env: &classification-full-env
@@ -46,13 +42,13 @@ x-classification-full-env: &classification-full-env
   POSTGRES_DATABASE: flowlens
   CLASSIFICATION_WORKER_COUNT: "1"
   CLASSIFICATION_POLL_INTERVAL_MS: "30000"
-  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.70"
-  CLASSIFICATION_MIN_OBSERVATION_HOURS: "12"
-  CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
+  CLASSIFICATION_AUTO_UPDATE_CONFIDENCE_THRESHOLD: "0.35"
+  CLASSIFICATION_MIN_OBSERVATION_HOURS: "1"
+  CLASSIFICATION_MIN_FLOWS_REQUIRED: "10"
   CLASSIFICATION_BATCH_SIZE: "100"
   CLASSIFICATION_HIGH_CONFIDENCE_THRESHOLD: "0.85"
   CLASSIFICATION_RECLASSIFY_INTERVAL_HOURS: "24"
-  LOG_LEVEL: DEBUG
+  LOG_LEVEL: INFO
   LOG_FORMAT: json
 
 services:
@@ -98,15 +94,25 @@ services:
     environment:
       ENVIRONMENT: development
       DEBUG: "true"
-      <<: [*db-env, *resolution-env]
+      <<: *db-env
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       API_WORKERS: "2"
+      API_CORS_ORIGINS: "*"
       AUTH_ENABLED: "true"
+      AUTH_SECRET_KEY: "change-me-in-production"
       CLASSIFICATION_MIN_OBSERVATION_HOURS: "1"
-      CLASSIFICATION_MIN_FLOWS_REQUIRED: "100"
+      CLASSIFICATION_MIN_FLOWS_REQUIRED: "10"
       LOG_LEVEL: INFO
       LOG_FORMAT: json
+      # AI/LLM Configuration - LM Studio with IBM Granite
+      LLM_ENABLED: "true"
+      LLM_PROVIDER: "openai_compatible"
+      LLM_BASE_URL: "http://10.100.192.189:1234/v1"
+      LLM_MODEL: "ibm/granite-3.2-8b"
+      LLM_TEMPERATURE: "0.7"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:
@@ -133,7 +139,12 @@ services:
       INGESTION_NETFLOW_PORT: "2055"
       INGESTION_SFLOW_PORT: "6343"
       INGESTION_BATCH_SIZE: "1000"
-      LOG_LEVEL: DEBUG
+      INGESTION_BATCH_TIMEOUT_MS: "1000"
+      INGESTION_QUEUE_MAX_SIZE: "100000"
+      INGESTION_SAMPLE_THRESHOLD: "50000"
+      INGESTION_DROP_THRESHOLD: "80000"
+      INGESTION_SAMPLE_RATE: "10"
+      LOG_LEVEL: INFO
       LOG_FORMAT: json
     ports:
       - "2055:2055/udp"
@@ -157,9 +168,13 @@ services:
     command: ["python", "-m", "flowlens.enrichment.main"]
     environment:
       ENVIRONMENT: development
-      <<: [*db-logging-env, *resolution-env]
-      ENRICHMENT_WORKER_COUNT: "2"
+      <<: *db-logging-env
+      ENRICHMENT_WORKER_COUNT: "4"
       ENRICHMENT_BATCH_SIZE: "500"
+      ENRICHMENT_POLL_INTERVAL_MS: "100"
+      ENRICHMENT_DNS_TIMEOUT: "2.0"
+      ENRICHMENT_DNS_CACHE_TTL: "3600"
+      ENRICHMENT_DNS_CACHE_SIZE: "10000"
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -181,9 +196,17 @@ services:
       - .env
     environment:
       ENVIRONMENT: development
-      <<: [*db-logging-env, *resolution-env]
+      <<: *db-logging-env
       RESOLUTION_WORKER_COUNT: "1"
       RESOLUTION_WINDOW_SIZE_MINUTES: "5"
+      RESOLUTION_BATCH_SIZE: "1000"
+      RESOLUTION_POLL_INTERVAL_MS: "500"
+      RESOLUTION_STALE_THRESHOLD_HOURS: "24"
+      RESOLUTION_STALE_DEPENDENCY_CLEANUP_DAYS: "30"
+      RESOLUTION_STALE_ASSET_CLEANUP_DAYS: "30"
+      RESOLUTION_EXCLUDE_EXTERNAL_IPS: "false"
+      RESOLUTION_EXCLUDE_EXTERNAL_SOURCES: "false"
+      RESOLUTION_EXCLUDE_EXTERNAL_TARGETS: "false"
     depends_on:
       migrations:
         condition: service_completed_successfully

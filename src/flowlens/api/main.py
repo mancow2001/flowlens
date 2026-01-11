@@ -52,6 +52,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_database(settings)
     logger.info("Database initialized")
 
+    # Invalidate all sessions on startup if configured
+    if settings.auth.enabled and settings.auth.invalidate_sessions_on_startup:
+        from flowlens.api.startup import invalidate_all_sessions
+        revoked_count = await invalidate_all_sessions()
+        if revoked_count > 0:
+            logger.info("Invalidated sessions on startup", revoked_count=revoked_count)
+
     # Start WebSocket connection manager
     ws_manager = get_connection_manager()
     await ws_manager.start()
@@ -214,9 +221,9 @@ def create_app() -> FastAPI:
         )
 
     # Include routers
-    from flowlens.api.routers import admin, ai_layout, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, backup, baselines, changes, classification, dependencies, discovery, discovery_providers, folders, gateways, layouts, maintenance, saml_providers, saved_views, search, segmentation, settings as settings_router, tasks, topology, users, ws
+    from flowlens.api.routers import admin, alert_rules, alerts, analysis, applications, asset_classification, assets, auth, backup, baselines, changes, classification, dependencies, discovery, discovery_providers, folders, gateways, layouts, maintenance, ml, saml_providers, saved_views, search, segmentation, settings as settings_router, tasks, topology, users, ws
 
-    app.include_router(admin.router)
+    app.include_router(admin.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
     app.include_router(saml_providers.router, prefix="/api/v1")
@@ -229,7 +236,6 @@ def create_app() -> FastAPI:
     app.include_router(segmentation.router, prefix="/api/v1")  # Segmentation policies
     app.include_router(folders.router, prefix="/api/v1")  # Folder organization
     app.include_router(layouts.router, prefix="/api/v1")  # Application layout persistence
-    app.include_router(ai_layout.router, prefix="/api/v1")  # AI-powered layout arrangement
     app.include_router(baselines.router, prefix="/api/v1")  # Application baselines
     app.include_router(dependencies.router, prefix="/api/v1")
     app.include_router(discovery.router, prefix="/api/v1")
@@ -243,6 +249,7 @@ def create_app() -> FastAPI:
     app.include_router(changes.router, prefix="/api/v1")
     app.include_router(saved_views.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
+    app.include_router(ml.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(ws.router, prefix="/api/v1")
 

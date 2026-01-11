@@ -32,20 +32,50 @@ export interface Asset {
   services: Service[];
   created_at: string;
   updated_at: string;
+  // Classification fields
+  classification_method?: ClassificationMethod | null;
+  classification_confidence?: number | null;
+  classification_locked?: boolean;
+  last_classified_at?: string | null;
 }
 
 export type AssetType =
+  // Compute
   | 'server'
   | 'workstation'
+  | 'virtual_machine'
+  | 'container'
+  | 'cloud_service'
+  // Data
   | 'database'
+  | 'storage'
+  // Network (legacy - kept for backwards compatibility)
   | 'load_balancer'
   | 'firewall'
   | 'router'
   | 'switch'
-  | 'storage'
-  | 'container'
-  | 'virtual_machine'
-  | 'cloud_service'
+  // Network Services
+  | 'dns_server'
+  | 'dhcp_server'
+  | 'ntp_server'
+  | 'directory_service'
+  // Communication
+  | 'mail_server'
+  | 'voip_server'
+  // Security & Access
+  | 'vpn_gateway'
+  | 'proxy_server'
+  | 'log_collector'
+  | 'remote_access'
+  // Endpoints
+  | 'printer'
+  | 'iot_device'
+  | 'ip_camera'
+  // Application Infrastructure
+  | 'message_queue'
+  | 'monitoring_server'
+  // Special
+  | 'network_device'  // Consolidated type covering router, switch, firewall
   | 'group'
   | 'unknown';
 
@@ -617,6 +647,7 @@ export interface ApplicationTopologyNode {
 }
 
 export interface ApplicationTopologyEdge {
+  id?: string;  // Dependency UUID
   source: string;
   target: string;
   target_port: number;
@@ -1492,4 +1523,78 @@ export interface BaselineComparisonResult {
   members_removed: MemberChange[];
   total_changes: number;
   change_severity: 'none' | 'low' | 'medium' | 'high';
+}
+
+// Layout suggestion types
+export interface LayoutSuggestion {
+  id: string;
+  name: string;
+  description: string;
+  groups: SuggestedGroup[];
+  positions: Record<string, { x: number; y: number }>;
+}
+
+export interface SuggestedGroup {
+  id: string;
+  name: string;
+  color: string;
+  asset_ids: string[];
+  bounds?: { x: number; y: number; width: number; height: number };
+}
+
+// =============================================================================
+// ML Classification types
+// =============================================================================
+
+export type MLAlgorithm = 'random_forest' | 'xgboost' | 'gradient_boosting';
+export type MLModelType = 'shipped' | 'custom';
+export type ClassificationMethod = 'ml' | 'heuristic' | 'hybrid' | 'manual' | 'auto' | 'api';
+
+export interface MLStatusResponse {
+  ml_enabled: boolean;
+  ml_available: boolean;
+  model_version: string | null;
+  model_classes: string[];
+  ml_confidence_threshold: number;
+  ml_min_flows: number;
+  heuristic_min_flows: number;
+  initialized: boolean;
+}
+
+export interface ModelInfo {
+  id: string;
+  version: string;
+  algorithm: string;
+  model_type: MLModelType;
+  is_active: boolean;
+  created_at: string;
+  training_samples: number;
+  accuracy: number;
+  f1_score: number | null;
+  file_size_bytes: number | null;
+  notes: string | null;
+}
+
+export interface ModelListResponse {
+  models: ModelInfo[];
+  active_version: string | null;
+}
+
+export interface TrainingDataStats {
+  total_confirmed_assets: number;
+  class_distribution: Record<string, number>;
+  meets_minimum_requirements: boolean;
+  minimum_samples_required: number;
+  minimum_per_class_required: number;
+  classes_below_minimum: string[];
+}
+
+export interface TrainModelRequest {
+  algorithm: MLAlgorithm;
+  notes?: string | null;
+}
+
+export interface TrainModelResponse {
+  task_id: string;
+  message: string;
 }

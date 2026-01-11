@@ -25,6 +25,9 @@ FlowLens is an open-source platform that ingests network flow data (NetFlow, sFl
 - **Alerting** - Configurable alert rules with real-time WebSocket notifications
 - **Topology Visualization** - Interactive D3-based network graph
 - **System Settings UI** - Web-based configuration with docker-compose.yml export
+- **AI-Powered Insights** (Optional) - LLM integration for intelligent features:
+  - **Dependency Explanations** - Natural language explanations of network dependencies
+  - Supports Anthropic Claude, OpenAI GPT, and local models (Ollama, LM Studio)
 
 ### Technical Highlights
 
@@ -245,6 +248,22 @@ FlowLens is configured via environment variables. Key settings:
 | `CLASSIFICATION_MIN_OBSERVATION_HOURS` | 12 | Minimum observation time |
 | `CLASSIFICATION_MIN_FLOWS_REQUIRED` | 100 | Minimum flows for classification |
 
+### AI/LLM (Optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_ENABLED` | false | Enable AI-powered features |
+| `LLM_PROVIDER` | anthropic | LLM provider: `anthropic`, `openai`, or `openai_compatible` |
+| `LLM_API_KEY` | - | API key for cloud providers (Anthropic/OpenAI) |
+| `LLM_MODEL` | - | Model override (uses provider default if not set) |
+| `LLM_BASE_URL` | - | Custom base URL for OpenAI-compatible APIs (e.g., `http://localhost:11434/v1` for Ollama) |
+| `LLM_TEMPERATURE` | 0.3 | Sampling temperature (0.0-1.0, lower = more deterministic) |
+
+**Supported Providers:**
+- **Anthropic** - Claude models (default: claude-sonnet-4-20250514)
+- **OpenAI** - GPT models (default: gpt-4o)
+- **OpenAI-compatible** - Local models via Ollama, LM Studio, etc. (default: llama3.2)
+
 ### Authentication
 
 | Variable | Default | Description |
@@ -320,6 +339,12 @@ The REST API is available at `http://localhost:8000/api/v1`.
 | GET | `/alerts` | List alerts |
 | GET | `/alert-rules` | List alert rules |
 | POST | `/alert-rules` | Create alert rule |
+
+#### AI/LLM (Requires `LLM_ENABLED=true`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/dependencies/{id}/explain` | Get AI-generated explanation for a dependency |
 
 #### Background Tasks
 

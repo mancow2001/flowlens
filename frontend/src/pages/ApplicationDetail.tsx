@@ -13,6 +13,8 @@ import {
   LockClosedIcon,
   LockOpenIcon,
   SparklesIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import Card from '../components/common/Card';
@@ -21,9 +23,11 @@ import { LoadingPage } from '../components/common/Loading';
 import EdgeTooltip from '../components/topology/EdgeTooltip';
 import GroupEditModal from '../components/layout/GroupEditModal';
 import BaselinePanel from '../components/baseline/BaselinePanel';
-import { applicationsApi, layoutApi } from '../services/api';
-import { getProtocolName, formatProtocolPort, formatBytes, getEdgeLabelForPort } from '../utils/network';
-import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange } from '../types';
+import { applicationsApi, layoutApi, dependencyApi, adminApi, classificationApi } from '../services/api';
+import { getProtocolName, formatProtocolPort } from '../utils/network';
+import { formatBytes } from '../utils/format';
+import type { AssetType, InboundSummary, NodePosition, BaselineComparisonResult, DependencyChange, LayoutSuggestion, SuggestedGroup } from '../types';
+import { generateLayoutSuggestions, type ClassificationRuleForLayout } from '../utils/layoutSuggestions';
 
 // Entry point in topology data
 interface TopologyEntryPointInfo {
@@ -60,7 +64,8 @@ interface SimNode extends d3.SimulationNodeDatum {
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
-  id: string;
+  id: string;  // Composite key for D3
+  dependency_id?: string;  // Actual dependency UUID for API calls
   target_port: number;
   protocol: number;
   dependency_type: string | null;
@@ -139,13 +144,26 @@ export default function ApplicationDetail() {
   const [comparisonResult, setComparisonResult] = useState<BaselineComparisonResult | null>(null);
   const [isArranging, setIsArranging] = useState(false);
   const [showArrangeConfirm, setShowArrangeConfirm] = useState(false);
+  const [layoutSuggestions, setLayoutSuggestions] = useState<LayoutSuggestion[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [preArrangePositions, setPreArrangePositions] = useState<Record<string, { x: number; y: number }> | null>(null);
+  const [previewGroups, setPreviewGroups] = useState<SuggestedGroup[]>([]);
+  const [edgeExplanation, setEdgeExplanation] = useState<string | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const transformRef = useRef<d3.ZoomTransform | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const nodesRef = useRef<SimNode[]>([]);
   const currentPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const queryClient = useQueryClient();
+
+  // Fetch app info to check if AI features are enabled
+  const { data: appInfo } = useQuery({
+    queryKey: ['app-info'],
+    queryFn: () => adminApi.getAppInfo(),
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+  const aiEnabled = appInfo?.features?.ai_enabled ?? false;
 
   // Fetch saved layout for this application and hop depth
   const { data: savedLayout, isLoading: isLayoutLoading } = useQuery({
@@ -418,6 +436,7 @@ export default function ApplicationDetail() {
 
       simLinks.push({
         id: `${edge.source}-${edge.target}-${i}`,
+        dependency_id: edge.id,  // Actual dependency UUID
         source: edge.source,
         target: edge.target,
         target_port: edge.target_port,
@@ -468,7 +487,7 @@ export default function ApplicationDetail() {
     return { nodes: simNodes, links: simLinks };
   }, [topology, dimensions, maxDepth, hideInfrastructureOnly, savedLayout]);
 
-  // AI-powered layout arrangement handlers
+  // Suggested layout arrangement handlers
   const handleAIArrange = useCallback(async () => {
     if (!id || !dimensions.width || !dimensions.height) return;
     setIsArranging(true);
@@ -483,50 +502,76 @@ export default function ApplicationDetail() {
     setPreArrangePositions(currentPositions);
 
     try {
-      // Prepare data for LLM using current nodes from ref
-      const currentNodes = nodesRef.current;
-      const nodeData = currentNodes.map(n => ({
-        id: n.id,
-        name: n.display_name || n.name,
-        node_type: n.is_entry_point ? 'entry_point' : n.is_client_summary ? 'client_summary' : n.is_external ? 'external' : 'member',
-        hop_distance: n.hop_distance ?? 0,
-        is_critical: n.is_critical,
+      // Fetch classification rules for network group naming
+      let classificationRules: ClassificationRuleForLayout[] = [];
+      try {
+        const rulesResponse = await classificationApi.list({ is_active: true, page_size: 1000 });
+        classificationRules = rulesResponse.items.map(rule => ({
+          name: rule.name,
+          cidr: rule.cidr,
+          priority: rule.priority,
+        }));
+      } catch {
+        // If classification rules can't be fetched, continue without them
+        console.warn('Could not fetch classification rules for layout suggestions');
+      }
+
+      // Prepare nodes and edges for layout suggestion
+      // Note: is_internal_asset is the network classification (internal vs external network)
+      // is_external is whether the asset is external to the application (not a member)
+      // For layout suggestions, we use is_internal_asset to exclude network-external assets
+      const layoutNodes = nodesRef.current.map(node => ({
+        id: node.id,
+        name: node.name,
+        ip_address: node.ip_address,
+        asset_type: node.asset_type,
+        is_internal: node.is_internal_asset ?? true,
+        is_entry_point: node.is_entry_point,
+        is_client_summary: node.is_client_summary,
+        x: node.x,
+        y: node.y,
       }));
 
-      // Build edge data from the links array
-      const edgeData = links.map(l => {
-        const sourceId = typeof l.source === 'object' && l.source !== null ? (l.source as SimNode).id : String(l.source);
-        const targetId = typeof l.target === 'object' && l.target !== null ? (l.target as SimNode).id : String(l.target);
+      const layoutEdges = links.map(link => {
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as SimNode).id;
+        const targetId = typeof link.target === 'string' ? link.target : (link.target as SimNode).id;
         return {
-          source_id: sourceId,
-          target_id: targetId,
-          dependency_type: l.dependency_type,
+          source: sourceId,
+          target: targetId,
+          port: link.target_port,
+          total_bytes: link.bytes_last_24h ?? undefined,
         };
       });
 
-      const result = await layoutApi.aiArrange(id, maxDepth, {
-        nodes: nodeData,
-        edges: edgeData,
-        canvas_width: dimensions.width,
-        canvas_height: dimensions.height,
-      });
+      // Generate 3 layout suggestions
+      const suggestions = generateLayoutSuggestions(
+        layoutNodes,
+        layoutEdges,
+        dimensions.width,
+        dimensions.height,
+        classificationRules
+      );
 
-      // Apply new positions with animation
-      nodesRef.current.forEach(node => {
-        const newPos = result.positions[node.id];
-        if (newPos) {
-          node.fx = newPos.x;
-          node.fy = newPos.y;
-        }
-      });
+      setLayoutSuggestions(suggestions);
+      setSelectedSuggestionIndex(0);
 
-      // Restart simulation briefly to animate
-      simulationRef.current?.alpha(0.3).restart();
+      // Apply the first suggestion's positions
+      const firstSuggestion = suggestions[0];
+      if (firstSuggestion) {
+        nodesRef.current.forEach(node => {
+          const newPos = firstSuggestion.positions[node.id];
+          if (newPos) {
+            node.fx = newPos.x;
+            node.fy = newPos.y;
+          }
+        });
+        simulationRef.current?.alpha(0.3).restart();
+      }
 
       // Show confirmation dialog
       setShowArrangeConfirm(true);
     } catch (error) {
-      console.error('AI arrange failed:', error);
+      console.error('Suggested arrange failed:', error);
       // Revert on error
       if (currentPositions && Object.keys(currentPositions).length > 0) {
         nodesRef.current.forEach(node => {
@@ -539,10 +584,38 @@ export default function ApplicationDetail() {
         simulationRef.current?.alpha(0.3).restart();
       }
       setPreArrangePositions(null);
+      setLayoutSuggestions([]);
     } finally {
       setIsArranging(false);
     }
-  }, [id, maxDepth, links, dimensions]);
+  }, [id, links, dimensions]);
+
+  // Apply a specific layout suggestion (used when navigating between options)
+  const applySuggestion = useCallback((suggestion: LayoutSuggestion) => {
+    nodesRef.current.forEach(node => {
+      const newPos = suggestion.positions[node.id];
+      if (newPos) {
+        node.fx = newPos.x;
+        node.fy = newPos.y;
+      }
+    });
+    // Update preview groups to show on canvas
+    setPreviewGroups(suggestion.groups);
+    simulationRef.current?.alpha(0.3).restart();
+  }, []);
+
+  // Handle navigation between layout suggestions
+  const handlePrevSuggestion = useCallback(() => {
+    const newIndex = (selectedSuggestionIndex - 1 + layoutSuggestions.length) % layoutSuggestions.length;
+    setSelectedSuggestionIndex(newIndex);
+    applySuggestion(layoutSuggestions[newIndex]);
+  }, [selectedSuggestionIndex, layoutSuggestions, applySuggestion]);
+
+  const handleNextSuggestion = useCallback(() => {
+    const newIndex = (selectedSuggestionIndex + 1) % layoutSuggestions.length;
+    setSelectedSuggestionIndex(newIndex);
+    applySuggestion(layoutSuggestions[newIndex]);
+  }, [selectedSuggestionIndex, layoutSuggestions, applySuggestion]);
 
   const handleKeepArrangement = useCallback(async () => {
     // Save the new positions to backend
@@ -553,9 +626,35 @@ export default function ApplicationDetail() {
       }
     });
     await savePositionsMutation.mutateAsync(positions);
+
+    // Create groups from the selected suggestion
+    const selectedSuggestion = layoutSuggestions[selectedSuggestionIndex];
+    if (selectedSuggestion && selectedSuggestion.groups.length > 0) {
+      // UUID regex to filter out non-asset IDs (like client-summary-...)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // Create each group sequentially
+      for (const group of selectedSuggestion.groups) {
+        // Filter to only include valid asset UUIDs
+        const validAssetIds = group.asset_ids.filter(id => uuidRegex.test(id));
+
+        // Only create group if we have at least 2 valid assets
+        if (validAssetIds.length >= 2) {
+          await createGroupMutation.mutateAsync({
+            name: group.name,
+            color: group.color,
+            asset_ids: validAssetIds,
+          });
+        }
+      }
+    }
+
     setShowArrangeConfirm(false);
     setPreArrangePositions(null);
-  }, [savePositionsMutation]);
+    setLayoutSuggestions([]);
+    setSelectedSuggestionIndex(0);
+    setPreviewGroups([]);
+  }, [savePositionsMutation, createGroupMutation, layoutSuggestions, selectedSuggestionIndex]);
 
   const handleDiscardArrangement = useCallback(() => {
     // Revert to previous positions
@@ -571,7 +670,32 @@ export default function ApplicationDetail() {
     }
     setShowArrangeConfirm(false);
     setPreArrangePositions(null);
+    setLayoutSuggestions([]);
+    setSelectedSuggestionIndex(0);
+    setPreviewGroups([]);
   }, [preArrangePositions]);
+
+  // Handle AI explanation for a dependency
+  const handleExplainEdge = useCallback(async (dependencyId: string): Promise<string> => {
+    setIsExplaining(true);
+    setEdgeExplanation(null);
+    try {
+      const result = await dependencyApi.explain(dependencyId);
+      setEdgeExplanation(result.explanation);
+      return result.explanation;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate explanation';
+      setEdgeExplanation(`Error: ${message}`);
+      return `Error: ${message}`;
+    } finally {
+      setIsExplaining(false);
+    }
+  }, []);
+
+  // Clear explanation when hovering a different edge
+  useEffect(() => {
+    setEdgeExplanation(null);
+  }, [hoveredEdge?.edge.id]);
 
   // Handle container resize
   useEffect(() => {
@@ -763,20 +887,14 @@ export default function ApplicationDetail() {
         event.stopPropagation();
       });
 
-    // Port labels on edges
-    const edgeLabels = linksGroup
-      .selectAll('text.edge-label')
-      .data(links)
-      .join('text')
-      .attr('class', 'edge-label')
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#94a3b8')
-      .attr('font-size', 10)
-      .attr('pointer-events', 'none')
-      .text((d) => getEdgeLabelForPort(d.target_port));
-
     // Draw asset groups (render before nodes so they appear behind)
-    const assetGroups = savedLayout?.groups || [];
+    // When previewing layout suggestions, show preview groups; otherwise show saved groups
+    // Define common type for group rendering (subset of properties used)
+    type RenderableGroup = { id: string; name: string; color: string; asset_ids: string[] };
+    const assetGroups: RenderableGroup[] = previewGroups.length > 0
+      ? previewGroups
+      : (savedLayout?.groups || []);
+    const isPreviewMode = previewGroups.length > 0;
     const groupsGroup = g.append('g').attr('class', 'groups');
 
     // Create a map of node positions for group bounds calculation
@@ -864,18 +982,18 @@ export default function ApplicationDetail() {
     }
 
     const groupElements = groupsGroup
-      .selectAll<SVGGElement, typeof assetGroups[number]>('g.asset-group')
+      .selectAll<SVGGElement, RenderableGroup>('g.asset-group')
       .data(assetGroups)
       .join('g')
       .attr('class', 'asset-group');
 
     // Track group drag state
-    let groupDragStartPositions: Map<string, { x: number; y: number }> = new Map();
+    const groupDragStartPositions: Map<string, { x: number; y: number }> = new Map();
 
     // Add drag behavior to groups in edit mode
     if (editMode) {
       groupElements.call(
-        d3.drag<SVGGElement, typeof assetGroups[number]>()
+        d3.drag<SVGGElement, RenderableGroup>()
           .on('start', (event, d) => {
             event.sourceEvent.stopPropagation();
             if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -936,11 +1054,11 @@ export default function ApplicationDetail() {
       .attr('class', 'group-bounds')
       .attr('rx', 12)
       .attr('ry', 12)
-      .attr('fill', d => d.color + '15')
+      .attr('fill', d => d.color + (isPreviewMode ? '10' : '15'))
       .attr('stroke', d => d.color)
-      .attr('stroke-width', 2)
-      .attr('stroke-dasharray', editMode ? '4,2' : 'none')
-      .attr('cursor', editMode ? 'move' : 'default');
+      .attr('stroke-width', isPreviewMode ? 2.5 : 2)
+      .attr('stroke-dasharray', isPreviewMode ? '8,4' : (editMode ? '4,2' : 'none'))
+      .attr('cursor', editMode && !isPreviewMode ? 'move' : 'default');
 
     // Group labels
     groupElements
@@ -952,8 +1070,21 @@ export default function ApplicationDetail() {
       .attr('pointer-events', 'none')
       .text(d => d.name);
 
-    // Delete buttons for groups (only in edit mode)
-    if (editMode) {
+    // Preview indicator badge for preview groups
+    if (isPreviewMode) {
+      groupElements
+        .append('text')
+        .attr('class', 'group-preview-badge')
+        .attr('fill', d => d.color)
+        .attr('font-size', 9)
+        .attr('font-weight', 'normal')
+        .attr('opacity', 0.7)
+        .attr('pointer-events', 'none')
+        .text('PREVIEW');
+    }
+
+    // Delete buttons for groups (only in edit mode, not in preview mode)
+    if (editMode && !isPreviewMode) {
       groupElements
         .append('text')
         .attr('class', 'group-delete')
@@ -973,7 +1104,7 @@ export default function ApplicationDetail() {
     const nodesGroup = g.append('g').attr('class', 'nodes');
 
     // Track drag start positions for multi-select dragging
-    let dragStartPositions: Map<string, { x: number; y: number }> = new Map();
+    const dragStartPositions: Map<string, { x: number; y: number }> = new Map();
 
     const nodeElements = nodesGroup
       .selectAll<SVGGElement, SimNode>('g')
@@ -1291,82 +1422,6 @@ export default function ApplicationDetail() {
           });
       }
 
-      edgeLabels
-        .attr('x', (d) => {
-          const source = d.source as SimNode;
-          const target = d.target as SimNode;
-          const sx = source.x ?? 0;
-          const sy = source.y ?? 0;
-          const tx = target.x ?? 0;
-          const ty = target.y ?? 0;
-          const midX = (sx + tx) / 2;
-
-          // For straight client edges, use simple midpoint
-          if (d.is_from_client_summary) {
-            return midX;
-          }
-
-          // For curved edges, offset perpendicular to edge direction
-          const dx = tx - sx;
-          const dy = ty - sy;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          if (len === 0) return midX;
-
-          // Perpendicular direction (matches arc sweep direction)
-          const perpX = -dy / len;
-          const offset = 15;
-          let labelX = midX + perpX * offset;
-
-          // Spread labels for edges with same source-target (different ports)
-          const key = `${source.id}-${target.id}`;
-          const group = edgeGroupMap.get(key);
-          if (group && group.count > 1) {
-            const idx = group.indexMap.get(d.id) ?? 0;
-            const spreadOffset = (idx - (group.count - 1) / 2) * 18;
-            // Spread along edge direction
-            labelX += (dx / len) * spreadOffset;
-          }
-
-          return labelX;
-        })
-        .attr('y', (d) => {
-          const source = d.source as SimNode;
-          const target = d.target as SimNode;
-          const sx = source.x ?? 0;
-          const sy = source.y ?? 0;
-          const tx = target.x ?? 0;
-          const ty = target.y ?? 0;
-          const midY = (sy + ty) / 2;
-
-          // For straight client edges, use simple midpoint with small offset
-          if (d.is_from_client_summary) {
-            return midY - 8;
-          }
-
-          // For curved edges, offset perpendicular to edge direction
-          const dx = tx - sx;
-          const dy = ty - sy;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          if (len === 0) return midY - 8;
-
-          // Perpendicular direction (matches arc sweep direction)
-          const perpY = dx / len;
-          const offset = 15;
-          let labelY = midY + perpY * offset;
-
-          // Spread labels for edges with same source-target (different ports)
-          const key = `${source.id}-${target.id}`;
-          const group = edgeGroupMap.get(key);
-          if (group && group.count > 1) {
-            const idx = group.indexMap.get(d.id) ?? 0;
-            const spreadOffset = (idx - (group.count - 1) / 2) * 18;
-            // Spread along edge direction
-            labelY += (dy / len) * spreadOffset;
-          }
-
-          return labelY;
-        });
-
       // Update group bounds based on member node positions
       groupElements.each(function (d) {
         const bounds = calculateGroupBounds(d);
@@ -1386,6 +1441,11 @@ export default function ApplicationDetail() {
           d3.select(this)
             .select('text.group-delete')
             .attr('x', bounds.x + bounds.width - 12)
+            .attr('y', bounds.y + 16);
+
+          d3.select(this)
+            .select('text.group-preview-badge')
+            .attr('x', bounds.x + bounds.width - 45)
             .attr('y', bounds.y + 16);
         }
       });
@@ -1414,7 +1474,7 @@ export default function ApplicationDetail() {
       simulation.stop();
       simulationRef.current = null;
     };
-  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult]);
+  }, [nodes, links, dimensions, editMode, selectedNodes, savedLayout, handleNodeDragEnd, handleNodeClick, deleteGroupMutation, savePositionsMutation, comparisonResult, previewGroups]);
 
   // Handle freeze/unfreeze without recreating the simulation
   useEffect(() => {
@@ -1563,7 +1623,7 @@ export default function ApplicationDetail() {
                 onClick={handleAIArrange}
                 disabled={isArranging}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-                title="Use AI to suggest optimal arrangement"
+                title="Suggest a layered arrangement"
               >
                 <SparklesIcon className={`h-4 w-4 ${isArranging ? 'animate-pulse' : ''}`} />
                 {isArranging ? 'Arranging...' : 'Suggest Arrangement'}
@@ -1753,9 +1813,14 @@ export default function ApplicationDetail() {
                 bytes_last_24h: hoveredEdge.edge.bytes_last_24h ?? undefined,
                 last_seen: hoveredEdge.edge.last_seen ?? undefined,
                 service_type: hoveredEdge.edge.dependency_type,
+                dependency_id: hoveredEdge.edge.dependency_id,
               }}
               position={hoveredEdge.position}
               containerBounds={containerRef.current?.getBoundingClientRect()}
+              onExplain={handleExplainEdge}
+              explanation={edgeExplanation}
+              isExplaining={isExplaining}
+              aiEnabled={aiEnabled}
             />
           )}
         </div>
@@ -1950,33 +2015,103 @@ export default function ApplicationDetail() {
         title="Create Asset Group"
       />
 
-      {/* AI Arrangement Confirmation Dialog */}
-      {showArrangeConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-lg p-6 max-w-sm shadow-xl border border-slate-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 rounded-full bg-indigo-600/20">
-                <SparklesIcon className="h-6 w-6 text-indigo-400" />
+      {/* Layout Suggestion Side Panel */}
+      {showArrangeConfirm && layoutSuggestions.length > 0 && (
+        <div className="fixed top-0 right-0 h-full w-80 bg-slate-800 shadow-2xl border-l border-slate-700 z-50 flex flex-col">
+          {/* Header */}
+          <div className="flex items-center gap-3 p-4 border-b border-slate-700">
+            <div className="p-2 rounded-full bg-indigo-600/20">
+              <SparklesIcon className="h-5 w-5 text-indigo-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-base font-medium text-white">Choose Layout</h3>
+              <p className="text-sm text-slate-400">
+                {selectedSuggestionIndex + 1} of {layoutSuggestions.length} options
+              </p>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {/* Navigation carousel */}
+            <div className="flex items-center justify-between mb-4">
+              <button
+                onClick={handlePrevSuggestion}
+                className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                title="Previous option"
+              >
+                <ChevronLeftIcon className="h-5 w-5" />
+              </button>
+              <div className="flex gap-1.5">
+                {layoutSuggestions.map((_, idx) => (
+                  <div
+                    key={idx}
+                    className={`w-2.5 h-2.5 rounded-full transition-colors cursor-pointer ${
+                      idx === selectedSuggestionIndex ? 'bg-indigo-500' : 'bg-slate-600 hover:bg-slate-500'
+                    }`}
+                    onClick={() => {
+                      const suggestion = layoutSuggestions[idx];
+                      if (suggestion) {
+                        setSelectedSuggestionIndex(idx);
+                        applySuggestion(suggestion);
+                      }
+                    }}
+                  />
+                ))}
               </div>
-              <h3 className="text-lg font-medium text-white">Keep this arrangement?</h3>
-            </div>
-            <p className="text-slate-400 text-sm mb-6">
-              The AI has suggested a new layout for your topology. Would you like to keep it or discard the changes?
-            </p>
-            <div className="flex gap-3 justify-end">
               <button
-                onClick={handleDiscardArrangement}
-                className="px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                onClick={handleNextSuggestion}
+                className="p-2 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                title="Next option"
               >
-                Discard
-              </button>
-              <button
-                onClick={handleKeepArrangement}
-                className="px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
-              >
-                Keep
+                <ChevronRightIcon className="h-5 w-5" />
               </button>
             </div>
+
+            {/* Current suggestion details */}
+            <div className="bg-slate-900/50 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">
+                {layoutSuggestions[selectedSuggestionIndex]?.name}
+              </h4>
+              <p className="text-slate-400 text-sm">
+                {layoutSuggestions[selectedSuggestionIndex]?.description}
+              </p>
+
+              {/* Groups legend */}
+              {layoutSuggestions[selectedSuggestionIndex]?.groups.length > 0 && (
+                <div className="border-t border-slate-700 pt-3 mt-3">
+                  <p className="text-xs text-slate-500 mb-2 uppercase tracking-wider">Groups to create:</p>
+                  <div className="flex flex-col gap-2">
+                    {layoutSuggestions[selectedSuggestionIndex].groups.map((group) => (
+                      <div
+                        key={group.id}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded text-sm"
+                        style={{ backgroundColor: group.color + '20', borderLeft: `3px solid ${group.color}` }}
+                      >
+                        <span className="text-slate-300 flex-1">{group.name}</span>
+                        <span className="text-slate-500 text-xs">{group.asset_ids.length} assets</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Footer actions */}
+          <div className="p-4 border-t border-slate-700 flex gap-3">
+            <button
+              onClick={handleDiscardArrangement}
+              className="flex-1 px-4 py-2 text-sm rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleKeepArrangement}
+              className="flex-1 px-4 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+            >
+              Accept
+            </button>
           </div>
         </div>
       )}

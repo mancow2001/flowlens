@@ -162,6 +162,32 @@ class ResolutionSettings(BaseSettings):
     stale_threshold_hours: int = Field(default=24, ge=1)
     new_dependency_lookback_minutes: int = Field(default=30, ge=5)
 
+    # Stale cleanup settings
+    stale_dependency_cleanup_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Automatically close dependencies with no traffic after this many days"
+    )
+    stale_asset_cleanup_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Automatically soft-delete assets with no activity after this many days"
+    )
+
+    # Auto-clear settings
+    auto_clear_enabled: bool = Field(
+        default=True,
+        description="Enable automatic clearing of alerts when conditions are no longer met"
+    )
+    auto_clear_sustained_cycles: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of consecutive detection cycles condition must remain clear before auto-resolving"
+    )
+
     # External IP filtering - master switch
     discard_external_flows: bool = Field(
         default=True,
@@ -308,6 +334,12 @@ class AuthSettings(BaseSettings):
     password_require_lowercase: bool = True
     password_require_digit: bool = True
     password_require_special: bool = False
+
+    # Session management
+    invalidate_sessions_on_startup: bool = Field(
+        default=True,
+        description="Invalidate all existing sessions when server starts (forces re-login)"
+    )
 
 
 class SAMLSettings(BaseSettings):
@@ -477,15 +509,67 @@ class ClassificationSettings(BaseSettings):
     ephemeral_port_min: int = Field(default=32768, ge=1024, le=65535)
 
 
+class MLClassificationSettings(BaseSettings):
+    """ML-based Classification Engine configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="ML_CLASSIFICATION_")
+
+    # Feature flag
+    enabled: bool = Field(
+        default=True,
+        description="Enable ML classification (uses shipped model by default)"
+    )
+
+    # Model storage
+    model_storage_path: Path = Field(
+        default=Path("/var/lib/flowlens/ml_models"),
+        description="Directory for custom model storage"
+    )
+
+    # Thresholds
+    ml_confidence_threshold: float = Field(
+        default=0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum ML confidence to use ML result"
+    )
+    ml_min_flows: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Minimum flows required for ML classification (vs 100 for heuristics)"
+    )
+
+    # Training requirements
+    min_training_samples: int = Field(
+        default=50,
+        ge=10,
+        description="Minimum confirmed samples before custom training is allowed"
+    )
+    min_samples_per_class: int = Field(
+        default=5,
+        ge=1,
+        description="Minimum samples per asset type for custom training"
+    )
+
+    # Algorithm
+    algorithm: Literal["random_forest", "xgboost", "gradient_boosting"] = Field(
+        default="random_forest",
+        description="ML algorithm to use"
+    )
+
+
 class LLMSettings(BaseSettings):
     """LLM/AI configuration for AI-powered features."""
 
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
+    enabled: bool = False  # AI features disabled by default
     provider: Literal["anthropic", "openai", "openai_compatible"] = "anthropic"
     api_key: str | None = None
     model: str | None = None  # Optional model override (uses provider default if not set)
     base_url: str | None = None  # Custom base URL for OpenAI-compatible APIs (Ollama, LM Studio, etc.)
+    temperature: float = 0.3  # Sampling temperature (0.0-1.0, lower = more deterministic)
 
 
 class NotificationSettings(BaseSettings):
@@ -537,6 +621,7 @@ class Settings(BaseSettings):
     vcenter: VCenterSettings = Field(default_factory=VCenterSettings)
     nutanix: NutanixSettings = Field(default_factory=NutanixSettings)
     classification: ClassificationSettings = Field(default_factory=ClassificationSettings)
+    ml_classification: MLClassificationSettings = Field(default_factory=MLClassificationSettings)
     api: APISettings = Field(default_factory=APISettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     saml: SAMLSettings = Field(default_factory=SAMLSettings)

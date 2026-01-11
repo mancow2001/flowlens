@@ -13,26 +13,12 @@ import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
 import BulkActionToolbar from '../components/assets/BulkActionToolbar';
+import ClassificationBadge from '../components/ml/ClassificationBadge';
+import { AssetTypeNativeSelect } from '../components/common/AssetTypeSelect';
 import { assetApi, assetBulkApi, AssetImportPreview } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import type { Asset, AssetType } from '../types';
 import clsx from 'clsx';
-
-const ASSET_TYPES: { value: AssetType | ''; label: string }[] = [
-  { value: '', label: 'All Types' },
-  { value: 'server', label: 'Server' },
-  { value: 'database', label: 'Database' },
-  { value: 'workstation', label: 'Workstation' },
-  { value: 'load_balancer', label: 'Load Balancer' },
-  { value: 'firewall', label: 'Firewall' },
-  { value: 'router', label: 'Router' },
-  { value: 'switch', label: 'Switch' },
-  { value: 'storage', label: 'Storage' },
-  { value: 'container', label: 'Container' },
-  { value: 'virtual_machine', label: 'Virtual Machine' },
-  { value: 'cloud_service', label: 'Cloud Service' },
-  { value: 'unknown', label: 'Unknown' },
-];
 
 export default function Assets() {
   const navigate = useNavigate();
@@ -239,6 +225,16 @@ export default function Assets() {
       ),
     },
     {
+      key: 'classification',
+      header: 'Classification',
+      render: (asset: Asset) => (
+        <ClassificationBadge
+          method={asset.classification_method}
+          confidence={asset.classification_confidence}
+        />
+      ),
+    },
+    {
       key: 'last_seen',
       header: 'Last Seen',
       render: (asset: Asset) => (
@@ -321,20 +317,14 @@ export default function Assets() {
           </div>
 
           {/* Type filter */}
-          <select
+          <AssetTypeNativeSelect
             value={assetType}
-            onChange={(e) => {
-              setAssetType(e.target.value as AssetType | '');
+            onChange={(value) => {
+              setAssetType(value);
               setPage(1);
             }}
             className="px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            {ASSET_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
+          />
 
           {/* Location filter */}
           <select

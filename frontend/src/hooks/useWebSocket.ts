@@ -243,7 +243,6 @@ export function useWebSocket() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('WebSocket connected');
       setConnected(true);
 
       // Clear any pending reconnection attempt since we're now connected
@@ -254,13 +253,11 @@ export function useWebSocket() {
     };
 
     ws.onclose = () => {
-      console.log('WebSocket disconnected');
       setConnected(false);
 
       // Schedule automatic reconnection attempt
       // Uses a fixed delay rather than exponential backoff for simplicity
       reconnectTimeoutRef.current = setTimeout(() => {
-        console.log('Attempting to reconnect...');
         connect();
       }, RECONNECT_DELAY_MS);
     };

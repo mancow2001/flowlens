@@ -3,24 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import Card from '../common/Card';
 import Button from '../common/Button';
 import { classificationApi, assetApi, topologyApi } from '../../services/api';
+import {
+  ASSET_TYPE_GROUPS,
+  ASSET_TYPES_BY_GROUP,
+  ASSET_TYPE_CONFIG,
+  getAssetTypeLabel,
+} from '../../constants/assetTypes';
 import type { TopologyFilters } from '../../hooks/useTopologyFilters';
 import type { Asset } from '../../types';
-
-// Standard asset types - must match backend AssetType enum in models/asset.py
-const ASSET_TYPES = [
-  { value: 'server', label: 'Server' },
-  { value: 'workstation', label: 'Workstation' },
-  { value: 'database', label: 'Database' },
-  { value: 'load_balancer', label: 'Load Balancer' },
-  { value: 'firewall', label: 'Firewall' },
-  { value: 'router', label: 'Router' },
-  { value: 'switch', label: 'Switch' },
-  { value: 'storage', label: 'Storage' },
-  { value: 'container', label: 'Container' },
-  { value: 'virtual_machine', label: 'Virtual Machine' },
-  { value: 'cloud_service', label: 'Cloud Service' },
-  { value: 'unknown', label: 'Unknown' },
-];
 
 interface FilterPanelProps {
   filters: TopologyFilters;
@@ -241,7 +231,7 @@ export default function FilterPanel({
                             {asset.asset_type && (
                               <>
                                 <span>•</span>
-                                <span className="capitalize">{asset.asset_type.replace('_', ' ')}</span>
+                                <span>{getAssetTypeLabel(asset.asset_type)}</span>
                               </>
                             )}
                           </div>
@@ -352,21 +342,58 @@ export default function FilterPanel({
             <label className="block text-xs text-slate-400 uppercase tracking-wider mb-2">
               Asset Types
             </label>
-            <div className="space-y-1 max-h-40 overflow-y-auto">
-              {ASSET_TYPES.map(type => (
-                <label
-                  key={type.value}
-                  className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2"
-                >
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {ASSET_TYPE_GROUPS.filter(group => group !== 'Other').map(group => (
+                <div key={group}>
+                  <div className="text-xs font-medium text-slate-500 px-2 py-1">
+                    {group}
+                  </div>
+                  <div className="space-y-1">
+                    {ASSET_TYPES_BY_GROUP[group]
+                      .filter(type => type !== 'group')
+                      .map(type => {
+                        const config = ASSET_TYPE_CONFIG[type];
+                        return (
+                          <label
+                            key={type}
+                            className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={localFilters.assetTypes.includes(type)}
+                              onChange={() => toggleArrayValue('assetTypes', type)}
+                              className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: config.color }}
+                            />
+                            <span className="text-sm text-slate-300">{config.label}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
+              {/* Unknown at the end */}
+              <div>
+                <div className="text-xs font-medium text-slate-500 px-2 py-1">
+                  Other
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 px-2 py-1 rounded -mx-2">
                   <input
                     type="checkbox"
-                    checked={localFilters.assetTypes.includes(type.value)}
-                    onChange={() => toggleArrayValue('assetTypes', type.value)}
+                    checked={localFilters.assetTypes.includes('unknown')}
+                    onChange={() => toggleArrayValue('assetTypes', 'unknown')}
                     className="rounded border-slate-600 bg-slate-700 text-primary-500 focus:ring-primary-500"
                   />
-                  <span className="text-sm text-slate-300">{type.label}</span>
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: ASSET_TYPE_CONFIG.unknown.color }}
+                  />
+                  <span className="text-sm text-slate-300">Unknown</span>
                 </label>
-              ))}
+              </div>
             </div>
           </div>
 
@@ -491,7 +518,7 @@ export default function FilterPanel({
                     key={`type-${type}`}
                     className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-300 text-xs rounded"
                   >
-                    {type.replace('_', ' ')}
+                    {getAssetTypeLabel(type as keyof typeof ASSET_TYPE_CONFIG)}
                     <button
                       onClick={() => toggleArrayValue('assetTypes', type)}
                       className="hover:text-purple-100"
