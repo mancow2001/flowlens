@@ -24,7 +24,7 @@ import numpy as np
 from flowlens.classification.constants import (
     CAMERA_PORTS,
     DATABASE_PORTS,
-    DHCP_PORTS,
+    DHCP_SERVER_PORTS,
     DIRECTORY_PORTS,
     DNS_PORTS,
     IOT_PORTS,
@@ -2146,7 +2146,7 @@ class SyntheticDataGenerator:
             has_ssh_ports=22 in port_set,
             # Network services
             has_dns_ports=bool(port_set & DNS_PORTS),
-            has_dhcp_ports=bool(port_set & DHCP_PORTS),
+            has_dhcp_ports=bool(port_set & DHCP_SERVER_PORTS),
             has_ntp_ports=bool(port_set & NTP_PORTS),
             has_directory_ports=bool(port_set & DIRECTORY_PORTS),
             # Communication
@@ -2384,7 +2384,7 @@ class SyntheticDataGenerator:
                 has_web_ports=bool(mixed_port_set & WEB_PORTS),
                 has_ssh_ports=22 in mixed_port_set,
                 has_dns_ports=bool(mixed_port_set & DNS_PORTS),
-                has_dhcp_ports=bool(mixed_port_set & DHCP_PORTS),
+                has_dhcp_ports=bool(mixed_port_set & DHCP_SERVER_PORTS),
                 has_ntp_ports=bool(mixed_port_set & NTP_PORTS),
                 has_directory_ports=bool(mixed_port_set & DIRECTORY_PORTS),
                 has_mail_ports=bool(mixed_port_set & MAIL_PORTS),
@@ -2556,7 +2556,7 @@ class SyntheticDataGenerator:
             has_ssh_ports=22 in port_set,
             # Network services
             has_dns_ports=bool(port_set & DNS_PORTS),
-            has_dhcp_ports=bool(port_set & DHCP_PORTS),
+            has_dhcp_ports=bool(port_set & DHCP_SERVER_PORTS),
             has_ntp_ports=bool(port_set & NTP_PORTS),
             has_directory_ports=bool(port_set & DIRECTORY_PORTS),
             # Communication

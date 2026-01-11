@@ -144,10 +144,12 @@ DNS_PORTS: Final[set[int]] = {
     5353,   # mDNS
 }
 
-DHCP_PORTS: Final[set[int]] = {
-    67,     # DHCP server
-    68,     # DHCP client
+DHCP_SERVER_PORTS: Final[set[int]] = {
+    67,     # DHCP server listens on port 67
 }
+
+# Note: Port 68 is for DHCP clients (receiving responses), not servers
+# We only use DHCP_SERVER_PORTS for classification to avoid misclassifying clients
 
 NTP_PORTS: Final[set[int]] = {
     123,    # NTP
@@ -323,7 +325,7 @@ def get_port_category(port: int) -> str | None:
     # Network Services
     if port in DNS_PORTS:
         return "dns"
-    if port in DHCP_PORTS:
+    if port in DHCP_SERVER_PORTS:
         return "dhcp"
     if port in NTP_PORTS:
         return "ntp"

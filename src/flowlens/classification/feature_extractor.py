@@ -14,7 +14,7 @@ from flowlens.classification.constants import (
     BUSINESS_HOURS_START,
     CAMERA_PORTS,
     DATABASE_PORTS,
-    DHCP_PORTS,
+    DHCP_SERVER_PORTS,
     DIRECTORY_PORTS,
     DNS_PORTS,
     EPHEMERAL_PORT_MIN,
@@ -320,7 +320,7 @@ class FeatureExtractor:
 
             # Network services
             features.has_dns_ports = bool(all_ports & DNS_PORTS)
-            features.has_dhcp_ports = bool(all_ports & DHCP_PORTS)
+            features.has_dhcp_ports = bool(all_ports & DHCP_SERVER_PORTS)
             features.has_ntp_ports = bool(all_ports & NTP_PORTS)
             features.has_directory_ports = bool(all_ports & DIRECTORY_PORTS)
 

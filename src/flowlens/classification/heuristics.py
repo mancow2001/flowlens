@@ -4,15 +4,14 @@ Each asset type has a set of weighted signals that evaluate behavioral features.
 Positive signals increase confidence, negative signals decrease it.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from flowlens.classification.constants import (
     CAMERA_PORTS,
-    ClassifiableAssetType,
-    DHCP_PORTS,
-    DIURNAL_PATTERN_THRESHOLD,
+    DHCP_SERVER_PORTS,
     DIRECTORY_PORTS,
+    DIURNAL_PATTERN_THRESHOLD,
     DNS_PORTS,
     HIGH_ACTIVE_HOURS_THRESHOLD,
     HIGH_BYTES_PER_FLOW_THRESHOLD,
@@ -38,6 +37,7 @@ from flowlens.classification.constants import (
     VERY_HIGH_FAN_IN_THRESHOLD,
     VOIP_PORTS,
     VPN_PORTS,
+    ClassifiableAssetType,
 )
 from flowlens.classification.feature_extractor import BehavioralFeatures
 
@@ -479,8 +479,8 @@ DHCP_SERVER_SIGNALS = [
     Signal(
         name="dhcp_port_listener",
         weight=0.40,
-        evaluator=lambda f: _has_ports_from_set(f, DHCP_PORTS),
-        description="Listening on DHCP ports 67/68",
+        evaluator=lambda f: _has_ports_from_set(f, DHCP_SERVER_PORTS),
+        description="Listening on DHCP server port 67",
     ),
     Signal(
         name="udp_only",
