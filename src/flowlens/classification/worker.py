@@ -338,15 +338,39 @@ class ClassificationWorker:
 
         # Map ClassifiableAssetType to AssetType
         asset_type_mapping = {
+            # Compute
             "server": AssetType.SERVER,
             "workstation": AssetType.WORKSTATION,
+            "virtual_machine": AssetType.VIRTUAL_MACHINE,
+            "container": AssetType.CONTAINER,
+            "cloud_service": AssetType.CLOUD_SERVICE,
+            # Data
             "database": AssetType.DATABASE,
+            "storage": AssetType.STORAGE,
+            # Network
             "load_balancer": AssetType.LOAD_BALANCER,
             "network_device": AssetType.ROUTER,  # Map to router as closest match
-            "storage": AssetType.STORAGE,
-            "container": AssetType.CONTAINER,
-            "virtual_machine": AssetType.VIRTUAL_MACHINE,
-            "cloud_service": AssetType.CLOUD_SERVICE,
+            # Network Services (new)
+            "dns_server": AssetType.DNS_SERVER,
+            "dhcp_server": AssetType.DHCP_SERVER,
+            "ntp_server": AssetType.NTP_SERVER,
+            "directory_service": AssetType.DIRECTORY_SERVICE,
+            # Communication (new)
+            "mail_server": AssetType.MAIL_SERVER,
+            "voip_server": AssetType.VOIP_SERVER,
+            # Security & Access (new)
+            "vpn_gateway": AssetType.VPN_GATEWAY,
+            "proxy_server": AssetType.PROXY_SERVER,
+            "log_collector": AssetType.LOG_COLLECTOR,
+            "remote_access": AssetType.REMOTE_ACCESS,
+            # Endpoints (new)
+            "printer": AssetType.PRINTER,
+            "iot_device": AssetType.IOT_DEVICE,
+            "ip_camera": AssetType.IP_CAMERA,
+            # Application Infrastructure (new)
+            "message_queue": AssetType.MESSAGE_QUEUE,
+            "monitoring_server": AssetType.MONITORING_SERVER,
+            # Default
             "unknown": AssetType.UNKNOWN,
         }
 
