@@ -285,7 +285,7 @@ class ModelManager:
                         SHIPPED_MODEL_PATH.stat().st_mtime,
                         tz=UTC,
                     ),
-                    training_samples=1800,  # Trained on synthetic data
+                    training_samples=45000,  # Trained on synthetic data (5000 per class)
                     accuracy=1.0,  # 100% accuracy on synthetic data
                     f1_score=1.0,
                     model_path=str(SHIPPED_MODEL_PATH),
@@ -343,7 +343,7 @@ class ModelManager:
                     SHIPPED_MODEL_PATH.stat().st_mtime,
                     tz=UTC,
                 ),
-                training_samples=1800,  # Trained on synthetic data
+                training_samples=45000,  # Trained on synthetic data (5000 per class)
                 accuracy=1.0,  # 100% accuracy on synthetic data
                 f1_score=1.0,
                 model_path=str(SHIPPED_MODEL_PATH),

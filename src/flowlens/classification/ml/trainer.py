@@ -8,20 +8,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
-from uuid import UUID
 
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from sklearn.preprocessing import LabelEncoder
 
 from flowlens.classification.ml.classifier import MLClassifier
-from flowlens.classification.ml.dataset import DatasetBuilder, DatasetSplit, TrainingDataset
+from flowlens.classification.ml.dataset import DatasetBuilder, TrainingDataset
 from flowlens.classification.ml.model_manager import ModelManager, TrainingStats
 from flowlens.classification.ml.synthetic import SyntheticDataGenerator
 from flowlens.common.config import get_settings
 from flowlens.common.logging import get_logger
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from flowlens.tasks.executor import TaskExecutor
@@ -180,18 +181,23 @@ class MLTrainer:
 
     def train_from_synthetic(
         self,
-        samples_per_class: int = 200,
+        samples_per_class: int = 5000,
         algorithm: Literal["random_forest", "xgboost", "gradient_boosting"] = "random_forest",
         seed: int = 42,
+        include_edge_cases: bool = True,
+        edge_case_ratio: float = 0.15,
     ) -> tuple[MLClassifier, TrainingStats, EvaluationMetrics]:
         """Train a model from synthetic data.
 
         Used for building the shipped model without real customer data.
+        Uses improved sub-type based generation with realistic distributions.
 
         Args:
             samples_per_class: Number of synthetic samples per asset type.
             algorithm: ML algorithm to use.
             seed: Random seed for reproducibility.
+            include_edge_cases: Whether to include edge case samples.
+            edge_case_ratio: Proportion of samples that are edge cases.
 
         Returns:
             Tuple of (trained classifier, training stats, evaluation metrics).
@@ -200,11 +206,17 @@ class MLTrainer:
             "Generating synthetic training data",
             samples_per_class=samples_per_class,
             seed=seed,
+            include_edge_cases=include_edge_cases,
+            edge_case_ratio=edge_case_ratio,
         )
 
-        # Generate synthetic dataset
+        # Generate diverse synthetic dataset with sub-type variants and edge cases
         generator = SyntheticDataGenerator(seed=seed)
-        dataset = generator.generate_balanced_dataset(samples_per_class)
+        dataset = generator.generate_diverse_dataset(
+            samples_per_class=samples_per_class,
+            include_edge_cases=include_edge_cases,
+            edge_case_ratio=edge_case_ratio,
+        )
 
         # Validate
         self._validate_dataset(dataset)
