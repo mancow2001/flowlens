@@ -40,17 +40,42 @@ export interface Asset {
 }
 
 export type AssetType =
+  // Compute
   | 'server'
   | 'workstation'
+  | 'virtual_machine'
+  | 'container'
+  | 'cloud_service'
+  // Data
   | 'database'
+  | 'storage'
+  // Network (legacy - kept for backwards compatibility)
   | 'load_balancer'
   | 'firewall'
   | 'router'
   | 'switch'
-  | 'storage'
-  | 'container'
-  | 'virtual_machine'
-  | 'cloud_service'
+  // Network Services
+  | 'dns_server'
+  | 'dhcp_server'
+  | 'ntp_server'
+  | 'directory_service'
+  // Communication
+  | 'mail_server'
+  | 'voip_server'
+  // Security & Access
+  | 'vpn_gateway'
+  | 'proxy_server'
+  | 'log_collector'
+  | 'remote_access'
+  // Endpoints
+  | 'printer'
+  | 'iot_device'
+  | 'ip_camera'
+  // Application Infrastructure
+  | 'message_queue'
+  | 'monitoring_server'
+  // Special
+  | 'network_device'  // Consolidated type covering router, switch, firewall
   | 'group'
   | 'unknown';
 

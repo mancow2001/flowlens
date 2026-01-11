@@ -13,9 +13,10 @@
 
 import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
-import type { TopologyNode, TopologyEdge } from '../../types';
+import type { TopologyNode, TopologyEdge, AssetType } from '../../types';
 import { getServiceName } from '../../utils/network';
 import { applyLayout, type LayoutType } from '../../utils/graphLayouts';
+import { getAssetTypeColor } from '../../constants/assetTypes';
 
 // Calculate distance from point to line segment
 function pointToLineDistance(
@@ -693,10 +694,14 @@ export default function CanvasTopologyRenderer({
         ctx.globalAlpha = 0.15;
       }
 
-      // Node fill
-      let fillColor = node.is_internal ? COLORS.nodeInternal : COLORS.nodeExternal;
+      // Node fill - use asset type color if available, otherwise internal/external
+      let fillColor: string;
       if (node.isGroupNode && node.groupKey) {
         fillColor = groupColors.get(node.groupKey) || '#6b7280';
+      } else if ((node as TopologyNode).asset_type && (node as TopologyNode).asset_type !== 'unknown') {
+        fillColor = getAssetTypeColor((node as TopologyNode).asset_type as AssetType);
+      } else {
+        fillColor = node.is_internal ? COLORS.nodeInternal : COLORS.nodeExternal;
       }
 
       ctx.fillStyle = fillColor;

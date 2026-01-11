@@ -4,6 +4,7 @@ import { ArrowDownTrayIcon, ArrowUpTrayIcon, XMarkIcon } from '@heroicons/react/
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { LoadingPage } from '../components/common/Loading';
+import { AssetTypeNativeSelect } from '../components/common/AssetTypeSelect';
 import {
   classificationApi,
   ClassificationRule,
@@ -12,6 +13,7 @@ import {
   downloadWithAuth,
 } from '../services/api';
 import { ENVIRONMENT_OPTIONS } from '../types';
+import type { AssetType } from '../types';
 
 interface RuleFormData {
   name: string;
@@ -42,21 +44,6 @@ const emptyFormData: RuleFormData = {
   default_team: '',
   is_active: true,
 };
-
-const ASSET_TYPES = [
-  'server',
-  'workstation',
-  'database',
-  'load_balancer',
-  'firewall',
-  'router',
-  'switch',
-  'storage',
-  'container',
-  'virtual_machine',
-  'cloud_service',
-  'unknown',
-];
 
 export default function ClassificationRules() {
   const queryClient = useQueryClient();
@@ -490,18 +477,13 @@ export default function ClassificationRules() {
 
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">Asset Type</label>
-                  <select
-                    value={formData.asset_type}
-                    onChange={(e) => setFormData({ ...formData, asset_type: e.target.value })}
+                  <AssetTypeNativeSelect
+                    value={(formData.asset_type || '') as AssetType | ''}
+                    onChange={(value) => setFormData({ ...formData, asset_type: value })}
+                    includeAll={true}
+                    allLabel="Not specified"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="">Not specified</option>
-                    {ASSET_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type.replace('_', ' ')}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 <div>

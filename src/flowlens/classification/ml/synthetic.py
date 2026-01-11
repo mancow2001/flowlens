@@ -22,10 +22,25 @@ from typing import ClassVar
 import numpy as np
 
 from flowlens.classification.constants import (
+    CAMERA_PORTS,
     DATABASE_PORTS,
+    DHCP_PORTS,
+    DIRECTORY_PORTS,
+    DNS_PORTS,
+    IOT_PORTS,
     LOAD_BALANCER_PORTS,
+    LOG_COLLECTOR_PORTS,
+    MAIL_PORTS,
+    MESSAGE_QUEUE_PORTS,
+    MONITORING_PORTS,
     NETWORK_DEVICE_PORTS,
+    NTP_PORTS,
+    PRINTER_PORTS,
+    PROXY_PORTS,
+    REMOTE_ACCESS_PORTS,
     STORAGE_PORTS,
+    VOIP_PORTS,
+    VPN_PORTS,
     WEB_PORTS,
 )
 from flowlens.classification.feature_extractor import BehavioralFeatures
@@ -864,6 +879,802 @@ class SyntheticDataGenerator:
                 stability=0.8,
             ),
         ],
+        # === NEW ASSET TYPES ===
+        "dns_server": [
+            SubTypeProfile(
+                name="primary_dns",
+                weight=3.0,
+                primary_ports=[53],
+                secondary_ports=[953],  # RNDC control
+                fan_in_params=(4.5, 1.0),  # Many clients
+                fan_out_params=(1.5, 0.6),  # Few upstream DNS
+                inbound_flow_params=(8.5, 1.0),
+                outbound_flow_params=(8.0, 1.0),
+                bytes_per_flow_params=(5.0, 0.5),  # Small DNS packets
+                inbound_bias=0.55,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.15,
+                udp_preference=0.83,  # DNS is mostly UDP
+                stability=0.9,
+            ),
+            SubTypeProfile(
+                name="recursive_dns",
+                weight=2.0,
+                primary_ports=[53],
+                secondary_ports=[],
+                fan_in_params=(5.0, 1.2),  # Very high fan-in
+                fan_out_params=(2.0, 0.8),  # Queries upstream
+                inbound_flow_params=(9.0, 1.0),
+                outbound_flow_params=(8.5, 1.0),
+                bytes_per_flow_params=(5.2, 0.6),
+                inbound_bias=0.52,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.12,
+                udp_preference=0.86,
+                stability=0.92,
+            ),
+            SubTypeProfile(
+                name="mdns_service",
+                weight=0.5,
+                primary_ports=[5353],
+                secondary_ports=[],
+                fan_in_params=(2.0, 0.8),
+                fan_out_params=(2.0, 0.8),  # Multicast both ways
+                inbound_flow_params=(5.0, 1.5),
+                outbound_flow_params=(5.0, 1.5),
+                bytes_per_flow_params=(4.5, 0.4),
+                inbound_bias=0.5,
+                active_hours_mean=20.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.05,
+                udp_preference=0.93,
+                stability=0.7,
+            ),
+        ],
+        "dhcp_server": [
+            SubTypeProfile(
+                name="dhcp_primary",
+                weight=3.0,
+                primary_ports=[67],
+                secondary_ports=[68],
+                fan_in_params=(3.5, 1.0),  # Many clients
+                fan_out_params=(0.5, 0.3),  # Minimal outbound
+                inbound_flow_params=(6.0, 1.2),
+                outbound_flow_params=(6.0, 1.2),  # Responses match requests
+                bytes_per_flow_params=(5.5, 0.5),  # Small DHCP packets
+                inbound_bias=0.5,  # Symmetric DORA
+                active_hours_mean=24.0,
+                business_hours_bias=0.55,  # Slight business hours bias
+                tcp_preference=0.02,
+                udp_preference=0.97,  # DHCP is UDP-only
+                stability=0.85,
+            ),
+            SubTypeProfile(
+                name="dhcp_failover",
+                weight=1.0,
+                primary_ports=[67, 68],
+                secondary_ports=[647],  # Failover port
+                fan_in_params=(3.0, 0.9),
+                fan_out_params=(1.0, 0.5),  # Peer communication
+                inbound_flow_params=(5.5, 1.0),
+                outbound_flow_params=(5.5, 1.0),
+                bytes_per_flow_params=(5.5, 0.6),
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.05,
+                udp_preference=0.94,
+                stability=0.88,
+            ),
+        ],
+        "ntp_server": [
+            SubTypeProfile(
+                name="ntp_primary",
+                weight=3.0,
+                primary_ports=[123],
+                secondary_ports=[],
+                fan_in_params=(4.0, 1.2),  # Many clients polling
+                fan_out_params=(0.8, 0.4),  # Upstream stratum servers
+                inbound_flow_params=(7.0, 1.0),
+                outbound_flow_params=(7.0, 1.0),  # Symmetric UDP
+                bytes_per_flow_params=(4.2, 0.3),  # Tiny NTP packets ~48B
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.02,
+                udp_preference=0.97,  # NTP is UDP
+                stability=0.95,  # Very stable, regular polling
+            ),
+            SubTypeProfile(
+                name="ntp_stratum1",
+                weight=0.5,
+                primary_ports=[123],
+                secondary_ports=[],
+                fan_in_params=(5.0, 1.0),  # Very high fan-in
+                fan_out_params=(0.2, 0.1),  # GPS/atomic source only
+                inbound_flow_params=(8.0, 0.8),
+                outbound_flow_params=(8.0, 0.8),
+                bytes_per_flow_params=(4.2, 0.3),
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.01,
+                udp_preference=0.98,
+                stability=0.98,
+            ),
+        ],
+        "directory_service": [
+            SubTypeProfile(
+                name="active_directory",
+                weight=3.0,
+                primary_ports=[389, 636, 88],  # LDAP, LDAPS, Kerberos
+                secondary_ports=[3268, 3269, 464],  # GC, GC-SSL, kpasswd
+                fan_in_params=(4.0, 0.9),  # Many workstations
+                fan_out_params=(1.5, 0.6),  # DC replication
+                inbound_flow_params=(7.5, 1.0),
+                outbound_flow_params=(6.5, 1.0),
+                bytes_per_flow_params=(6.5, 1.2),
+                inbound_bias=0.6,
+                active_hours_mean=24.0,
+                business_hours_bias=0.55,
+                tcp_preference=0.85,
+                udp_preference=0.12,  # Kerberos can be UDP
+                stability=0.8,
+            ),
+            SubTypeProfile(
+                name="ldap_server",
+                weight=2.0,
+                primary_ports=[389, 636],
+                secondary_ports=[],
+                fan_in_params=(3.5, 0.8),
+                fan_out_params=(0.5, 0.3),
+                inbound_flow_params=(7.0, 1.0),
+                outbound_flow_params=(6.0, 1.0),
+                bytes_per_flow_params=(6.0, 1.0),
+                inbound_bias=0.65,
+                active_hours_mean=24.0,
+                business_hours_bias=0.6,
+                tcp_preference=0.95,
+                udp_preference=0.03,
+                stability=0.85,
+            ),
+            SubTypeProfile(
+                name="radius_server",
+                weight=1.5,
+                primary_ports=[1812, 1813],
+                secondary_ports=[],
+                fan_in_params=(3.0, 1.0),  # Network devices authenticating
+                fan_out_params=(1.0, 0.5),  # Backend LDAP
+                inbound_flow_params=(6.5, 1.2),
+                outbound_flow_params=(5.5, 1.0),
+                bytes_per_flow_params=(5.5, 0.8),
+                inbound_bias=0.58,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.1,
+                udp_preference=0.88,  # RADIUS is UDP
+                stability=0.82,
+            ),
+        ],
+        "mail_server": [
+            SubTypeProfile(
+                name="smtp_server",
+                weight=2.5,
+                primary_ports=[25, 465, 587],
+                secondary_ports=[22],
+                fan_in_params=(3.5, 1.0),  # External mail + internal clients
+                fan_out_params=(2.5, 0.8),  # Outbound delivery
+                inbound_flow_params=(7.0, 1.2),
+                outbound_flow_params=(6.5, 1.2),
+                bytes_per_flow_params=(8.5, 2.0),  # Attachments vary widely
+                inbound_bias=0.55,
+                active_hours_mean=24.0,
+                business_hours_bias=0.55,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.7,
+            ),
+            SubTypeProfile(
+                name="imap_pop_server",
+                weight=2.0,
+                primary_ports=[143, 993, 110, 995],
+                secondary_ports=[22],
+                fan_in_params=(3.0, 0.9),  # Mail clients
+                fan_out_params=(0.5, 0.3),  # Minimal outbound
+                inbound_flow_params=(6.5, 1.0),
+                outbound_flow_params=(7.0, 1.0),  # Serving mailboxes
+                bytes_per_flow_params=(9.0, 1.8),
+                inbound_bias=0.45,  # More outbound (serving)
+                active_hours_mean=20.0,
+                business_hours_bias=0.65,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.75,
+            ),
+            SubTypeProfile(
+                name="full_mail_server",
+                weight=1.5,
+                primary_ports=[25, 143, 993, 587],
+                secondary_ports=[465, 110, 995],
+                fan_in_params=(3.5, 1.0),
+                fan_out_params=(2.0, 0.8),
+                inbound_flow_params=(7.0, 1.2),
+                outbound_flow_params=(7.0, 1.2),
+                bytes_per_flow_params=(8.5, 2.0),
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.55,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.72,
+            ),
+        ],
+        "voip_server": [
+            SubTypeProfile(
+                name="sip_server",
+                weight=3.0,
+                primary_ports=[5060, 5061],
+                secondary_ports=[],
+                fan_in_params=(3.5, 1.0),  # Phone endpoints
+                fan_out_params=(2.0, 0.8),  # Trunk providers
+                inbound_flow_params=(7.0, 1.2),
+                outbound_flow_params=(7.0, 1.2),
+                bytes_per_flow_params=(6.0, 1.0),  # Signaling is small
+                inbound_bias=0.5,
+                active_hours_mean=18.0,
+                business_hours_bias=0.7,  # Business hours heavy
+                tcp_preference=0.35,
+                udp_preference=0.63,  # SIP often UDP
+                stability=0.7,
+            ),
+            SubTypeProfile(
+                name="media_server",
+                weight=2.0,
+                primary_ports=[5004, 5005],  # RTP/RTCP
+                secondary_ports=[5060],
+                fan_in_params=(2.5, 0.9),
+                fan_out_params=(2.5, 0.9),  # Bidirectional media
+                inbound_flow_params=(7.5, 1.0),
+                outbound_flow_params=(7.5, 1.0),
+                bytes_per_flow_params=(9.0, 1.2),  # Media streams
+                inbound_bias=0.5,
+                active_hours_mean=16.0,
+                business_hours_bias=0.75,
+                tcp_preference=0.1,
+                udp_preference=0.88,  # RTP is UDP
+                stability=0.65,
+            ),
+            SubTypeProfile(
+                name="stun_turn_server",
+                weight=1.0,
+                primary_ports=[3478, 3479],
+                secondary_ports=[],
+                fan_in_params=(4.0, 1.2),  # WebRTC clients
+                fan_out_params=(0.5, 0.3),
+                inbound_flow_params=(7.0, 1.5),
+                outbound_flow_params=(7.0, 1.5),
+                bytes_per_flow_params=(5.5, 0.8),
+                inbound_bias=0.5,
+                active_hours_mean=20.0,
+                business_hours_bias=0.6,
+                tcp_preference=0.25,
+                udp_preference=0.73,
+                stability=0.75,
+            ),
+        ],
+        "vpn_gateway": [
+            SubTypeProfile(
+                name="ipsec_gateway",
+                weight=2.5,
+                primary_ports=[500, 4500],
+                secondary_ports=[],
+                fan_in_params=(4.0, 1.0),  # Many VPN clients
+                fan_out_params=(1.0, 0.5),  # Internal resources
+                inbound_flow_params=(8.0, 1.2),
+                outbound_flow_params=(8.0, 1.2),
+                bytes_per_flow_params=(9.0, 1.5),  # Tunnel traffic
+                inbound_bias=0.5,
+                active_hours_mean=20.0,
+                business_hours_bias=0.6,
+                tcp_preference=0.15,
+                udp_preference=0.83,  # IKE/ESP is UDP
+                stability=0.75,
+            ),
+            SubTypeProfile(
+                name="ssl_vpn",
+                weight=2.0,
+                primary_ports=[443],
+                secondary_ports=[8443],
+                fan_in_params=(4.5, 1.0),
+                fan_out_params=(1.5, 0.6),
+                inbound_flow_params=(8.5, 1.0),
+                outbound_flow_params=(8.5, 1.0),
+                bytes_per_flow_params=(9.5, 1.5),
+                inbound_bias=0.5,
+                active_hours_mean=18.0,
+                business_hours_bias=0.65,
+                tcp_preference=0.95,
+                udp_preference=0.03,
+                stability=0.72,
+            ),
+            SubTypeProfile(
+                name="openvpn_server",
+                weight=1.5,
+                primary_ports=[1194],
+                secondary_ports=[443],
+                fan_in_params=(3.5, 1.0),
+                fan_out_params=(1.0, 0.5),
+                inbound_flow_params=(7.5, 1.2),
+                outbound_flow_params=(7.5, 1.2),
+                bytes_per_flow_params=(9.0, 1.5),
+                inbound_bias=0.5,
+                active_hours_mean=20.0,
+                business_hours_bias=0.6,
+                tcp_preference=0.4,
+                udp_preference=0.58,
+                stability=0.7,
+            ),
+        ],
+        "proxy_server": [
+            SubTypeProfile(
+                name="http_proxy",
+                weight=3.0,
+                primary_ports=[3128, 8080],
+                secondary_ports=[8888],
+                fan_in_params=(4.5, 1.0),  # Many workstations
+                fan_out_params=(4.0, 1.0),  # Many destinations
+                inbound_flow_params=(8.5, 1.0),
+                outbound_flow_params=(8.5, 1.0),  # Symmetric
+                bytes_per_flow_params=(8.0, 1.5),
+                inbound_bias=0.5,
+                active_hours_mean=18.0,
+                business_hours_bias=0.7,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.8,
+            ),
+            SubTypeProfile(
+                name="socks_proxy",
+                weight=1.5,
+                primary_ports=[1080],
+                secondary_ports=[],
+                fan_in_params=(3.0, 1.0),
+                fan_out_params=(3.5, 1.0),
+                inbound_flow_params=(7.5, 1.2),
+                outbound_flow_params=(7.5, 1.2),
+                bytes_per_flow_params=(8.5, 1.8),
+                inbound_bias=0.5,
+                active_hours_mean=20.0,
+                business_hours_bias=0.55,
+                tcp_preference=0.95,
+                udp_preference=0.03,
+                stability=0.75,
+            ),
+            SubTypeProfile(
+                name="transparent_proxy",
+                weight=1.0,
+                primary_ports=[3128, 8080],
+                secondary_ports=[],
+                fan_in_params=(5.0, 1.2),  # All subnet traffic
+                fan_out_params=(4.5, 1.0),
+                inbound_flow_params=(9.0, 1.0),
+                outbound_flow_params=(9.0, 1.0),
+                bytes_per_flow_params=(7.5, 1.3),
+                inbound_bias=0.5,
+                active_hours_mean=20.0,
+                business_hours_bias=0.6,
+                tcp_preference=0.97,
+                udp_preference=0.02,
+                stability=0.85,
+            ),
+        ],
+        "log_collector": [
+            SubTypeProfile(
+                name="syslog_server",
+                weight=3.0,
+                primary_ports=[514, 6514],
+                secondary_ports=[],
+                fan_in_params=(5.0, 1.0),  # Many sources sending logs
+                fan_out_params=(0.5, 0.3),  # Minimal outbound
+                inbound_flow_params=(8.0, 1.2),
+                outbound_flow_params=(4.0, 1.5),
+                bytes_per_flow_params=(7.0, 1.5),
+                inbound_bias=0.85,  # Heavily inbound
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.4,
+                udp_preference=0.58,  # Traditional syslog is UDP
+                stability=0.75,
+            ),
+            SubTypeProfile(
+                name="splunk_forwarder",
+                weight=2.0,
+                primary_ports=[5000, 9997],
+                secondary_ports=[8089],
+                fan_in_params=(4.5, 1.0),
+                fan_out_params=(0.3, 0.2),  # Sends to indexer
+                inbound_flow_params=(8.0, 1.0),
+                outbound_flow_params=(7.5, 1.0),
+                bytes_per_flow_params=(8.0, 1.5),
+                inbound_bias=0.7,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.8,
+            ),
+            SubTypeProfile(
+                name="netflow_collector",
+                weight=1.5,
+                primary_ports=[2055, 9995, 4739],
+                secondary_ports=[],
+                fan_in_params=(3.5, 0.9),  # Network devices
+                fan_out_params=(0.2, 0.1),
+                inbound_flow_params=(8.5, 1.0),
+                outbound_flow_params=(3.0, 1.0),
+                bytes_per_flow_params=(6.0, 1.0),
+                inbound_bias=0.9,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.1,
+                udp_preference=0.88,  # NetFlow is UDP
+                stability=0.9,
+            ),
+            SubTypeProfile(
+                name="logstash_beats",
+                weight=1.0,
+                primary_ports=[5044],
+                secondary_ports=[9600],
+                fan_in_params=(4.0, 1.0),
+                fan_out_params=(0.5, 0.3),  # Elasticsearch
+                inbound_flow_params=(7.5, 1.0),
+                outbound_flow_params=(7.0, 1.0),
+                bytes_per_flow_params=(7.5, 1.5),
+                inbound_bias=0.6,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.82,
+            ),
+        ],
+        "remote_access": [
+            SubTypeProfile(
+                name="rdp_server",
+                weight=3.0,
+                primary_ports=[3389],
+                secondary_ports=[],
+                fan_in_params=(2.5, 0.9),  # RDP clients
+                fan_out_params=(1.5, 0.6),  # Resources accessed
+                inbound_flow_params=(6.5, 1.2),
+                outbound_flow_params=(7.0, 1.2),
+                bytes_per_flow_params=(9.0, 1.5),  # Screen data
+                inbound_bias=0.45,  # More outbound (screen)
+                active_hours_mean=12.0,
+                business_hours_bias=0.8,
+                tcp_preference=0.98,
+                udp_preference=0.01,  # RDP UDP mode
+                stability=0.6,  # Session-based
+            ),
+            SubTypeProfile(
+                name="vnc_server",
+                weight=2.0,
+                primary_ports=[5900],
+                secondary_ports=[5901, 5902],
+                fan_in_params=(1.5, 0.7),
+                fan_out_params=(0.5, 0.3),
+                inbound_flow_params=(5.5, 1.2),
+                outbound_flow_params=(6.5, 1.2),
+                bytes_per_flow_params=(8.5, 1.5),
+                inbound_bias=0.4,
+                active_hours_mean=10.0,
+                business_hours_bias=0.75,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.55,
+            ),
+            SubTypeProfile(
+                name="pcoip_server",
+                weight=1.0,
+                primary_ports=[4172],
+                secondary_ports=[443],
+                fan_in_params=(2.0, 0.8),
+                fan_out_params=(1.0, 0.5),
+                inbound_flow_params=(6.0, 1.0),
+                outbound_flow_params=(7.0, 1.0),
+                bytes_per_flow_params=(9.5, 1.3),
+                inbound_bias=0.4,
+                active_hours_mean=10.0,
+                business_hours_bias=0.85,
+                tcp_preference=0.6,
+                udp_preference=0.38,  # PCoIP uses UDP
+                stability=0.65,
+            ),
+        ],
+        "printer": [
+            SubTypeProfile(
+                name="network_printer",
+                weight=3.0,
+                primary_ports=[9100],
+                secondary_ports=[631, 515],
+                fan_in_params=(2.5, 1.0),  # Print clients
+                fan_out_params=(0.2, 0.1),  # Minimal outbound
+                inbound_flow_params=(4.5, 1.5),  # Low volume
+                outbound_flow_params=(3.0, 1.5),
+                bytes_per_flow_params=(10.0, 2.0),  # Print jobs vary
+                inbound_bias=0.8,  # Mostly inbound print jobs
+                active_hours_mean=10.0,
+                business_hours_bias=0.9,  # Business hours
+                tcp_preference=0.95,
+                udp_preference=0.03,
+                stability=0.3,  # Very bursty
+            ),
+            SubTypeProfile(
+                name="ipp_printer",
+                weight=2.0,
+                primary_ports=[631],
+                secondary_ports=[9100],
+                fan_in_params=(2.0, 0.9),
+                fan_out_params=(0.1, 0.1),
+                inbound_flow_params=(4.0, 1.5),
+                outbound_flow_params=(3.5, 1.5),
+                bytes_per_flow_params=(9.5, 2.0),
+                inbound_bias=0.75,
+                active_hours_mean=9.0,
+                business_hours_bias=0.92,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.25,
+            ),
+            SubTypeProfile(
+                name="print_server",
+                weight=1.0,
+                primary_ports=[515, 631, 9100],
+                secondary_ports=[445],  # Windows sharing
+                fan_in_params=(3.5, 1.0),  # Many clients
+                fan_out_params=(1.5, 0.6),  # Physical printers
+                inbound_flow_params=(5.5, 1.2),
+                outbound_flow_params=(5.0, 1.2),
+                bytes_per_flow_params=(10.0, 1.8),
+                inbound_bias=0.6,
+                active_hours_mean=12.0,
+                business_hours_bias=0.85,
+                tcp_preference=0.92,
+                udp_preference=0.05,
+                stability=0.4,
+            ),
+        ],
+        "iot_device": [
+            SubTypeProfile(
+                name="mqtt_device",
+                weight=3.0,
+                primary_ports=[1883, 8883],
+                secondary_ports=[],
+                fan_in_params=(0.5, 0.3),  # Broker initiates
+                fan_out_params=(1.0, 0.5),  # Publishes to broker
+                inbound_flow_params=(4.5, 1.5),
+                outbound_flow_params=(5.0, 1.5),
+                bytes_per_flow_params=(5.0, 1.0),  # Small telemetry
+                inbound_bias=0.4,  # More outbound (publishing)
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.85,  # Regular heartbeats
+            ),
+            SubTypeProfile(
+                name="coap_device",
+                weight=1.5,
+                primary_ports=[5683, 5684],
+                secondary_ports=[],
+                fan_in_params=(0.8, 0.4),
+                fan_out_params=(1.2, 0.5),
+                inbound_flow_params=(4.0, 1.2),
+                outbound_flow_params=(4.5, 1.2),
+                bytes_per_flow_params=(4.5, 0.8),  # Very small
+                inbound_bias=0.4,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.05,
+                udp_preference=0.93,  # CoAP is UDP
+                stability=0.82,
+            ),
+            SubTypeProfile(
+                name="generic_iot",
+                weight=1.0,
+                primary_ports=[],
+                secondary_ports=[80, 443, 1883],
+                fan_in_params=(0.3, 0.2),
+                fan_out_params=(1.5, 0.7),  # Cloud connectivity
+                inbound_flow_params=(3.5, 1.5),
+                outbound_flow_params=(4.0, 1.5),
+                bytes_per_flow_params=(5.5, 1.2),
+                inbound_bias=0.35,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.75,
+                udp_preference=0.2,
+                stability=0.7,
+            ),
+        ],
+        "ip_camera": [
+            SubTypeProfile(
+                name="rtsp_camera",
+                weight=3.0,
+                primary_ports=[554],
+                secondary_ports=[80, 443],
+                fan_in_params=(2.0, 0.8),  # Viewers/NVR
+                fan_out_params=(1.0, 0.5),  # NVR/cloud
+                inbound_flow_params=(5.0, 1.2),
+                outbound_flow_params=(8.0, 0.8),  # Constant streaming
+                bytes_per_flow_params=(11.0, 1.0),  # High bandwidth video
+                inbound_bias=0.15,  # Mostly outbound (streaming)
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.7,
+                udp_preference=0.28,  # RTP over UDP
+                stability=0.9,  # Constant stream
+            ),
+            SubTypeProfile(
+                name="onvif_camera",
+                weight=2.0,
+                primary_ports=[80, 554],
+                secondary_ports=[8080, 443],
+                fan_in_params=(1.5, 0.7),
+                fan_out_params=(1.2, 0.5),
+                inbound_flow_params=(4.5, 1.0),
+                outbound_flow_params=(7.5, 0.9),
+                bytes_per_flow_params=(10.5, 1.2),
+                inbound_bias=0.2,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.75,
+                udp_preference=0.22,
+                stability=0.88,
+            ),
+            SubTypeProfile(
+                name="dahua_hikvision",
+                weight=1.0,
+                primary_ports=[37777, 554],
+                secondary_ports=[80, 8000],
+                fan_in_params=(1.5, 0.6),
+                fan_out_params=(1.0, 0.4),
+                inbound_flow_params=(4.0, 1.0),
+                outbound_flow_params=(7.5, 0.8),
+                bytes_per_flow_params=(11.0, 1.0),
+                inbound_bias=0.18,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.72,
+                udp_preference=0.25,
+                stability=0.92,
+            ),
+        ],
+        "message_queue": [
+            SubTypeProfile(
+                name="rabbitmq",
+                weight=2.5,
+                primary_ports=[5672, 5671],
+                secondary_ports=[15672],  # Management
+                fan_in_params=(3.5, 0.9),  # Producers
+                fan_out_params=(3.5, 0.9),  # Consumers
+                inbound_flow_params=(7.5, 1.0),
+                outbound_flow_params=(7.5, 1.0),  # Balanced
+                bytes_per_flow_params=(7.5, 1.5),
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.55,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.85,
+            ),
+            SubTypeProfile(
+                name="kafka_broker",
+                weight=2.0,
+                primary_ports=[9092, 9093],
+                secondary_ports=[2181],  # ZooKeeper (if collocated)
+                fan_in_params=(4.0, 1.0),  # Many producers
+                fan_out_params=(4.0, 1.0),  # Many consumers
+                inbound_flow_params=(8.5, 1.0),
+                outbound_flow_params=(8.5, 1.0),
+                bytes_per_flow_params=(9.0, 1.5),  # Higher throughput
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.88,
+            ),
+            SubTypeProfile(
+                name="activemq",
+                weight=1.0,
+                primary_ports=[61616],
+                secondary_ports=[8161],  # Web console
+                fan_in_params=(3.0, 0.9),
+                fan_out_params=(3.0, 0.9),
+                inbound_flow_params=(7.0, 1.2),
+                outbound_flow_params=(7.0, 1.2),
+                bytes_per_flow_params=(7.0, 1.5),
+                inbound_bias=0.5,
+                active_hours_mean=24.0,
+                business_hours_bias=0.55,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.8,
+            ),
+        ],
+        "monitoring_server": [
+            SubTypeProfile(
+                name="prometheus",
+                weight=3.0,
+                primary_ports=[9090],
+                secondary_ports=[9091],  # Pushgateway
+                fan_in_params=(2.0, 0.8),  # Queries/dashboards
+                fan_out_params=(5.0, 1.0),  # Scraping many targets
+                inbound_flow_params=(6.0, 1.0),
+                outbound_flow_params=(7.5, 1.0),
+                bytes_per_flow_params=(6.0, 1.0),  # Metrics are small
+                inbound_bias=0.35,  # More outbound (scraping)
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.98,
+                udp_preference=0.01,
+                stability=0.9,  # Regular scrape intervals
+            ),
+            SubTypeProfile(
+                name="grafana",
+                weight=2.0,
+                primary_ports=[3000],
+                secondary_ports=[],
+                fan_in_params=(3.0, 1.0),  # Dashboard viewers
+                fan_out_params=(2.0, 0.7),  # Data sources
+                inbound_flow_params=(6.5, 1.2),
+                outbound_flow_params=(6.0, 1.2),
+                bytes_per_flow_params=(7.0, 1.3),
+                inbound_bias=0.55,
+                active_hours_mean=18.0,
+                business_hours_bias=0.65,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.7,
+            ),
+            SubTypeProfile(
+                name="kibana",
+                weight=1.5,
+                primary_ports=[5601],
+                secondary_ports=[],
+                fan_in_params=(2.5, 0.9),
+                fan_out_params=(1.0, 0.5),  # Elasticsearch backend
+                inbound_flow_params=(6.0, 1.2),
+                outbound_flow_params=(6.5, 1.2),
+                bytes_per_flow_params=(7.5, 1.5),
+                inbound_bias=0.45,
+                active_hours_mean=16.0,
+                business_hours_bias=0.7,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.65,
+            ),
+            SubTypeProfile(
+                name="influxdb",
+                weight=1.0,
+                primary_ports=[8086],
+                secondary_ports=[8088],
+                fan_in_params=(3.5, 1.0),  # Write sources
+                fan_out_params=(1.5, 0.6),  # Query clients
+                inbound_flow_params=(7.5, 1.0),
+                outbound_flow_params=(6.5, 1.0),
+                bytes_per_flow_params=(6.5, 1.2),
+                inbound_bias=0.6,
+                active_hours_mean=24.0,
+                business_hours_bias=0.5,
+                tcp_preference=0.99,
+                udp_preference=0.005,
+                stability=0.85,
+            ),
+        ],
     }
 
     # Legacy profiles for backward compatibility
@@ -1304,6 +2115,9 @@ class SyntheticDataGenerator:
 
         ephemeral_port_ratio = max(0.0, 1.0 - well_known_port_ratio - 0.15)
 
+        # Convert to set for port checks
+        port_set = set(listener_ports)
+
         return BehavioralFeatures(
             ip_address=f"10.{self.rng.randint(0, 255)}.{self.rng.randint(0, 255)}.{self.rng.randint(1, 254)}/32",
             window_size="5min",
@@ -1325,10 +2139,31 @@ class SyntheticDataGenerator:
             active_hours_count=active_hours,
             business_hours_ratio=business_hours_ratio,
             traffic_variance=traffic_variance,
-            has_db_ports=bool(set(listener_ports) & DATABASE_PORTS),
-            has_storage_ports=bool(set(listener_ports) & STORAGE_PORTS),
-            has_web_ports=bool(set(listener_ports) & WEB_PORTS),
-            has_ssh_ports=22 in listener_ports,
+            # Original port flags
+            has_db_ports=bool(port_set & DATABASE_PORTS),
+            has_storage_ports=bool(port_set & STORAGE_PORTS),
+            has_web_ports=bool(port_set & WEB_PORTS),
+            has_ssh_ports=22 in port_set,
+            # Network services
+            has_dns_ports=bool(port_set & DNS_PORTS),
+            has_dhcp_ports=bool(port_set & DHCP_PORTS),
+            has_ntp_ports=bool(port_set & NTP_PORTS),
+            has_directory_ports=bool(port_set & DIRECTORY_PORTS),
+            # Communication
+            has_mail_ports=bool(port_set & MAIL_PORTS),
+            has_voip_ports=bool(port_set & VOIP_PORTS),
+            # Security & access
+            has_vpn_ports=bool(port_set & VPN_PORTS),
+            has_proxy_ports=bool(port_set & PROXY_PORTS),
+            has_log_collector_ports=bool(port_set & LOG_COLLECTOR_PORTS),
+            has_remote_access_ports=bool(port_set & REMOTE_ACCESS_PORTS),
+            # Endpoints
+            has_printer_ports=bool(port_set & PRINTER_PORTS),
+            has_iot_ports=bool(port_set & IOT_PORTS),
+            has_camera_ports=bool(port_set & CAMERA_PORTS),
+            # App infrastructure
+            has_message_queue_ports=bool(port_set & MESSAGE_QUEUE_PORTS),
+            has_monitoring_ports=bool(port_set & MONITORING_PORTS),
         )
 
     def _generate_edge_cases(
@@ -1393,6 +2228,21 @@ class SyntheticDataGenerator:
                 has_storage_ports=base.has_storage_ports,
                 has_web_ports=base.has_web_ports,
                 has_ssh_ports=base.has_ssh_ports,
+                has_dns_ports=base.has_dns_ports,
+                has_dhcp_ports=base.has_dhcp_ports,
+                has_ntp_ports=base.has_ntp_ports,
+                has_directory_ports=base.has_directory_ports,
+                has_mail_ports=base.has_mail_ports,
+                has_voip_ports=base.has_voip_ports,
+                has_vpn_ports=base.has_vpn_ports,
+                has_proxy_ports=base.has_proxy_ports,
+                has_log_collector_ports=base.has_log_collector_ports,
+                has_remote_access_ports=base.has_remote_access_ports,
+                has_printer_ports=base.has_printer_ports,
+                has_iot_ports=base.has_iot_ports,
+                has_camera_ports=base.has_camera_ports,
+                has_message_queue_ports=base.has_message_queue_ports,
+                has_monitoring_ports=base.has_monitoring_ports,
             )
 
         elif edge_type == "peak":
@@ -1424,6 +2274,21 @@ class SyntheticDataGenerator:
                 has_storage_ports=base.has_storage_ports,
                 has_web_ports=base.has_web_ports,
                 has_ssh_ports=base.has_ssh_ports,
+                has_dns_ports=base.has_dns_ports,
+                has_dhcp_ports=base.has_dhcp_ports,
+                has_ntp_ports=base.has_ntp_ports,
+                has_directory_ports=base.has_directory_ports,
+                has_mail_ports=base.has_mail_ports,
+                has_voip_ports=base.has_voip_ports,
+                has_vpn_ports=base.has_vpn_ports,
+                has_proxy_ports=base.has_proxy_ports,
+                has_log_collector_ports=base.has_log_collector_ports,
+                has_remote_access_ports=base.has_remote_access_ports,
+                has_printer_ports=base.has_printer_ports,
+                has_iot_ports=base.has_iot_ports,
+                has_camera_ports=base.has_camera_ports,
+                has_message_queue_ports=base.has_message_queue_ports,
+                has_monitoring_ports=base.has_monitoring_ports,
             )
 
         elif edge_type == "unusual_ports":
@@ -1455,10 +2320,26 @@ class SyntheticDataGenerator:
                 active_hours_count=base.active_hours_count,
                 business_hours_ratio=base.business_hours_ratio,
                 traffic_variance=base.traffic_variance,
-                has_db_ports=False,  # Non-standard ports
+                # All port flags False for non-standard ports
+                has_db_ports=False,
                 has_storage_ports=False,
                 has_web_ports=False,
                 has_ssh_ports=False,
+                has_dns_ports=False,
+                has_dhcp_ports=False,
+                has_ntp_ports=False,
+                has_directory_ports=False,
+                has_mail_ports=False,
+                has_voip_ports=False,
+                has_vpn_ports=False,
+                has_proxy_ports=False,
+                has_log_collector_ports=False,
+                has_remote_access_ports=False,
+                has_printer_ports=False,
+                has_iot_ports=False,
+                has_camera_ports=False,
+                has_message_queue_ports=False,
+                has_monitoring_ports=False,
             )
 
         elif edge_type == "mixed_role":
@@ -1472,6 +2353,7 @@ class SyntheticDataGenerator:
                 mixed_ports.extend([22, 80, 443])
 
             mixed_ports = list(set(mixed_ports))[:6]
+            mixed_port_set = set(mixed_ports)
 
             return BehavioralFeatures(
                 ip_address=base.ip_address,
@@ -1497,10 +2379,25 @@ class SyntheticDataGenerator:
                 active_hours_count=min(24, base.active_hours_count + 4),
                 business_hours_ratio=base.business_hours_ratio,
                 traffic_variance=base.traffic_variance * 1.2,
-                has_db_ports=bool(set(mixed_ports) & DATABASE_PORTS),
-                has_storage_ports=bool(set(mixed_ports) & STORAGE_PORTS),
-                has_web_ports=bool(set(mixed_ports) & WEB_PORTS),
-                has_ssh_ports=22 in mixed_ports,
+                has_db_ports=bool(mixed_port_set & DATABASE_PORTS),
+                has_storage_ports=bool(mixed_port_set & STORAGE_PORTS),
+                has_web_ports=bool(mixed_port_set & WEB_PORTS),
+                has_ssh_ports=22 in mixed_port_set,
+                has_dns_ports=bool(mixed_port_set & DNS_PORTS),
+                has_dhcp_ports=bool(mixed_port_set & DHCP_PORTS),
+                has_ntp_ports=bool(mixed_port_set & NTP_PORTS),
+                has_directory_ports=bool(mixed_port_set & DIRECTORY_PORTS),
+                has_mail_ports=bool(mixed_port_set & MAIL_PORTS),
+                has_voip_ports=bool(mixed_port_set & VOIP_PORTS),
+                has_vpn_ports=bool(mixed_port_set & VPN_PORTS),
+                has_proxy_ports=bool(mixed_port_set & PROXY_PORTS),
+                has_log_collector_ports=bool(mixed_port_set & LOG_COLLECTOR_PORTS),
+                has_remote_access_ports=bool(mixed_port_set & REMOTE_ACCESS_PORTS),
+                has_printer_ports=bool(mixed_port_set & PRINTER_PORTS),
+                has_iot_ports=bool(mixed_port_set & IOT_PORTS),
+                has_camera_ports=bool(mixed_port_set & CAMERA_PORTS),
+                has_message_queue_ports=bool(mixed_port_set & MESSAGE_QUEUE_PORTS),
+                has_monitoring_ports=bool(mixed_port_set & MONITORING_PORTS),
             )
 
         else:  # intermittent
@@ -1532,6 +2429,21 @@ class SyntheticDataGenerator:
                 has_storage_ports=base.has_storage_ports,
                 has_web_ports=base.has_web_ports,
                 has_ssh_ports=base.has_ssh_ports,
+                has_dns_ports=base.has_dns_ports,
+                has_dhcp_ports=base.has_dhcp_ports,
+                has_ntp_ports=base.has_ntp_ports,
+                has_directory_ports=base.has_directory_ports,
+                has_mail_ports=base.has_mail_ports,
+                has_voip_ports=base.has_voip_ports,
+                has_vpn_ports=base.has_vpn_ports,
+                has_proxy_ports=base.has_proxy_ports,
+                has_log_collector_ports=base.has_log_collector_ports,
+                has_remote_access_ports=base.has_remote_access_ports,
+                has_printer_ports=base.has_printer_ports,
+                has_iot_ports=base.has_iot_ports,
+                has_camera_ports=base.has_camera_ports,
+                has_message_queue_ports=base.has_message_queue_ports,
+                has_monitoring_ports=base.has_monitoring_ports,
             )
 
     def _generate_from_profile(
@@ -1613,6 +2525,9 @@ class SyntheticDataGenerator:
         else:
             traffic_variance = self._sample_float((0.5, 0.8))
 
+        # Convert to set for port checks
+        port_set = set(listener_ports)
+
         return BehavioralFeatures(
             ip_address=f"10.{self.rng.randint(0, 255)}.{self.rng.randint(0, 255)}.{self.rng.randint(1, 254)}/32",
             window_size="5min",
@@ -1634,10 +2549,31 @@ class SyntheticDataGenerator:
             active_hours_count=active_hours,
             business_hours_ratio=business_hours_ratio,
             traffic_variance=traffic_variance,
-            has_db_ports=bool(set(listener_ports) & DATABASE_PORTS),
-            has_storage_ports=bool(set(listener_ports) & STORAGE_PORTS),
-            has_web_ports=bool(set(listener_ports) & WEB_PORTS),
-            has_ssh_ports=22 in listener_ports,
+            # Original port flags
+            has_db_ports=bool(port_set & DATABASE_PORTS),
+            has_storage_ports=bool(port_set & STORAGE_PORTS),
+            has_web_ports=bool(port_set & WEB_PORTS),
+            has_ssh_ports=22 in port_set,
+            # Network services
+            has_dns_ports=bool(port_set & DNS_PORTS),
+            has_dhcp_ports=bool(port_set & DHCP_PORTS),
+            has_ntp_ports=bool(port_set & NTP_PORTS),
+            has_directory_ports=bool(port_set & DIRECTORY_PORTS),
+            # Communication
+            has_mail_ports=bool(port_set & MAIL_PORTS),
+            has_voip_ports=bool(port_set & VOIP_PORTS),
+            # Security & access
+            has_vpn_ports=bool(port_set & VPN_PORTS),
+            has_proxy_ports=bool(port_set & PROXY_PORTS),
+            has_log_collector_ports=bool(port_set & LOG_COLLECTOR_PORTS),
+            has_remote_access_ports=bool(port_set & REMOTE_ACCESS_PORTS),
+            # Endpoints
+            has_printer_ports=bool(port_set & PRINTER_PORTS),
+            has_iot_ports=bool(port_set & IOT_PORTS),
+            has_camera_ports=bool(port_set & CAMERA_PORTS),
+            # App infrastructure
+            has_message_queue_ports=bool(port_set & MESSAGE_QUEUE_PORTS),
+            has_monitoring_ports=bool(port_set & MONITORING_PORTS),
         )
 
     def _sample_int(self, range_tuple: tuple[int, int]) -> int:

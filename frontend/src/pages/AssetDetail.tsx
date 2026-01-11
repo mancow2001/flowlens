@@ -15,25 +15,12 @@ import Button from '../components/common/Button';
 import Table from '../components/common/Table';
 import { LoadingPage } from '../components/common/Loading';
 import ClassificationBadge from '../components/ml/ClassificationBadge';
+import { AssetTypeNativeSelect } from '../components/common/AssetTypeSelect';
+import { getAssetTypeLabel } from '../constants/assetTypes';
 import { assetApi, analysisApi, classificationApi, gatewayApi } from '../services/api';
 import { formatRelativeTime, formatBytes, formatPort, formatProtocol } from '../utils/format';
-import type { Dependency, Asset, GatewayRelationship, Environment } from '../types';
+import type { Dependency, Asset, GatewayRelationship, Environment, AssetType } from '../types';
 import { ENVIRONMENT_OPTIONS } from '../types';
-
-const ASSET_TYPES = [
-  'server',
-  'workstation',
-  'database',
-  'load_balancer',
-  'firewall',
-  'router',
-  'switch',
-  'storage',
-  'container',
-  'virtual_machine',
-  'cloud_service',
-  'unknown',
-];
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -218,19 +205,14 @@ export default function AssetDetail() {
             )}
             <div className="flex items-center gap-2 mt-1">
               {isEditing ? (
-                <select
-                  value={editForm.asset_type || ''}
-                  onChange={(e) => setEditForm({ ...editForm, asset_type: e.target.value as Asset['asset_type'] })}
+                <AssetTypeNativeSelect
+                  value={editForm.asset_type || 'unknown'}
+                  onChange={(value) => setEditForm({ ...editForm, asset_type: (value || 'unknown') as AssetType })}
+                  includeAll={false}
                   className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  {ASSET_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {type.replace('_', ' ')}
-                    </option>
-                  ))}
-                </select>
+                />
               ) : (
-                <Badge>{asset.asset_type?.replace('_', ' ') ?? 'Unknown'}</Badge>
+                <Badge>{asset.asset_type ? getAssetTypeLabel(asset.asset_type) : 'Unknown'}</Badge>
               )}
               {isEditing ? (
                 <label className="flex items-center gap-1 text-sm text-slate-300">

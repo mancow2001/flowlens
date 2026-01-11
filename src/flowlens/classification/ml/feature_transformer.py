@@ -50,11 +50,36 @@ class FeatureTransformer:
         "active_hours_normalized",  # 0-24 -> 0-1
         "traffic_variance",
 
-        # Boolean flags (0 or 1)
+        # Boolean flags - existing (0 or 1)
         "has_db_ports",
         "has_storage_ports",
         "has_web_ports",
         "has_ssh_ports",
+
+        # Boolean flags - network services
+        "has_dns_ports",
+        "has_dhcp_ports",
+        "has_ntp_ports",
+        "has_directory_ports",
+
+        # Boolean flags - communication
+        "has_mail_ports",
+        "has_voip_ports",
+
+        # Boolean flags - security & access
+        "has_vpn_ports",
+        "has_proxy_ports",
+        "has_log_collector_ports",
+        "has_remote_access_ports",
+
+        # Boolean flags - endpoints
+        "has_printer_ports",
+        "has_iot_ports",
+        "has_camera_ports",
+
+        # Boolean flags - app infrastructure
+        "has_message_queue_ports",
+        "has_monitoring_ports",
 
         # Protocol ratios
         "tcp_ratio",
@@ -115,34 +140,59 @@ class FeatureTransformer:
         vector[13] = active_hours / 24.0  # Normalize to 0-1
         vector[14] = features.traffic_variance if features.traffic_variance is not None else 0.5
 
-        # Boolean flags
+        # Boolean flags - existing
         vector[15] = 1.0 if features.has_db_ports else 0.0
         vector[16] = 1.0 if features.has_storage_ports else 0.0
         vector[17] = 1.0 if features.has_web_ports else 0.0
         vector[18] = 1.0 if features.has_ssh_ports else 0.0
 
+        # Boolean flags - network services
+        vector[19] = 1.0 if features.has_dns_ports else 0.0
+        vector[20] = 1.0 if features.has_dhcp_ports else 0.0
+        vector[21] = 1.0 if features.has_ntp_ports else 0.0
+        vector[22] = 1.0 if features.has_directory_ports else 0.0
+
+        # Boolean flags - communication
+        vector[23] = 1.0 if features.has_mail_ports else 0.0
+        vector[24] = 1.0 if features.has_voip_ports else 0.0
+
+        # Boolean flags - security & access
+        vector[25] = 1.0 if features.has_vpn_ports else 0.0
+        vector[26] = 1.0 if features.has_proxy_ports else 0.0
+        vector[27] = 1.0 if features.has_log_collector_ports else 0.0
+        vector[28] = 1.0 if features.has_remote_access_ports else 0.0
+
+        # Boolean flags - endpoints
+        vector[29] = 1.0 if features.has_printer_ports else 0.0
+        vector[30] = 1.0 if features.has_iot_ports else 0.0
+        vector[31] = 1.0 if features.has_camera_ports else 0.0
+
+        # Boolean flags - app infrastructure
+        vector[32] = 1.0 if features.has_message_queue_ports else 0.0
+        vector[33] = 1.0 if features.has_monitoring_ports else 0.0
+
         # Protocol ratios from distribution
         total_protocol_flows = sum(features.protocol_distribution.values()) if features.protocol_distribution else 0
         if total_protocol_flows > 0:
-            vector[19] = features.protocol_distribution.get(6, 0) / total_protocol_flows  # TCP
-            vector[20] = features.protocol_distribution.get(17, 0) / total_protocol_flows  # UDP
+            vector[34] = features.protocol_distribution.get(6, 0) / total_protocol_flows  # TCP
+            vector[35] = features.protocol_distribution.get(17, 0) / total_protocol_flows  # UDP
             icmp_flows = features.protocol_distribution.get(1, 0) + features.protocol_distribution.get(58, 0)
-            vector[21] = icmp_flows / total_protocol_flows  # ICMP + ICMPv6
+            vector[36] = icmp_flows / total_protocol_flows  # ICMP + ICMPv6
         else:
-            vector[19] = 0.8  # Default assume mostly TCP
-            vector[20] = 0.15
-            vector[21] = 0.05
+            vector[34] = 0.8  # Default assume mostly TCP
+            vector[35] = 0.15
+            vector[36] = 0.05
 
         # Derived metrics
         total_bytes = features.inbound_bytes + features.outbound_bytes
         total_flows = features.total_flows if features.total_flows > 0 else 1
-        vector[22] = self._log_transform(total_bytes / total_flows)  # bytes per flow
+        vector[37] = self._log_transform(total_bytes / total_flows)  # bytes per flow
 
         total_traffic = features.inbound_flows + features.outbound_flows
         if total_traffic > 0:
-            vector[23] = features.inbound_flows / total_traffic  # inbound ratio
+            vector[38] = features.inbound_flows / total_traffic  # inbound ratio
         else:
-            vector[23] = 0.5
+            vector[38] = 0.5
 
         return vector
 
@@ -195,34 +245,59 @@ class FeatureTransformer:
         vector[13] = active_hours / 24.0
         vector[14] = features_dict.get("traffic_variance") or 0.5
 
-        # Boolean flags
+        # Boolean flags - existing
         vector[15] = 1.0 if features_dict.get("has_db_ports") else 0.0
         vector[16] = 1.0 if features_dict.get("has_storage_ports") else 0.0
         vector[17] = 1.0 if features_dict.get("has_web_ports") else 0.0
         vector[18] = 1.0 if features_dict.get("has_ssh_ports") else 0.0
 
+        # Boolean flags - network services
+        vector[19] = 1.0 if features_dict.get("has_dns_ports") else 0.0
+        vector[20] = 1.0 if features_dict.get("has_dhcp_ports") else 0.0
+        vector[21] = 1.0 if features_dict.get("has_ntp_ports") else 0.0
+        vector[22] = 1.0 if features_dict.get("has_directory_ports") else 0.0
+
+        # Boolean flags - communication
+        vector[23] = 1.0 if features_dict.get("has_mail_ports") else 0.0
+        vector[24] = 1.0 if features_dict.get("has_voip_ports") else 0.0
+
+        # Boolean flags - security & access
+        vector[25] = 1.0 if features_dict.get("has_vpn_ports") else 0.0
+        vector[26] = 1.0 if features_dict.get("has_proxy_ports") else 0.0
+        vector[27] = 1.0 if features_dict.get("has_log_collector_ports") else 0.0
+        vector[28] = 1.0 if features_dict.get("has_remote_access_ports") else 0.0
+
+        # Boolean flags - endpoints
+        vector[29] = 1.0 if features_dict.get("has_printer_ports") else 0.0
+        vector[30] = 1.0 if features_dict.get("has_iot_ports") else 0.0
+        vector[31] = 1.0 if features_dict.get("has_camera_ports") else 0.0
+
+        # Boolean flags - app infrastructure
+        vector[32] = 1.0 if features_dict.get("has_message_queue_ports") else 0.0
+        vector[33] = 1.0 if features_dict.get("has_monitoring_ports") else 0.0
+
         # Protocol distribution
         protocol_dist = features_dict.get("protocol_distribution", {})
         total_protocol_flows = sum(protocol_dist.values()) if protocol_dist else 0
         if total_protocol_flows > 0:
-            vector[19] = protocol_dist.get(6, protocol_dist.get("6", 0)) / total_protocol_flows
-            vector[20] = protocol_dist.get(17, protocol_dist.get("17", 0)) / total_protocol_flows
+            vector[34] = protocol_dist.get(6, protocol_dist.get("6", 0)) / total_protocol_flows
+            vector[35] = protocol_dist.get(17, protocol_dist.get("17", 0)) / total_protocol_flows
             icmp = protocol_dist.get(1, protocol_dist.get("1", 0)) + protocol_dist.get(58, protocol_dist.get("58", 0))
-            vector[21] = icmp / total_protocol_flows
+            vector[36] = icmp / total_protocol_flows
         else:
-            vector[19] = 0.8
-            vector[20] = 0.15
-            vector[21] = 0.05
+            vector[34] = 0.8
+            vector[35] = 0.15
+            vector[36] = 0.05
 
         # Derived
         total_bytes = features_dict.get("inbound_bytes", 0) + features_dict.get("outbound_bytes", 0)
         total_flows = features_dict.get("total_flows", 1) or 1
-        vector[22] = self._log_transform(total_bytes / total_flows)
+        vector[37] = self._log_transform(total_bytes / total_flows)
 
         inbound = features_dict.get("inbound_flows", 0)
         outbound = features_dict.get("outbound_flows", 0)
         total = inbound + outbound
-        vector[23] = inbound / total if total > 0 else 0.5
+        vector[38] = inbound / total if total > 0 else 0.5
 
         return vector
 

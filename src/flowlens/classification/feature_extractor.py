@@ -12,10 +12,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flowlens.classification.constants import (
     BUSINESS_HOURS_END,
     BUSINESS_HOURS_START,
+    CAMERA_PORTS,
     DATABASE_PORTS,
+    DHCP_PORTS,
+    DIRECTORY_PORTS,
+    DNS_PORTS,
     EPHEMERAL_PORT_MIN,
+    IOT_PORTS,
+    LOG_COLLECTOR_PORTS,
+    MAIL_PORTS,
+    MESSAGE_QUEUE_PORTS,
+    MONITORING_PORTS,
+    NTP_PORTS,
+    PRINTER_PORTS,
+    PROXY_PORTS,
+    REMOTE_ACCESS_PORTS,
     SSH_PORTS,
     STORAGE_PORTS,
+    VOIP_PORTS,
+    VPN_PORTS,
     WEB_PORTS,
     WELL_KNOWN_PORT_MAX,
 )
@@ -67,11 +82,36 @@ class BehavioralFeatures:
     business_hours_ratio: float | None = None
     traffic_variance: float | None = None
 
-    # Port-specific flags
+    # Port-specific flags (existing)
     has_db_ports: bool = False
     has_storage_ports: bool = False
     has_web_ports: bool = False
     has_ssh_ports: bool = False
+
+    # Port-specific flags (new - network services)
+    has_dns_ports: bool = False
+    has_dhcp_ports: bool = False
+    has_ntp_ports: bool = False
+    has_directory_ports: bool = False
+
+    # Port-specific flags (new - communication)
+    has_mail_ports: bool = False
+    has_voip_ports: bool = False
+
+    # Port-specific flags (new - security & access)
+    has_vpn_ports: bool = False
+    has_proxy_ports: bool = False
+    has_log_collector_ports: bool = False
+    has_remote_access_ports: bool = False
+
+    # Port-specific flags (new - endpoints)
+    has_printer_ports: bool = False
+    has_iot_ports: bool = False
+    has_camera_ports: bool = False
+
+    # Port-specific flags (new - app infrastructure)
+    has_message_queue_ports: bool = False
+    has_monitoring_ports: bool = False
 
     def to_dict(self) -> dict:
         """Convert features to dictionary for storage."""
@@ -104,6 +144,22 @@ class BehavioralFeatures:
             "has_storage_ports": self.has_storage_ports,
             "has_web_ports": self.has_web_ports,
             "has_ssh_ports": self.has_ssh_ports,
+            # New port flags
+            "has_dns_ports": self.has_dns_ports,
+            "has_dhcp_ports": self.has_dhcp_ports,
+            "has_ntp_ports": self.has_ntp_ports,
+            "has_directory_ports": self.has_directory_ports,
+            "has_mail_ports": self.has_mail_ports,
+            "has_voip_ports": self.has_voip_ports,
+            "has_vpn_ports": self.has_vpn_ports,
+            "has_proxy_ports": self.has_proxy_ports,
+            "has_log_collector_ports": self.has_log_collector_ports,
+            "has_remote_access_ports": self.has_remote_access_ports,
+            "has_printer_ports": self.has_printer_ports,
+            "has_iot_ports": self.has_iot_ports,
+            "has_camera_ports": self.has_camera_ports,
+            "has_message_queue_ports": self.has_message_queue_ports,
+            "has_monitoring_ports": self.has_monitoring_ports,
         }
 
 
@@ -255,10 +311,37 @@ class FeatureExtractor:
 
             # Check for special port categories
             all_ports = {int(row.dst_port) for row in listener_ports}
+
+            # Existing port flags
             features.has_db_ports = bool(all_ports & DATABASE_PORTS)
             features.has_storage_ports = bool(all_ports & STORAGE_PORTS)
             features.has_web_ports = bool(all_ports & WEB_PORTS)
             features.has_ssh_ports = bool(all_ports & SSH_PORTS)
+
+            # Network services
+            features.has_dns_ports = bool(all_ports & DNS_PORTS)
+            features.has_dhcp_ports = bool(all_ports & DHCP_PORTS)
+            features.has_ntp_ports = bool(all_ports & NTP_PORTS)
+            features.has_directory_ports = bool(all_ports & DIRECTORY_PORTS)
+
+            # Communication
+            features.has_mail_ports = bool(all_ports & MAIL_PORTS)
+            features.has_voip_ports = bool(all_ports & VOIP_PORTS)
+
+            # Security & access
+            features.has_vpn_ports = bool(all_ports & VPN_PORTS)
+            features.has_proxy_ports = bool(all_ports & PROXY_PORTS)
+            features.has_log_collector_ports = bool(all_ports & LOG_COLLECTOR_PORTS)
+            features.has_remote_access_ports = bool(all_ports & REMOTE_ACCESS_PORTS)
+
+            # Endpoints
+            features.has_printer_ports = bool(all_ports & PRINTER_PORTS)
+            features.has_iot_ports = bool(all_ports & IOT_PORTS)
+            features.has_camera_ports = bool(all_ports & CAMERA_PORTS)
+
+            # App infrastructure
+            features.has_message_queue_ports = bool(all_ports & MESSAGE_QUEUE_PORTS)
+            features.has_monitoring_ports = bool(all_ports & MONITORING_PORTS)
 
             # Calculate well-known and ephemeral port ratios
             well_known_count = sum(
